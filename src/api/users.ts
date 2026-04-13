@@ -43,3 +43,34 @@ export async function createUser(token: string, data: CreateUserData): Promise<A
   }
   return res.json() as Promise<AppUser>;
 }
+
+export interface UpdateUserData {
+  name?: string;
+  email?: string;
+  role?: string;
+  password?: string;
+}
+
+export async function updateUser(token: string, id: number, data: UpdateUserData): Promise<AppUser> {
+  const res = await fetch(`${API}/users/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(body.message ?? 'Failed to update user');
+  }
+  return res.json() as Promise<AppUser>;
+}
+
+export async function deleteUser(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API}/users/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(body.message ?? 'Failed to delete user');
+  }
+}

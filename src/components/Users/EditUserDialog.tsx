@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import type { AppUser } from '../../api/users';
 import { useRoles } from '../../hooks/useRoles';
-import { useCreateUser } from '../../hooks/useCreateUser';
+import { useUpdateUser } from '../../hooks/useUpdateUser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,94 +23,74 @@ import {
 interface FormState {
   name: string;
   email: string;
-  password: string;
   role: string | null;
+  password: string;
 }
 
-const EMPTY_FORM: FormState = { name: '', email: '', password: '', role: null };
-
-
 interface Props {
-  open: boolean;
+  user: AppUser | null;
   onOpenChange: (open: boolean) => void;
 }
 
-export function CreateUserDialog({ open, onOpenChange }: Props) {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+export function EditUserDialog({ user, onOpenChange }: Props) {
+  const [form, setForm] = useState<FormState>({ name: '', email: '', role: null, password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const { data: roles = [] } = useRoles();
-  const createMutation = useCreateUser();
+  const updateMutation = useUpdateUser();
+
+  useEffect(() => {
+    if (user) {
+      setForm({ name: user.name, email: user.email, role: user.role, password: '' });
+      updateMutation.reset();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   function handleOpenChange(val: boolean) {
     onOpenChange(val);
-    if (!val) {
-      setForm(EMPTY_FORM);
-      createMutation.reset();
-    }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.role) return;
-    createMutation.mutate(
-      { name: form.name, email: form.email, password: form.password, role: form.role },
+    if (!user || !form.role) return;
+    const data: Record<string, string> = {
+      name: form.name,
+      email: form.email,
+      role: form.role,
+    };
+    if (form.password) data.password = form.password;
+    updateMutation.mutate(
+      { id: user.id, data },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={!!user} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add New User</DialogTitle>
+          <DialogTitle>Edit User</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="edit-name">Name</Label>
             <Input
-              id="name"
+              id="edit-name"
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="Jane Smith"
               required
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="edit-email">Email</Label>
             <Input
-              id="email"
+              id="edit-email"
               type="email"
               value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="jane@cygfinance.com"
               required
             />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                value={form.password}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                placeholder="Min. 8 characters"
-                required
-                minLength={8}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(v => !v)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -131,20 +112,44 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
             </Select>
           </div>
 
-          {createMutation.isError && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-password">New Password <span className="text-muted-foreground font-normal">(leave blank to keep current)</span></Label>
+            <div className="relative">
+              <Input
+                id="edit-password"
+                type={showPassword ? 'text' : 'password'}
+                value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                placeholder="Min. 8 characters"
+                minLength={form.password ? 8 : undefined}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                tabIndex={-1}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          {updateMutation.isError && (
             <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-              {createMutation.error instanceof Error
-                ? createMutation.error.message
+              {updateMutation.error instanceof Error
+                ? updateMutation.error.message
                 : 'Something went wrong'}
             </p>
           )}
 
           <Button
             type="submit"
-            disabled={createMutation.isPending || !form.role}
+            disabled={updateMutation.isPending || !form.role}
             className="mt-1"
           >
-            {createMutation.isPending ? 'Creating...' : 'Create User'}
+            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
           </Button>
         </form>
       </DialogContent>
