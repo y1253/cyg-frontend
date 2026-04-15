@@ -3,6 +3,9 @@ import { LoginPage } from '../components/Login/LoginPage';
 import { DashboardPage } from '../components/Dashboard/DashboardPage';
 import { UsersPage } from '../components/Users/UsersPage';
 import { RegisterPage } from '../components/Register/RegisterPage';
+import { CompanyDetailPage } from '../components/Companies/CompanyDetailPage';
+import { TasksPage } from '../components/Tasks/TasksPage';
+import { AppLayout } from '../components/Layout/AppLayout';
 import { PrivateRoute } from './PrivateRoute';
 import { AdminRoute } from './AdminRoute';
 
@@ -18,13 +21,20 @@ export const router = createBrowserRouter([
   {
     element: <PrivateRoute />,
     children: [
-      { path: '/dashboard', element: <DashboardPage /> },
-    ],
-  },
-  {
-    element: <AdminRoute />,
-    children: [
-      { path: '/admin/users', element: <UsersPage /> },
+      {
+        element: <AppLayout />,
+        children: [
+          { path: '/dashboard', element: <DashboardPage /> },
+          { path: '/companies/:id', element: <CompanyDetailPage /> },
+          {
+            element: <AdminRoute />,
+            children: [
+              { path: '/admin/tasks', element: <TasksPage /> },
+              { path: '/admin/users', element: <UsersPage /> },
+            ],
+          },
+        ],
+      },
     ],
   },
   {

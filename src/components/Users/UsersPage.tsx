@@ -1,11 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import { useUsers } from '../../hooks/useUsers';
 import { useDeleteUser } from '../../hooks/useDeleteUser';
 import type { AppUser } from '../../api/users';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { UserTable } from './UserTable';
 import { CreateUserDialog } from './CreateUserDialog';
 import { EditUserDialog } from './EditUserDialog';
@@ -17,19 +14,12 @@ import {
 } from '@/components/ui/dialog';
 
 export function UsersPage() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<AppUser | null>(null);
   const [deleteUser, setDeleteUser] = useState<AppUser | null>(null);
 
   const { data: users = [], isLoading } = useUsers();
   const deleteMutation = useDeleteUser();
-
-  function handleLogout() {
-    logout();
-    navigate('/login');
-  }
 
   function handleDeleteConfirm() {
     if (!deleteUser) return;
@@ -39,75 +29,59 @@ export function UsersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-muted/40">
-      <header className="bg-background border-b h-16 flex items-center justify-between px-6">
-        <span className="font-bold text-lg">CYG Finance</span>
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-            Dashboard
-          </Button>
-          <span className="text-sm text-muted-foreground">{user?.name}</span>
-          <Badge variant="secondary">{user?.role}</Badge>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            Sign out
-          </Button>
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-semibold">Users</h2>
+          <p className="text-muted-foreground text-sm mt-0.5">
+            Manage team members and their roles.
+          </p>
         </div>
-      </header>
+        <Button onClick={() => setCreateOpen(true)}>Add User</Button>
+      </div>
 
-      <main className="p-8 max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-semibold">Users</h2>
-            <p className="text-muted-foreground text-sm mt-0.5">
-              Manage team members and their roles.
+      <UserTable
+        users={users}
+        isLoading={isLoading}
+        onEdit={setEditUser}
+        onDelete={setDeleteUser}
+      />
+
+      <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <EditUserDialog user={editUser} onOpenChange={open => { if (!open) setEditUser(null); }} />
+
+      <Dialog open={!!deleteUser} onOpenChange={open => { if (!open) setDeleteUser(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete{' '}
+            <span className="font-medium text-foreground">{deleteUser?.name}</span>? This action cannot be undone.
+          </p>
+          {deleteMutation.isError && (
+            <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+              {deleteMutation.error instanceof Error
+                ? deleteMutation.error.message
+                : 'Something went wrong'}
             </p>
+          )}
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteUser(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={handleDeleteConfirm}
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
           </div>
-          <Button onClick={() => setCreateOpen(true)}>Add User</Button>
-        </div>
-
-        <UserTable
-          users={users}
-          isLoading={isLoading}
-          onEdit={setEditUser}
-          onDelete={setDeleteUser}
-        />
-
-        <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
-
-        <EditUserDialog user={editUser} onOpenChange={open => { if (!open) setEditUser(null); }} />
-
-        {/* Delete confirmation */}
-        <Dialog open={!!deleteUser} onOpenChange={open => { if (!open) setDeleteUser(null); }}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Delete User</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Are you sure you want to delete <span className="font-medium text-foreground">{deleteUser?.name}</span>? This action cannot be undone.
-            </p>
-            {deleteMutation.isError && (
-              <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                {deleteMutation.error instanceof Error
-                  ? deleteMutation.error.message
-                  : 'Something went wrong'}
-              </p>
-            )}
-            <div className="flex justify-end gap-2 mt-2">
-              <Button variant="outline" size="sm" onClick={() => setDeleteUser(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={deleteMutation.isPending}
-                onClick={handleDeleteConfirm}
-              >
-                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </main>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
