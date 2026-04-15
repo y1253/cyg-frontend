@@ -51,7 +51,9 @@ export function Step3BusinessInfo({ data, onChange }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label>Business Type</Label>
+          <Label>
+            Business Type <span className="text-destructive">*</span>
+          </Label>
           <Select
             value={data.businessType}
             onValueChange={val => onChange({ businessType: val })}
@@ -70,7 +72,9 @@ export function Step3BusinessInfo({ data, onChange }: Props) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label>Company Structure</Label>
+          <Label>
+            Company Structure <span className="text-destructive">*</span>
+          </Label>
           <Select
             value={data.companyType}
             onValueChange={val => onChange({ companyType: val })}
@@ -90,7 +94,9 @@ export function Step3BusinessInfo({ data, onChange }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="companyActivity">Business Activity</Label>
+        <Label htmlFor="companyActivity">
+          Business Activity <span className="text-destructive">*</span>
+        </Label>
         <textarea
           id="companyActivity"
           value={data.companyActivity}

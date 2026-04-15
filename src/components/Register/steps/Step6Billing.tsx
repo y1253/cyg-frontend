@@ -19,7 +19,9 @@ export function Step6Billing({ data, onChange }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="billingEmail">Billing Email</Label>
+        <Label htmlFor="billingEmail">
+          Billing Email <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="billingEmail"
           type="email"
@@ -33,7 +35,9 @@ export function Step6Billing({ data, onChange }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="billingPassword">Billing Password</Label>
+        <Label htmlFor="billingPassword">
+          Billing Password <span className="text-destructive">*</span>
+        </Label>
         <div className="relative">
           <Input
             id="billingPassword"

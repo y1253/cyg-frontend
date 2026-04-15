@@ -157,18 +157,39 @@ export function RegisterPage() {
       return true;
     }
     if (name === 'country') return form.country !== null;
-    if (name === 'business') return form.businessName.trim() !== '';
+    if (name === 'business') {
+      return (
+        form.businessName.trim() !== '' &&
+        form.businessType !== null &&
+        form.companyType !== null &&
+        form.companyActivity.trim() !== ''
+      );
+    }
     if (name === 'contact') {
-      if (form.privateEmail && !form.privateEmail.includes('@')) return false;
-      return true;
+      return (
+        form.personalName.trim() !== '' &&
+        form.privateEmail.includes('@') &&
+        form.privatePhone.trim() !== '' &&
+        form.storeNumber.trim() !== ''
+      );
+    }
+    if (name === 'legal') {
+      return (
+        form.neq.trim() !== '' &&
+        form.revenueQcId.trim() !== '' &&
+        form.craBn.trim() !== '' &&
+        form.fiscalYear.trim() !== ''
+      );
     }
     if (name === 'billing') {
-      if (form.billingEmail && !form.billingEmail.includes('@')) return false;
-      return true;
+      return form.billingEmail.includes('@') && form.billingPassword.trim() !== '';
     }
     if (name === 'accountant') {
-      if (form.accountantEmail && !form.accountantEmail.includes('@')) return false;
-      return true;
+      return (
+        form.accountantName.trim() !== '' &&
+        form.accountantEmail.includes('@') &&
+        form.accountantPhone.trim() !== ''
+      );
     }
     return true;
   }

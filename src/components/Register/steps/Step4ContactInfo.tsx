@@ -11,7 +11,9 @@ export function Step4ContactInfo({ data, onChange }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="personalName">Contact Name</Label>
+        <Label htmlFor="personalName">
+          Contact Name <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="personalName"
           value={data.personalName}
@@ -22,7 +24,9 @@ export function Step4ContactInfo({ data, onChange }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="privateEmail">Email</Label>
+          <Label htmlFor="privateEmail">
+            Email <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="privateEmail"
             type="email"
@@ -36,7 +40,9 @@ export function Step4ContactInfo({ data, onChange }: Props) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="privatePhone">Phone</Label>
+          <Label htmlFor="privatePhone">
+            Phone <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="privatePhone"
             type="tel"
@@ -48,12 +54,15 @@ export function Step4ContactInfo({ data, onChange }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="storeNumber">Store / Unit Number</Label>
+        <Label htmlFor="storeNumber">
+          Store Phone Number <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="storeNumber"
+          type="tel"
           value={data.storeNumber}
           onChange={e => onChange({ storeNumber: e.target.value })}
-          placeholder="e.g. Store #42 or Unit 3B"
+          placeholder="+1 (555) 000-0000"
         />
       </div>
     </div>

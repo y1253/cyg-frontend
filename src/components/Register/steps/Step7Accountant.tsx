@@ -11,7 +11,9 @@ export function Step7Accountant({ data, onChange }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="accountantName">Accountant Name</Label>
+        <Label htmlFor="accountantName">
+          Accountant Name <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="accountantName"
           value={data.accountantName}
@@ -22,7 +24,9 @@ export function Step7Accountant({ data, onChange }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="accountantEmail">Accountant Email</Label>
+          <Label htmlFor="accountantEmail">
+            Accountant Email <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="accountantEmail"
             type="email"
@@ -36,7 +40,9 @@ export function Step7Accountant({ data, onChange }: Props) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="accountantPhone">Accountant Phone</Label>
+          <Label htmlFor="accountantPhone">
+            Accountant Phone <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="accountantPhone"
             type="tel"
