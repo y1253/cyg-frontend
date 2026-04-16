@@ -62,6 +62,7 @@ export interface AssignedUser {
 export interface CompanySummary {
   id: number;
   businessName: string;
+  supportNumber: string | null;
   country: string | null;
   status: boolean;
   createdAt: string;
@@ -91,6 +92,7 @@ export interface TodoItem {
 export interface CompanyDetail {
   id: number;
   businessName: string;
+  supportNumber: string | null;
   country: string | null;
   qbPlan: string | null;
   businessType: string | null;
@@ -123,6 +125,25 @@ export async function fetchCompany(token: string, id: number): Promise<CompanyDe
   const res = await fetch(`${API}/companies/${id}`, { headers: authHeaders(token) });
   if (!res.ok) throw new Error('Failed to fetch company');
   return res.json() as Promise<CompanyDetail>;
+}
+
+// ─── Update company ───────────────────────────────────────────────────────────
+
+export async function updateCompany(
+  token: string,
+  id: number,
+  data: { supportNumber?: string },
+): Promise<{ id: number; supportNumber: string | null }> {
+  const res = await fetch(`${API}/companies/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to update company');
+  }
+  return res.json() as Promise<{ id: number; supportNumber: string | null }>;
 }
 
 // ─── Assign user ─────────────────────────────────────────────────────────────

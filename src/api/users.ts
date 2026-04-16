@@ -31,6 +31,27 @@ export async function fetchUsers(token: string): Promise<AppUser[]> {
   return res.json() as Promise<AppUser[]>;
 }
 
+export interface UserCompany {
+  id: number;
+  businessName: string;
+  country: string | null;
+  status: boolean;
+  supportNumber: string | null;
+  openTodos: number;
+}
+
+export interface AppUserDetail extends AppUser {
+  deletedAt: string | null;
+  updatedAt: string;
+  companies: UserCompany[];
+}
+
+export async function fetchUser(token: string, id: number): Promise<AppUserDetail> {
+  const res = await fetch(`${API}/users/${id}`, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error('Failed to fetch user');
+  return res.json() as Promise<AppUserDetail>;
+}
+
 export async function createUser(token: string, data: CreateUserData): Promise<AppUser> {
   const res = await fetch(`${API}/users`, {
     method: 'POST',

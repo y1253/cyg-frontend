@@ -20,10 +20,14 @@ import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
+import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
+import { useDeleteSchedule, useUpdateSchedule } from '@/hooks/useTaskSchedules';
+import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
+import type { CompanyNote } from '@/api/notes';
 
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
@@ -309,24 +313,28 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved' | 'links';
+type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'notes' | 'schedules';
 
 function TabBar({
   active,
   onChange,
   openCount,
   resolvedCount,
+  isAdmin,
 }: {
   active: Tab;
   onChange: (t: Tab) => void;
   openCount: number;
   resolvedCount: number;
+  isAdmin: boolean;
 }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'details', label: 'Details' },
     { key: 'tasks',   label: `Tasks (${openCount})` },
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
     { key: 'links', label: 'Links' },
+    { key: 'notes', label: 'Notes' },
+    ...(isAdmin ? [{ key: 'schedules' as Tab, label: 'Schedules' }] : []),
   ];
 
   return (
@@ -560,6 +568,315 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
   );
 }
 
+// ─── Notes section ───────────────────────────────────────────────────────────
+
+function NotesSection({ companyId }: { companyId: number }) {
+  const { data: notes = [], isLoading } = useNotes(companyId);
+  const createMutation = useCreateNote(companyId);
+  const updateMutation = useUpdateNote(companyId);
+  const deleteMutation = useDeleteNote(companyId);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addTitle, setAddTitle] = useState('');
+  const [addNote, setAddNote] = useState('');
+
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editNote, setEditNote] = useState('');
+
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!addTitle || !addNote) return;
+    createMutation.mutate(
+      { companyId, title: addTitle, note: addNote },
+      {
+        onSuccess: () => {
+          setAddOpen(false);
+          setAddTitle('');
+          setAddNote('');
+        },
+      },
+    );
+  }
+
+  function openEdit(n: CompanyNote) {
+    setEditId(n.id);
+    setEditTitle(n.title);
+    setEditNote(n.note);
+  }
+
+  function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editId) return;
+    updateMutation.mutate(
+      { id: editId, data: { title: editTitle, note: editNote } },
+      { onSuccess: () => setEditId(null) },
+    );
+  }
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading notes…</p>;
+
+  return (
+    <div className="flex flex-col gap-3 max-w-3xl">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Only you can see your notes.</p>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(v => !v)}>
+          <Plus size={14} /> Add Note
+        </Button>
+      </div>
+
+      {/* Inline add form */}
+      {addOpen && (
+        <form onSubmit={handleAdd} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
+          <p className="text-sm font-medium">New Note</p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-note-title">Title</Label>
+            <Input
+              id="add-note-title"
+              value={addTitle}
+              onChange={e => setAddTitle(e.target.value)}
+              placeholder="Note title"
+              autoFocus
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-note-body">Note</Label>
+            <textarea
+              id="add-note-body"
+              value={addNote}
+              onChange={e => setAddNote(e.target.value)}
+              placeholder="Write your note here…"
+              rows={4}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+            />
+          </div>
+          {createMutation.isError && (
+            <p className="text-xs text-destructive">
+              {createMutation.error instanceof Error ? createMutation.error.message : 'Error'}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={!addTitle || !addNote || createMutation.isPending}>
+              {createMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {/* Empty state */}
+      {notes.length === 0 && !addOpen && (
+        <p className="text-sm text-muted-foreground">No notes yet.</p>
+      )}
+
+      {/* Notes list */}
+      {notes.map(n => (
+        <div key={n.id}>
+          {editId === n.id ? (
+            <form onSubmit={handleUpdate} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Title</Label>
+                <Input value={editTitle} onChange={e => setEditTitle(e.target.value)} autoFocus />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Note</Label>
+                <textarea
+                  value={editNote}
+                  onChange={e => setEditNote(e.target.value)}
+                  rows={4}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                />
+              </div>
+              {updateMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {updateMutation.error instanceof Error ? updateMutation.error.message : 'Error'}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEditId(null)}>Cancel</Button>
+                <Button type="submit" size="sm" disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="rounded-lg border bg-background px-4 py-3 flex flex-col gap-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium leading-snug">{n.title}</p>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    title="Edit note"
+                    onClick={() => openEdit(n)}
+                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete note"
+                    onClick={() => setDeleteId(n.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{n.note}</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">
+                {new Date(n.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Delete confirm dialog */}
+      <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Note</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">
+              {notes.find(n => n.id === deleteId)?.title}
+            </span>?
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (deleteId !== null) {
+                  deleteMutation.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
+                }
+              }}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Schedules section (admin only) ──────────────────────────────────────────
+
+function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
+  const updateMutation = useUpdateSchedule(companyId);
+  const deleteMutation = useDeleteSchedule(companyId);
+
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editCycle, setEditCycle] = useState('');
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  const activeSchedules = schedules.filter(s => !s.deletedAt);
+
+  if (activeSchedules.length === 0) {
+    return <p className="text-sm text-muted-foreground">No recurring schedules set up for this company yet.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {activeSchedules.map(s => (
+        <div key={s.id} className="rounded-lg border bg-blue-50/60 border-blue-200 px-4 py-3 flex items-center gap-3">
+          <RefreshCw size={14} className="text-blue-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium leading-snug">{s.task.title}</p>
+            {editId === s.id ? (
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-xs text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={editCycle}
+                  onChange={e => setEditCycle(e.target.value)}
+                  className="h-7 w-20 text-xs px-2"
+                  autoFocus
+                />
+                <span className="text-xs text-muted-foreground">days</span>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2"
+                  disabled={updateMutation.isPending}
+                  onClick={() => {
+                    const n = Number(editCycle);
+                    if (n >= 1) {
+                      updateMutation.mutate(
+                        { id: s.id, cycle: n },
+                        { onSuccess: () => setEditId(null) },
+                      );
+                    }
+                  }}
+                >
+                  {updateMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => setEditId(null)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-0.5">Every {s.cycle} days</p>
+            )}
+          </div>
+          {editId !== s.id && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                title="Edit cycle"
+                onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); }}
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                title="Delete schedule"
+                onClick={() => setDeleteId(s.id)}
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Delete confirm dialog */}
+      <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Schedule</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Stop recurring schedule for{' '}
+            <span className="font-medium text-foreground">
+              {activeSchedules.find(s => s.id === deleteId)?.task.title}
+            </span>?
+            Existing todos won't be deleted.
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (deleteId !== null) {
+                  deleteMutation.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
+                }
+              }}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function CompanyDetailPage() {
@@ -575,10 +892,14 @@ export function CompanyDetailPage() {
   const { data: users = [] } = useUsers();
   const { data: schedules = [] } = useTaskSchedules(companyId);
   const assignMutation = useAssignCompany();
+  const updateCompanyMutation = useUpdateCompany();
   const resolveMutation = useResolveTodo(companyId);
   const deleteMutation = useDeleteTodo(companyId);
   const setCycleMutation = useSetTodoCycle(companyId);
   const removeCycleMutation = useRemoveTodoCycle(companyId);
+
+  const [editSupportNumber, setEditSupportNumber] = useState(false);
+  const [supportNumberInput, setSupportNumberInput] = useState('');
 
   if (isLoading) return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
@@ -629,6 +950,15 @@ export function CompanyDetailPage() {
             ? <>Assigned to <span className="font-medium text-foreground">{company.assignedUser.name}</span></>
             : <span className="text-orange-600 font-medium">Unassigned</span>
           }
+          {isAdmin && (
+            <>
+              {' · '}
+              {company.supportNumber
+                ? <span className="font-medium text-foreground">{company.supportNumber}</span>
+                : <span className="text-orange-600 font-medium">No support number</span>
+              }
+            </>
+          )}
         </p>
 
         {/* Stats */}
@@ -654,6 +984,7 @@ export function CompanyDetailPage() {
           onChange={setTab}
           openCount={openTodos.length}
           resolvedCount={resolvedTodos.length}
+          isAdmin={isAdmin}
         />
       </div>
 
@@ -673,6 +1004,70 @@ export function CompanyDetailPage() {
                 <Field label="Business Type" value={company.businessType} />
                 <Field label="Company Type" value={company.companyType} />
                 <Field label="QB Plan" value={company.qbPlan} />
+                {/* Support Number — read-only for users, inline-editable for admin */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Support Number</p>
+                  {isAdmin && editSupportNumber ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Input
+                        value={supportNumberInput}
+                        onChange={e => setSupportNumberInput(e.target.value)}
+                        className="h-7 text-sm px-2 w-36"
+                        placeholder="e.g. +15141234567"
+                        autoFocus
+                      />
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs px-2"
+                        disabled={updateCompanyMutation.isPending}
+                        onClick={() => {
+                          updateCompanyMutation.mutate(
+                            { id: companyId, data: { supportNumber: supportNumberInput.trim() || undefined } },
+                            { onSuccess: () => setEditSupportNumber(false) },
+                          );
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs px-2"
+                        onClick={() => setEditSupportNumber(false)}
+                      >
+                        Cancel
+                      </Button>
+                      {updateCompanyMutation.isError && (
+                        <span className="text-xs text-destructive">
+                          {updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error'}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      {company.supportNumber ? (
+                        <p className="text-sm font-medium">{company.supportNumber}</p>
+                      ) : (
+                        <p className={`text-sm font-medium ${isAdmin ? 'text-orange-600' : 'text-muted-foreground'}`}>
+                          {isAdmin ? 'Not set' : '—'}
+                        </p>
+                      )}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          title="Edit support number"
+                          onClick={() => {
+                            setSupportNumberInput(company.supportNumber ?? '');
+                            setEditSupportNumber(true);
+                          }}
+                          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {company.companyActivity && (
                   <div className="col-span-2 sm:col-span-3">
                     <Field label="Activity" value={company.companyActivity} />
@@ -776,6 +1171,7 @@ export function CompanyDetailPage() {
                 ))}
               </div>
             )}
+
           </div>
         )}
 
@@ -795,6 +1191,24 @@ export function CompanyDetailPage() {
         {/* ── Links tab ── */}
         {tab === 'links' && (
           <LinksSection companyId={companyId} isAdmin={isAdmin} />
+        )}
+
+        {/* ── Notes tab ── */}
+        {tab === 'notes' && (
+          <NotesSection companyId={companyId} />
+        )}
+
+        {/* ── Schedules tab (admin only) ── */}
+        {tab === 'schedules' && isAdmin && (
+          <div className="flex flex-col gap-4 max-w-3xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Recurring Schedules</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Manage repeating tasks assigned to this company.</p>
+              </div>
+            </div>
+            <SchedulesSection companyId={companyId} schedules={schedules} />
+          </div>
         )}
       </div>
 

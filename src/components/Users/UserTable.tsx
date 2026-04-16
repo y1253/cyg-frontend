@@ -13,11 +13,12 @@ import {
 interface Props {
   users: AppUser[];
   isLoading: boolean;
+  onView: (user: AppUser) => void;
   onEdit: (user: AppUser) => void;
   onDelete: (user: AppUser) => void;
 }
 
-export function UserTable({ users, isLoading, onEdit, onDelete }: Props) {
+export function UserTable({ users, isLoading, onView, onEdit, onDelete }: Props) {
   return (
     <div className="rounded-md border bg-background">
       <Table>
@@ -27,7 +28,7 @@ export function UserTable({ users, isLoading, onEdit, onDelete }: Props) {
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[120px]"></TableHead>
+            <TableHead className="w-[160px]"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -45,7 +46,11 @@ export function UserTable({ users, isLoading, onEdit, onDelete }: Props) {
             </TableRow>
           ) : (
             users.map(u => (
-              <TableRow key={u.id}>
+              <TableRow
+                key={u.id}
+                className="cursor-pointer"
+                onClick={() => onView(u)}
+              >
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
                 <TableCell>
@@ -56,7 +61,7 @@ export function UserTable({ users, isLoading, onEdit, onDelete }: Props) {
                 <TableCell className="text-muted-foreground">
                   {new Date(u.createdAt).toLocaleDateString()}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" onClick={() => onEdit(u)}>
                       Edit

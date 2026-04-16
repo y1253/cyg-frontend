@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../../hooks/useUsers';
 import { useDeleteUser } from '../../hooks/useDeleteUser';
 import type { AppUser } from '../../api/users';
@@ -14,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 
 export function UsersPage() {
+  const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<AppUser | null>(null);
   const [deleteUser, setDeleteUser] = useState<AppUser | null>(null);
@@ -43,6 +45,7 @@ export function UsersPage() {
       <UserTable
         users={users}
         isLoading={isLoading}
+        onView={u => navigate(`/admin/users/${u.id}`)}
         onEdit={setEditUser}
         onDelete={setDeleteUser}
       />

@@ -98,6 +98,7 @@ export function DashboardPage() {
   const urgentTodos = companies.reduce((s, c) => s + c.urgentTodos, 0);
   const overdueTodos = companies.reduce((s, c) => s + c.overdueTodos, 0);
   const unassigned = companies.filter(c => c.assignedUser === null);
+  const noSupportNumber = companies.filter(c => !c.supportNumber);
 
   return (
     <div className="p-6 max-w-4xl mx-auto flex flex-col gap-6">
@@ -145,6 +146,20 @@ export function DashboardPage() {
             </span>{' '}
             <span className="text-orange-700">{unassigned.map(c => c.businessName).join(', ')}</span>
             <span className="text-orange-600"> — click a company below to assign a user.</span>
+          </div>
+        </div>
+      )}
+
+      {/* No support number banner (admin only) */}
+      {isAdmin && !isLoading && noSupportNumber.length > 0 && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
+          <AlertCircle className="text-orange-500 shrink-0 mt-0.5" size={18} />
+          <div className="text-sm">
+            <span className="font-semibold text-orange-700">
+              {noSupportNumber.length === 1 ? '1 company has' : `${noSupportNumber.length} companies have`} no support number:
+            </span>{' '}
+            <span className="text-orange-700">{noSupportNumber.map(c => c.businessName).join(', ')}</span>
+            <span className="text-orange-600"> — click a company below to assign one.</span>
           </div>
         </div>
       )}
