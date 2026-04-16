@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, ChevronDown, ChevronUp, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -18,9 +19,11 @@ import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
+import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
 import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
+import type { CompanyLink } from '@/api/links';
 
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
@@ -306,7 +309,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved';
+type Tab = 'details' | 'tasks' | 'resolved' | 'links';
 
 function TabBar({
   active,
@@ -323,6 +326,7 @@ function TabBar({
     { key: 'details', label: 'Details' },
     { key: 'tasks',   label: `Tasks (${openCount})` },
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
+    { key: 'links', label: 'Links' },
   ];
 
   return (
@@ -341,6 +345,217 @@ function TabBar({
           {label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ─── Links section ───────────────────────────────────────────────────────────
+
+function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: boolean }) {
+  const { data: links = [], isLoading } = useLinks(companyId);
+  const createMutation = useCreateLink(companyId);
+  const updateMutation = useUpdateLink(companyId);
+  const deleteMutation = useDeleteLink(companyId);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLabel, setAddLabel] = useState('');
+  const [addUrl, setAddUrl] = useState('');
+
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editUrl, setEditUrl] = useState('');
+
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  function faviconUrl(url: string) {
+    try {
+      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+    } catch {
+      return null;
+    }
+  }
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!addLabel || !addUrl) return;
+    createMutation.mutate(
+      { companyId, label: addLabel, url: addUrl },
+      {
+        onSuccess: () => {
+          setAddOpen(false);
+          setAddLabel('');
+          setAddUrl('');
+        },
+      },
+    );
+  }
+
+  function openEdit(link: CompanyLink) {
+    setEditId(link.id);
+    setEditLabel(link.label);
+    setEditUrl(link.url);
+  }
+
+  function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editId) return;
+    updateMutation.mutate(
+      { id: editId, data: { label: editLabel, url: editUrl } },
+      { onSuccess: () => setEditId(null) },
+    );
+  }
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading links…</p>;
+
+  return (
+    <div className="flex flex-col gap-3 max-w-3xl">
+      {isAdmin && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(v => !v)}>
+            <Plus size={14} /> Add Link
+          </Button>
+        </div>
+      )}
+
+      {/* Inline add form */}
+      {isAdmin && addOpen && (
+        <form onSubmit={handleAdd} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
+          <p className="text-sm font-medium">New Link</p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-link-label">Label</Label>
+            <Input
+              id="add-link-label"
+              value={addLabel}
+              onChange={e => setAddLabel(e.target.value)}
+              placeholder="e.g. TD Bank"
+              autoFocus
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-link-url">URL</Label>
+            <Input
+              id="add-link-url"
+              value={addUrl}
+              onChange={e => setAddUrl(e.target.value)}
+              placeholder="https://..."
+            />
+          </div>
+          {createMutation.isError && (
+            <p className="text-xs text-destructive">
+              {createMutation.error instanceof Error ? createMutation.error.message : 'Error'}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={!addLabel || !addUrl || createMutation.isPending}>
+              {createMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {/* Empty state */}
+      {links.length === 0 && !addOpen && (
+        <p className="text-sm text-muted-foreground">No links added yet.</p>
+      )}
+
+      {/* Links list */}
+      {links.map(link => (
+        <div key={link.id}>
+          {editId === link.id ? (
+            <form onSubmit={handleUpdate} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Label</Label>
+                <Input value={editLabel} onChange={e => setEditLabel(e.target.value)} autoFocus />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>URL</Label>
+                <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} />
+              </div>
+              {updateMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {updateMutation.error instanceof Error ? updateMutation.error.message : 'Error'}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEditId(null)}>Cancel</Button>
+                <Button type="submit" size="sm" disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="rounded-lg border bg-background px-4 py-3 flex items-center gap-3">
+              {faviconUrl(link.url) && (
+                <img
+                  src={faviconUrl(link.url)!}
+                  alt=""
+                  aria-hidden
+                  className="w-5 h-5 shrink-0 rounded-sm object-contain"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                />
+              )}
+              <a
+                href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 text-sm font-medium hover:underline flex items-center gap-1.5"
+              >
+                {link.label}
+                <ExternalLink size={12} className="text-muted-foreground" />
+              </a>
+              {isAdmin && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    title="Edit link"
+                    onClick={() => openEdit(link)}
+                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete link"
+                    onClick={() => setDeleteId(link.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Delete confirm dialog */}
+      <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Link</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">
+              {links.find(l => l.id === deleteId)?.label}
+            </span>?
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (deleteId !== null) {
+                  deleteMutation.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
+                }
+              }}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -575,6 +790,11 @@ export function CompanyDetailPage() {
               ))
             )}
           </div>
+        )}
+
+        {/* ── Links tab ── */}
+        {tab === 'links' && (
+          <LinksSection companyId={companyId} isAdmin={isAdmin} />
         )}
       </div>
 
