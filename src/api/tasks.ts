@@ -8,6 +8,7 @@ export interface AppTask {
   id: number;
   title: string;
   description: string | null;
+  note: string | null;
   isGeneral: boolean;
   createdAt: string;
   openTodos: number;
@@ -16,12 +17,14 @@ export interface AppTask {
 export interface CreateTaskData {
   title: string;
   description?: string;
+  note?: string;
   isGeneral?: boolean;
 }
 
 export interface UpdateTaskData {
   title?: string;
   description?: string;
+  note?: string;
   isGeneral?: boolean;
 }
 

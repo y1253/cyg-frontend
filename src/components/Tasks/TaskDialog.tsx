@@ -22,6 +22,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [note, setNote] = useState('');
   const [isGeneral, setIsGeneral] = useState(false);
 
   const createMutation = useCreateTask();
@@ -33,6 +34,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
     if (open) {
       setTitle(task?.title ?? '');
       setDescription(task?.description ?? '');
+      setNote(task?.note ?? '');
       setIsGeneral(task?.isGeneral ?? false);
       createMutation.reset();
       updateMutation.reset();
@@ -47,6 +49,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
     const data = {
       title: title.trim(),
       description: description.trim() || undefined,
+      note: note.trim() || undefined,
       isGeneral,
     };
 
@@ -87,6 +90,18 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
               onChange={e => setDescription(e.target.value)}
               placeholder="Optional notes or instructions…"
               rows={3}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="task-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <textarea
+              id="task-note"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="Extra reminder shown on every occurrence of this task…"
+              rows={2}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
             />
           </div>

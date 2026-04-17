@@ -5,6 +5,7 @@ export interface AppTaskSchedule {
   taskId: number;
   companyId: number;
   cycle: number;
+  note: string | null;
   createdAt: string;
   deletedAt: string | null;
   task: { id: number; title: string; description: string | null };
@@ -20,7 +21,7 @@ export async function fetchSchedulesByCompany(token: string, companyId: number):
 
 export async function createSchedule(
   token: string,
-  data: { taskId: number; companyId: number; cycle: number },
+  data: { taskId: number; companyId: number; cycle: number; note?: string },
 ): Promise<AppTaskSchedule> {
   const res = await fetch(BASE, {
     method: 'POST',
@@ -37,7 +38,7 @@ export async function createSchedule(
 export async function updateSchedule(
   token: string,
   id: number,
-  data: { cycle: number },
+  data: { cycle?: number; note?: string | null },
 ): Promise<AppTaskSchedule> {
   const res = await fetch(`${BASE}/${id}`, {
     method: 'PATCH',

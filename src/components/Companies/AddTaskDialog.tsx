@@ -110,6 +110,7 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
   const [mode, setMode] = useState<'recurring' | 'onetime'>('recurring');
   const [cycle, setCycle] = useState('30');
   const [dueDate, setDueDate] = useState('');
+  const [scheduleNote, setScheduleNote] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
 
   const { data: tasks = [] } = useTasks();
@@ -126,6 +127,7 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
       setMode('recurring');
       setCycle('30');
       setDueDate('');
+      setScheduleNote('');
       scheduleMutation.reset();
       assignMutation.reset();
     }
@@ -138,7 +140,7 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
 
     if (mode === 'recurring') {
       scheduleMutation.mutate(
-        { taskId: Number(taskId), companyId, cycle: Number(cycle) || 30 },
+        { taskId: Number(taskId), companyId, cycle: Number(cycle) || 30, note: scheduleNote.trim() || undefined },
         { onSuccess: () => onOpenChange(false) },
       );
     } else {
@@ -213,19 +215,32 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
             </div>
 
             {mode === 'recurring' ? (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="add-cycle">Repeat Every (days)</Label>
-                <Input
-                  id="add-cycle"
-                  type="number"
-                  min={1}
-                  value={cycle}
-                  onChange={e => setCycle(e.target.value)}
-                  placeholder="30"
-                />
-                <p className="text-xs text-muted-foreground">
-                  First todo will be due in {Number(cycle) || 30} days.
-                </p>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="add-cycle">Repeat Every (days)</Label>
+                  <Input
+                    id="add-cycle"
+                    type="number"
+                    min={1}
+                    value={cycle}
+                    onChange={e => setCycle(e.target.value)}
+                    placeholder="30"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    First todo will be due in {Number(cycle) || 30} days.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="add-schedule-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <textarea
+                    id="add-schedule-note"
+                    value={scheduleNote}
+                    onChange={e => setScheduleNote(e.target.value)}
+                    placeholder="Company-specific reminder for this task…"
+                    rows={2}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                  />
+                </div>
               </div>
             ) : (
               <div className="flex flex-col gap-1.5">

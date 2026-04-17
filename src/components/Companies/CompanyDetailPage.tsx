@@ -90,6 +90,7 @@ function CycleBadge({ days }: { days: number }) {
 function TodoRow({
   todo,
   cycleDays,
+  scheduleNote,
   isAdmin,
   onToggle,
   togglePending,
@@ -99,6 +100,7 @@ function TodoRow({
 }: {
   todo: TodoItem;
   cycleDays: number | null;
+  scheduleNote: string | null;
   isAdmin: boolean;
   onToggle: () => void;
   togglePending: boolean;
@@ -120,6 +122,7 @@ function TodoRow({
     : rowBg(tier, isRecurring);
 
   const hasDescription = !!todo.task.description;
+  const hasNote = !!scheduleNote;
 
   return (
     <>
@@ -176,7 +179,7 @@ function TodoRow({
           {/* Right side */}
           <div className="flex items-center gap-1 shrink-0">
             {/* Details expand */}
-            {hasDescription && (
+            {(hasDescription || hasNote) && (
               <button
                 type="button"
                 onClick={() => setExpanded(v => !v)}
@@ -221,10 +224,19 @@ function TodoRow({
           </div>
         </div>
 
-        {/* Expanded description */}
-        {expanded && hasDescription && (
-          <div className="mt-2 ml-8 text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed border-t border-border/50 pt-2">
-            {todo.task.description}
+        {/* Expanded description + note */}
+        {expanded && (hasDescription || hasNote) && (
+          <div className="mt-2 ml-8 border-t border-border/50 pt-2 flex flex-col gap-1.5">
+            {hasDescription && (
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                {todo.task.description}
+              </p>
+            )}
+            {hasNote && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
+                📝 {scheduleNote}
+              </p>
+            )}
           </div>
         )}
 
@@ -771,6 +783,7 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycle, setEditCycle] = useState('');
+  const [editNote, setEditNote] = useState('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
   const activeSchedules = schedules.filter(s => !s.deletedAt);
@@ -782,52 +795,70 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
   return (
     <div className="flex flex-col gap-2">
       {activeSchedules.map(s => (
-        <div key={s.id} className="rounded-lg border bg-blue-50/60 border-blue-200 px-4 py-3 flex items-center gap-3">
-          <RefreshCw size={14} className="text-blue-500 shrink-0" />
+        <div key={s.id} className="rounded-lg border bg-blue-50/60 border-blue-200 px-4 py-3 flex items-start gap-3">
+          <RefreshCw size={14} className="text-blue-500 shrink-0 mt-1" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium leading-snug">{s.task.title}</p>
             {editId === s.id ? (
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-xs text-muted-foreground">Every</span>
-                <Input
-                  type="number"
-                  min={1}
-                  value={editCycle}
-                  onChange={e => setEditCycle(e.target.value)}
-                  className="h-7 w-20 text-xs px-2"
-                  autoFocus
+              <div className="flex flex-col gap-2 mt-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Every</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={editCycle}
+                    onChange={e => setEditCycle(e.target.value)}
+                    className="h-7 w-20 text-xs px-2"
+                    autoFocus
+                  />
+                  <span className="text-xs text-muted-foreground">days</span>
+                </div>
+                <textarea
+                  value={editNote}
+                  onChange={e => setEditNote(e.target.value)}
+                  placeholder="Company-specific note (optional)…"
+                  rows={2}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
                 />
-                <span className="text-xs text-muted-foreground">days</span>
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2"
-                  disabled={updateMutation.isPending}
-                  onClick={() => {
-                    const n = Number(editCycle);
-                    if (n >= 1) {
-                      updateMutation.mutate(
-                        { id: s.id, cycle: n },
-                        { onSuccess: () => setEditId(null) },
-                      );
-                    }
-                  }}
-                >
-                  {updateMutation.isPending ? 'Saving…' : 'Save'}
-                </Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => setEditId(null)}>
-                  Cancel
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs px-2"
+                    disabled={updateMutation.isPending}
+                    onClick={() => {
+                      const n = Number(editCycle);
+                      if (n >= 1) {
+                        updateMutation.mutate(
+                          { id: s.id, cycle: n, note: editNote.trim() || null },
+                          { onSuccess: () => setEditId(null) },
+                        );
+                      }
+                    }}
+                  >
+                    {updateMutation.isPending ? 'Saving…' : 'Save'}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => setEditId(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground mt-0.5">Every {s.cycle} days</p>
+              <div className="mt-0.5">
+                <p className="text-xs text-muted-foreground">Every {s.cycle} days</p>
+                {s.note && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed">
+                    📝 {s.note}
+                  </p>
+                )}
+              </div>
             )}
           </div>
           {editId !== s.id && (
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
-                title="Edit cycle"
-                onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); }}
+                title="Edit schedule"
+                onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); setEditNote(s.note ?? ''); }}
                 className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <Pencil size={13} />
@@ -908,12 +939,19 @@ export function CompanyDetailPage() {
   const openTodos = company.todos.filter(t => !t.resolved);
   const resolvedTodos = company.todos.filter(t => t.resolved);
 
-  // Build a map: scheduleId → cycle days
-  const scheduleMap = new Map<number, number>(schedules.map((s: AppTaskSchedule) => [s.id, s.cycle]));
+  // Build a map: scheduleId → { cycle, note }
+  const scheduleMap = new Map<number, { cycle: number; note: string | null }>(
+    schedules.map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note }])
+  );
 
   function getCycleDays(todo: TodoItem): number | null {
     if (!todo.scheduleId) return null;
-    return scheduleMap.get(todo.scheduleId) ?? null;
+    return scheduleMap.get(todo.scheduleId)?.cycle ?? null;
+  }
+
+  function getScheduleNote(todo: TodoItem): string | null {
+    if (!todo.scheduleId) return null;
+    return scheduleMap.get(todo.scheduleId)?.note ?? null;
   }
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -925,6 +963,7 @@ export function CompanyDetailPage() {
     return {
       todo,
       cycleDays: getCycleDays(todo),
+      scheduleNote: getScheduleNote(todo),
       isAdmin,
       onToggle: () => resolveMutation.mutate(todo.id),
       togglePending: resolveMutation.isPending,

@@ -20,7 +20,7 @@ export function useCreateSchedule(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { taskId: number; companyId: number; cycle: number }) =>
+    mutationFn: (data: { taskId: number; companyId: number; cycle: number; note?: string }) =>
       createSchedule(token!, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
@@ -33,8 +33,8 @@ export function useUpdateSchedule(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, cycle }: { id: number; cycle: number }) =>
-      updateSchedule(token!, id, { cycle }),
+    mutationFn: ({ id, cycle, note }: { id: number; cycle?: number; note?: string | null }) =>
+      updateSchedule(token!, id, { cycle, note }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
     },
