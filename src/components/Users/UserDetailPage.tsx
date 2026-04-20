@@ -1,13 +1,22 @@
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, CheckCircle2, Mail, Phone, Shield, User } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useUser } from '@/hooks/useUser';
+import { useNavigate, useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  Building2,
+  CheckCircle2,
+  Mail,
+  Shield,
+  User,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useUser } from "@/hooks/useUser";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
-    month: 'long', day: 'numeric', year: 'numeric',
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
@@ -30,7 +39,7 @@ export function UserDetailPage() {
         variant="ghost"
         size="sm"
         className="self-start gap-1.5 -ml-2 text-muted-foreground"
-        onClick={() => navigate('/admin/users')}
+        onClick={() => navigate("/admin/users")}
       >
         <ArrowLeft size={15} />
         Back to Users
@@ -44,12 +53,14 @@ export function UserDetailPage() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold">{user.name}</h1>
-            <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>
+            <Badge variant={user.role === "ADMIN" ? "default" : "secondary"}>
               {user.role}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">{user.email}</p>
-          <p className="text-xs text-muted-foreground mt-1">Member since {formatDate(user.createdAt)}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Member since {formatDate(user.createdAt)}
+          </p>
         </div>
       </div>
 
@@ -74,7 +85,10 @@ export function UserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-0.5">Role</p>
-            <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'} className="text-xs">
+            <Badge
+              variant={user.role === "ADMIN" ? "default" : "secondary"}
+              className="text-xs"
+            >
               {user.role}
             </Badge>
           </div>
@@ -83,7 +97,9 @@ export function UserDetailPage() {
             <p className="text-sm font-medium">{formatDate(user.createdAt)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-0.5">Assigned Companies</p>
+            <p className="text-xs text-muted-foreground mb-0.5">
+              Assigned Companies
+            </p>
             <p className="text-sm font-medium">{user.companies.length}</p>
           </div>
         </CardContent>
@@ -99,10 +115,12 @@ export function UserDetailPage() {
         </div>
 
         {user.companies.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No companies assigned to this user.</p>
+          <p className="text-sm text-muted-foreground">
+            No companies assigned to this user.
+          </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {user.companies.map(company => (
+            {user.companies.map((company) => (
               <button
                 key={company.id}
                 type="button"
@@ -110,20 +128,33 @@ export function UserDetailPage() {
                 className="w-full text-left rounded-lg border bg-background px-4 py-3 hover:bg-muted/50 transition-colors flex items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${company.status ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${company.status ? "bg-green-500" : "bg-muted-foreground/40"}`}
+                  />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{company.businessName}</p>
+                    <p className="text-sm font-medium truncate">
+                      {company.businessName}
+                    </p>
                     <p className="text-xs text-muted-foreground">
-                      {company.country ?? '—'}
+                      {company.country ?? "—"}
                       {company.supportNumber && (
-                        <> · <span className="font-medium text-foreground">{company.supportNumber}</span></>
+                        <>
+                          {" "}
+                          ·{" "}
+                          <span className="font-medium text-foreground">
+                            {company.supportNumber}
+                          </span>
+                        </>
                       )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant={company.status ? 'default' : 'secondary'} className="text-xs">
-                    {company.status ? 'Active' : 'Inactive'}
+                  <Badge
+                    variant={company.status ? "default" : "secondary"}
+                    className="text-xs"
+                  >
+                    {company.status ? "Active" : "Inactive"}
                   </Badge>
                   {company.openTodos > 0 && (
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -131,8 +162,18 @@ export function UserDetailPage() {
                       {company.openTodos}
                     </span>
                   )}
-                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  <svg
+                    className="w-4 h-4 text-muted-foreground"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </div>
               </button>
