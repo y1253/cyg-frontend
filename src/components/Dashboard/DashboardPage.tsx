@@ -1,6 +1,15 @@
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Building2, CheckCircle2, Clock } from 'lucide-react';
+import { AlertCircle, Building2, CheckCircle2, Clock, Search } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
 import type { CompanySummary } from '@/api/companies';
@@ -87,6 +96,8 @@ function StatCard({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+type StatusFilter = 'all' | 'overdue' | 'urgent' | 'unassigned';
+
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -94,11 +105,33 @@ export function DashboardPage() {
 
   const { data: companies = [], isLoading } = useCompanies();
 
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
   const totalTodos = companies.reduce((s, c) => s + c.totalTodos, 0);
   const urgentTodos = companies.reduce((s, c) => s + c.urgentTodos, 0);
   const overdueTodos = companies.reduce((s, c) => s + c.overdueTodos, 0);
   const unassigned = companies.filter(c => c.assignedUser === null);
   const noSupportNumber = companies.filter(c => !c.supportNumber);
+
+  const filteredCompanies = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return companies.filter(c => {
+      if (q) {
+        const matchesName = c.businessName.toLowerCase().includes(q);
+        const matchesUser = c.assignedUser?.name.toLowerCase().includes(q) ?? false;
+        if (!matchesName && !matchesUser) return false;
+      }
+      if (isAdmin && statusFilter !== 'all') {
+        if (statusFilter === 'overdue' && c.overdueTodos === 0) return false;
+        if (statusFilter === 'urgent' && c.urgentTodos <= c.overdueTodos) return false;
+        if (statusFilter === 'unassigned' && c.assignedUser !== null) return false;
+      }
+      return true;
+    });
+  }, [companies, search, statusFilter, isAdmin]);
+
+  const isFiltered = search.trim() !== '' || (isAdmin && statusFilter !== 'all');
 
   return (
     <div className="p-6 max-w-4xl mx-auto flex flex-col gap-6">
@@ -169,17 +202,51 @@ export function DashboardPage() {
         <div className="flex items-center gap-2 mb-3">
           <Building2 size={16} className="text-muted-foreground" />
           <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-            {isAdmin ? 'All Companies' : 'My Companies'} ({companies.length})
+            {isAdmin ? 'All Companies' : 'My Companies'}{' '}
+            ({isFiltered ? `${filteredCompanies.length} of ${companies.length}` : companies.length})
           </h3>
         </div>
 
+        {/* Search + filter bar */}
+        {!isLoading && companies.length > 0 && (
+          <div className="flex gap-2 mb-3">
+            <div className="relative flex-1">
+              <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+              <Input
+                className="pl-8"
+                placeholder="Search companies…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            {isAdmin && (
+              <Select
+                value={statusFilter}
+                onValueChange={v => setStatusFilter((v ?? 'all') as StatusFilter)}
+              >
+                <SelectTrigger className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )}
+
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : companies.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No companies found.</p>
+        ) : filteredCompanies.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {isFiltered ? 'No companies match your search.' : 'No companies found.'}
+          </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {companies.map(company => (
+            {filteredCompanies.map(company => (
               <CompanyRow
                 key={company.id}
                 company={company}

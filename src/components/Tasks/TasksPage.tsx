@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Pencil, Plus, Trash2, Building2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Pencil, Plus, Trash2, Building2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +21,8 @@ import { TaskDialog } from './TaskDialog';
 import { AssignTaskDialog } from './AssignTaskDialog';
 import type { AppTask } from '@/api/tasks';
 
+type TypeFilter = 'all' | 'general' | 'specific';
+
 export function TasksPage() {
   const { data: tasks = [], isLoading } = useTasks();
   const deleteMutation = useDeleteTask();
@@ -21,6 +31,25 @@ export function TasksPage() {
   const [editTask, setEditTask] = useState<AppTask | null>(null);
   const [assignTask, setAssignTask] = useState<AppTask | null>(null);
   const [deleteTask, setDeleteTask] = useState<AppTask | null>(null);
+
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+
+  const filteredTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return tasks.filter(t => {
+      if (q) {
+        const matchesTitle = t.title.toLowerCase().includes(q);
+        const matchesDesc = t.description?.toLowerCase().includes(q) ?? false;
+        if (!matchesTitle && !matchesDesc) return false;
+      }
+      if (typeFilter === 'general' && !t.isGeneral) return false;
+      if (typeFilter === 'specific' && t.isGeneral) return false;
+      return true;
+    });
+  }, [tasks, search, typeFilter]);
+
+  const isFiltered = search.trim() !== '' || typeFilter !== 'all';
 
   function handleDeleteConfirm() {
     if (!deleteTask) return;
@@ -44,13 +73,43 @@ export function TasksPage() {
         </Button>
       </div>
 
+      {/* Search + type filter */}
+      {!isLoading && tasks.length > 0 && (
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              placeholder="Search tasks…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <Select
+            value={typeFilter}
+            onValueChange={v => setTypeFilter((v ?? 'all') as TypeFilter)}
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="general">General</SelectItem>
+              <SelectItem value="specific">Specific</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : tasks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
+      ) : filteredTasks.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isFiltered ? 'No tasks match your search.' : 'No tasks yet. Create one to get started.'}
+        </p>
       ) : (
         <div className="flex flex-col gap-2">
-          {tasks.map(task => (
+          {filteredTasks.map(task => (
             <TaskRow
               key={task.id}
               task={task}

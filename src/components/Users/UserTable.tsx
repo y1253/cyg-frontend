@@ -13,12 +13,13 @@ import {
 interface Props {
   users: AppUser[];
   isLoading: boolean;
+  emptyMessage?: string;
   onView: (user: AppUser) => void;
   onEdit: (user: AppUser) => void;
   onDelete: (user: AppUser) => void;
 }
 
-export function UserTable({ users, isLoading, onView, onEdit, onDelete }: Props) {
+export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDelete }: Props) {
   return (
     <div className="rounded-md border bg-background">
       <Table>
@@ -41,7 +42,7 @@ export function UserTable({ users, isLoading, onView, onEdit, onDelete }: Props)
           ) : users.length === 0 ? (
             <TableRow>
               <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                No users found.
+                {emptyMessage ?? 'No users found.'}
               </TableCell>
             </TableRow>
           ) : (

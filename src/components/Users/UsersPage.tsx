@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { useUsers } from '../../hooks/useUsers';
 import { useDeleteUser } from '../../hooks/useDeleteUser';
 import type { AppUser } from '../../api/users';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { UserTable } from './UserTable';
 import { CreateUserDialog } from './CreateUserDialog';
 import { EditUserDialog } from './EditUserDialog';
@@ -14,14 +23,34 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+type RoleFilter = 'ALL' | 'ADMIN' | 'USER';
+
 export function UsersPage() {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<AppUser | null>(null);
   const [deleteUser, setDeleteUser] = useState<AppUser | null>(null);
 
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
+
   const { data: users = [], isLoading } = useUsers();
   const deleteMutation = useDeleteUser();
+
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter(u => {
+      if (q) {
+        const matchesName = u.name.toLowerCase().includes(q);
+        const matchesEmail = u.email.toLowerCase().includes(q);
+        if (!matchesName && !matchesEmail) return false;
+      }
+      if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
+      return true;
+    });
+  }, [users, search, roleFilter]);
+
+  const isFiltered = search.trim() !== '' || roleFilter !== 'ALL';
 
   function handleDeleteConfirm() {
     if (!deleteUser) return;
@@ -42,9 +71,38 @@ export function UsersPage() {
         <Button onClick={() => setCreateOpen(true)}>Add User</Button>
       </div>
 
+      {/* Search + role filter */}
+      {!isLoading && users.length > 0 && (
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              placeholder="Search by name or email…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <Select
+            value={roleFilter}
+            onValueChange={v => setRoleFilter((v ?? 'ALL') as RoleFilter)}
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All roles</SelectItem>
+              <SelectItem value="ADMIN">Admin</SelectItem>
+              <SelectItem value="USER">User</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <UserTable
-        users={users}
+        users={filteredUsers}
         isLoading={isLoading}
+        emptyMessage={isFiltered ? 'No users match your search.' : undefined}
         onView={u => navigate(`/admin/users/${u.id}`)}
         onEdit={setEditUser}
         onDelete={setDeleteUser}
