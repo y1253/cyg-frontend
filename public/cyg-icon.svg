@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Teal background matching the logo -->
+  <rect width="100" height="100" rx="10" fill="#2DC5B2"/>
+  <!-- Dark navy base / bottom-left triangle -->
+  <polygon points="0,100 0,42 62,100" fill="#1A5272"/>
+  <!-- Three ascending bars in dark navy -->
+  <rect x="8"  y="64" width="21" height="28" rx="2" fill="#1A5272"/>
+  <rect x="35" y="46" width="21" height="46" rx="2" fill="#1A5272"/>
+  <rect x="62" y="26" width="21" height="66" rx="2" fill="#1A5272"/>
+  <!-- White diagonal slash -->
+  <polygon points="0,54 16,22 27,22 0,68" fill="white"/>
+</svg>

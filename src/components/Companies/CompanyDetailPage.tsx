@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Check, ChevronDown, ChevronUp, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/u
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
 import { useDeleteSchedule, useUpdateSchedule } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
+import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
@@ -915,15 +916,18 @@ export function CompanyDetailPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const companyId = Number(id);
+  const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>('tasks');
   const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data: company, isLoading, isError } = useCompany(companyId);
   const { data: users = [] } = useUsers();
   const { data: schedules = [] } = useTaskSchedules(companyId);
   const assignMutation = useAssignCompany();
   const updateCompanyMutation = useUpdateCompany();
+  const deleteCompanyMutation = useDeleteCompany();
   const resolveMutation = useResolveTodo(companyId);
   const deleteMutation = useDeleteTodo(companyId);
   const setCycleMutation = useSetTodoCycle(companyId);
@@ -982,6 +986,17 @@ export function CompanyDetailPage() {
           <Badge variant={company.status ? 'default' : 'secondary'}>
             {company.status ? 'Active' : 'Inactive'}
           </Badge>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              <Trash2 size={14} />
+              Delete Company
+            </Button>
+          )}
         </div>
         <p className="text-sm text-muted-foreground mb-4">
           {company.country ?? '—'} · Registered {formatDate(company.createdAt)} ·{' '}
@@ -1252,6 +1267,40 @@ export function CompanyDetailPage() {
       </div>
 
       <AddTaskDialog open={addTaskOpen} onOpenChange={setAddTaskOpen} companyId={companyId} />
+
+      {/* Delete company confirmation */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Company</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete <span className="font-semibold text-foreground">{company.businessName}</span>?
+            This action cannot be undone.
+          </p>
+          {deleteCompanyMutation.isError && (
+            <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+              {(deleteCompanyMutation.error as Error)?.message ?? 'Failed to delete company'}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteCompanyMutation.isPending}
+              onClick={() =>
+                deleteCompanyMutation.mutate(companyId, {
+                  onSuccess: () => navigate('/dashboard'),
+                })
+              }
+            >
+              {deleteCompanyMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

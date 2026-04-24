@@ -146,6 +146,19 @@ export async function updateCompany(
   return res.json() as Promise<{ id: number; supportNumber: string | null }>;
 }
 
+// ─── Delete company ──────────────────────────────────────────────────────────
+
+export async function deleteCompany(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API}/companies/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to delete company');
+  }
+}
+
 // ─── Assign user ─────────────────────────────────────────────────────────────
 
 export async function assignCompanyUser(
