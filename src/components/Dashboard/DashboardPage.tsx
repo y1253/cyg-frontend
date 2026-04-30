@@ -31,7 +31,7 @@ function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: ()
     <button
       type="button"
       onClick={onClick}
-      className={`group w-full text-left flex items-center gap-5 px-5 py-3.5 border-b last:border-b-0 border-l-[3px] ${accentClass} hover:bg-muted/50 transition-colors`}
+      className={`group w-full text-left flex items-center gap-5 px-5 py-3.5 rounded-lg border border-l-[3px] bg-background ${accentClass} hover:bg-muted/50 transition-colors`}
     >
       {/* Name + meta */}
       <div className="flex-1 flex items-baseline gap-3 min-w-0">
@@ -78,7 +78,7 @@ function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: ()
 
 function SkeletonRow({ wide }: { wide?: boolean }) {
   return (
-    <div className="flex items-center gap-5 px-5 py-3.5 border-b last:border-b-0 border-l-[3px] border-l-border animate-pulse">
+    <div className="flex items-center gap-5 px-5 py-3.5 rounded-lg border border-l-[3px] border-l-border bg-background animate-pulse">
       <div className={`h-3 bg-muted rounded ${wide ? 'w-56' : 'w-40'}`} />
       <div className="h-2.5 bg-muted rounded w-32 hidden sm:block" />
       <div className="ml-auto h-2.5 bg-muted rounded w-14" />
@@ -231,7 +231,7 @@ export function DashboardPage() {
 
       {/* Company list */}
       {isLoading ? (
-        <div className="rounded-lg border bg-background overflow-hidden">
+        <div className="flex flex-col gap-2">
           {[52, 40, 60, 35, 50, 45].map((w, i) => (
             <SkeletonRow key={i} wide={w > 48} />
           ))}
@@ -241,7 +241,7 @@ export function DashboardPage() {
           {isFiltered ? 'No companies match your search.' : 'No companies yet.'}
         </p>
       ) : (
-        <div className="rounded-lg border bg-background overflow-hidden">
+        <div className="flex flex-col gap-2">
           {filteredCompanies.map(company => (
             <CompanyRow
               key={company.id}

@@ -117,6 +117,10 @@ export interface CompanyDetail {
     email: string | null;
     phone: string | null;
   } | null;
+  billing: {
+    billingEmail: string | null;
+    billingPassword: string | null;
+  } | null;
   assignedUser: AssignedUser | null;
   todos: TodoItem[];
 }
@@ -129,11 +133,34 @@ export async function fetchCompany(token: string, id: number): Promise<CompanyDe
 
 // ─── Update company ───────────────────────────────────────────────────────────
 
+export interface UpdateCompanyData {
+  supportNumber?: string;
+  businessName?: string;
+  businessType?: string;
+  companyType?: string;
+  companyActivity?: string;
+  country?: string;
+  qbPlan?: string;
+  personalName?: string;
+  privateEmail?: string;
+  privatePhone?: string;
+  storeNumber?: string;
+  neq?: string;
+  revenueQcId?: string;
+  craBn?: string;
+  fiscalYear?: string;
+  accountantName?: string;
+  accountantEmail?: string;
+  accountantPhone?: string;
+  billingEmail?: string;
+  billingPassword?: string;
+}
+
 export async function updateCompany(
   token: string,
   id: number,
-  data: { supportNumber?: string },
-): Promise<{ id: number; supportNumber: string | null }> {
+  data: UpdateCompanyData,
+): Promise<{ id: number }> {
   const res = await fetch(`${API}/companies/${id}`, {
     method: 'PATCH',
     headers: authHeaders(token),
@@ -143,7 +170,7 @@ export async function updateCompany(
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? 'Failed to update company');
   }
-  return res.json() as Promise<{ id: number; supportNumber: string | null }>;
+  return res.json() as Promise<{ id: number }>;
 }
 
 // ─── Delete company ──────────────────────────────────────────────────────────

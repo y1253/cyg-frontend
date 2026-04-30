@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Check, ChevronDown, ChevronUp, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -312,6 +319,43 @@ function TodoRow({
   );
 }
 
+// ─── Shared constants ─────────────────────────────────────────────────────────
+
+const BUSINESS_TYPES = [
+  { value: 'REAL_ESTATE', label: 'Real Estate' },
+  { value: 'ADVERTISING', label: 'Advertising' },
+  { value: 'RETAIL', label: 'Retail' },
+  { value: 'CONSTRUCTION', label: 'Construction' },
+  { value: 'TECHNOLOGY', label: 'Technology' },
+  { value: 'HEALTHCARE', label: 'Healthcare' },
+  { value: 'FINANCE', label: 'Finance' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const COMPANY_TYPES = [
+  { value: 'CORPORATION', label: 'Corporation' },
+  { value: 'LLC', label: 'LLC' },
+  { value: 'SOLE_PROPRIETOR', label: 'Sole Proprietor' },
+  { value: 'PARTNERSHIP', label: 'Partnership' },
+  { value: 'NON_PROFIT', label: 'Non-Profit' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const MONTHS = [
+  { value: '01', label: 'January',   maxDay: 31 },
+  { value: '02', label: 'February',  maxDay: 29 },
+  { value: '03', label: 'March',     maxDay: 31 },
+  { value: '04', label: 'April',     maxDay: 30 },
+  { value: '05', label: 'May',       maxDay: 31 },
+  { value: '06', label: 'June',      maxDay: 30 },
+  { value: '07', label: 'July',      maxDay: 31 },
+  { value: '08', label: 'August',    maxDay: 31 },
+  { value: '09', label: 'September', maxDay: 30 },
+  { value: '10', label: 'October',   maxDay: 31 },
+  { value: '11', label: 'November',  maxDay: 30 },
+  { value: '12', label: 'December',  maxDay: 31 },
+];
+
 // ─── Info field ───────────────────────────────────────────────────────────────
 
 function formatFiscalYear(date: string | null | undefined): string | null {
@@ -330,6 +374,102 @@ function Field({ label, value }: { label: string; value?: string | null }) {
     <div>
       <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
       <p className="text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+// ─── Editable card header ─────────────────────────────────────────────────────
+
+function EditableCardHeader({
+  title,
+  editing,
+  saving,
+  onEdit,
+  onSave,
+  onCancel,
+  error,
+}: {
+  title: string;
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  error?: string | null;
+}) {
+  return (
+    <CardHeader className="pb-3 flex-row items-center justify-between">
+      <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+      {editing ? (
+        <div className="flex items-center gap-2">
+          {error && <span className="text-xs text-destructive">{error}</span>}
+          <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={onCancel} disabled={saving}>
+            Cancel
+          </Button>
+          <Button size="sm" className="h-7 text-xs px-3" onClick={onSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <Pencil size={13} />
+        </button>
+      )}
+    </CardHeader>
+  );
+}
+
+// ─── Fiscal year picker (month + day) ─────────────────────────────────────────
+
+function FiscalYearPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const parts = value ? value.split('-') : [];
+  const selectedMonth = parts.length >= 2 ? parts[1] : null;
+  const selectedDay   = parts.length >= 3 ? parts[2] : null;
+  const maxDays = selectedMonth ? (MONTHS.find(m => m.value === selectedMonth)?.maxDay ?? 31) : 31;
+
+  function handleMonth(m: string | null) {
+    if (!m) { onChange(''); return; }
+    const max = MONTHS.find(x => x.value === m)?.maxDay ?? 31;
+    const day = selectedDay && parseInt(selectedDay) <= max ? selectedDay : '01';
+    onChange(`2000-${m}-${day}`);
+  }
+
+  function handleDay(d: string | null) {
+    if (!d || !selectedMonth) return;
+    onChange(`2000-${selectedMonth}-${d}`);
+  }
+
+  return (
+    <div className="flex gap-2">
+      <Select value={selectedMonth} onValueChange={handleMonth}>
+        <SelectTrigger className="flex-1 h-8 text-sm">
+          <SelectValue placeholder="Month" />
+        </SelectTrigger>
+        <SelectContent>
+          {MONTHS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Select value={selectedDay} onValueChange={handleDay}>
+        <SelectTrigger className="w-20 h-8 text-sm">
+          <SelectValue placeholder="Day" />
+        </SelectTrigger>
+        <SelectContent>
+          {Array.from({ length: maxDays }, (_, i) => {
+            const d = (i + 1).toString().padStart(2, '0');
+            return <SelectItem key={d} value={d}>{i + 1}</SelectItem>;
+          })}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -943,8 +1083,82 @@ export function CompanyDetailPage() {
   const setCycleMutation = useSetTodoCycle(companyId);
   const removeCycleMutation = useRemoveTodoCycle(companyId);
 
-  const [editSupportNumber, setEditSupportNumber] = useState(false);
-  const [supportNumberInput, setSupportNumberInput] = useState('');
+  type EditSection = 'info' | 'contact' | 'legal' | 'accountant' | 'billing' | null;
+  const [editSection, setEditSection] = useState<EditSection>(null);
+
+  const [infoForm, setInfoForm] = useState({
+    businessName: '', country: '', businessType: '', companyType: '',
+    companyActivity: '', qbPlan: '', supportNumber: '',
+  });
+  const [contactForm, setContactForm] = useState({
+    personalName: '', privateEmail: '', privatePhone: '', storeNumber: '',
+  });
+  const [legalForm, setLegalForm] = useState({
+    neq: '', revenueQcId: '', craBn: '', fiscalYear: '',
+  });
+  const [accountantForm, setAccountantForm] = useState({
+    accountantName: '', accountantEmail: '', accountantPhone: '',
+  });
+  const [billingForm, setBillingForm] = useState({ billingEmail: '', billingPassword: '' });
+  const [showBillingPw, setShowBillingPw] = useState(false);
+
+  function startEdit(section: EditSection) {
+    if (!company) return;
+    if (section === 'info') {
+      setInfoForm({
+        businessName:    company.businessName ?? '',
+        country:         company.country ?? '',
+        businessType:    company.businessType ?? '',
+        companyType:     company.companyType ?? '',
+        companyActivity: company.companyActivity ?? '',
+        qbPlan:          company.qbPlan ?? '',
+        supportNumber:   company.supportNumber ?? '',
+      });
+    } else if (section === 'contact') {
+      setContactForm({
+        personalName: company.contactInfo?.personalName ?? '',
+        privateEmail: company.contactInfo?.privateEmail ?? '',
+        privatePhone: company.contactInfo?.privatePhone ?? '',
+        storeNumber:  company.contactInfo?.storeNumber  ?? '',
+      });
+    } else if (section === 'legal') {
+      const fy = company.legalInfo?.fiscalYear;
+      const fyVal = fy ? fy.substring(0, 10) : ''; // keep "2000-MM-DD"
+      setLegalForm({
+        neq:         company.legalInfo?.neq         ?? '',
+        revenueQcId: company.legalInfo?.revenueQcId ?? '',
+        craBn:       company.legalInfo?.craBn       ?? '',
+        fiscalYear:  fyVal,
+      });
+    } else if (section === 'accountant') {
+      setAccountantForm({
+        accountantName:  company.accountant?.name  ?? '',
+        accountantEmail: company.accountant?.email ?? '',
+        accountantPhone: company.accountant?.phone ?? '',
+      });
+    } else if (section === 'billing') {
+      setBillingForm({
+        billingEmail:    company.billing?.billingEmail    ?? '',
+        billingPassword: '',
+      });
+    }
+    setEditSection(section);
+  }
+
+  function cancelEdit() { setEditSection(null); }
+
+  function saveSection(section: EditSection) {
+    if (!section) return;
+    const data = section === 'info'       ? infoForm
+               : section === 'contact'    ? contactForm
+               : section === 'legal'      ? legalForm
+               : section === 'accountant' ? accountantForm
+               : billingForm;
+    updateCompanyMutation.mutate(
+      { id: companyId, data },
+      { onSuccess: () => setEditSection(null) },
+    );
+  }
 
   if (isLoading) return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
@@ -1058,129 +1272,300 @@ export function CompanyDetailPage() {
         {/* ── Details tab ── */}
         {tab === 'details' && (
           <div className="flex flex-col gap-4 max-w-3xl">
+
+            {/* Company Info */}
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold">Company Info</CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <Field label="Business Name" value={company.businessName} />
-                <Field label="Country" value={company.country} />
-                <Field label="Business Type" value={company.businessType} />
-                <Field label="Company Type" value={company.companyType} />
-                <Field label="QB Plan" value={company.qbPlan} />
-                {/* Support Number — read-only for users, inline-editable for admin */}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-0.5">Support Number</p>
-                  {isAdmin && editSupportNumber ? (
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <Input
-                        value={supportNumberInput}
-                        onChange={e => setSupportNumberInput(e.target.value)}
-                        className="h-7 text-sm px-2 w-36"
-                        placeholder="e.g. +15141234567"
-                        autoFocus
+              {isAdmin ? (
+                <EditableCardHeader
+                  title="Company Info"
+                  editing={editSection === 'info'}
+                  saving={updateCompanyMutation.isPending}
+                  onEdit={() => startEdit('info')}
+                  onSave={() => saveSection('info')}
+                  onCancel={cancelEdit}
+                  error={editSection === 'info' && updateCompanyMutation.isError
+                    ? (updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error')
+                    : null}
+                />
+              ) : (
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Company Info</CardTitle>
+                </CardHeader>
+              )}
+              <CardContent>
+                {editSection === 'info' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Business Name</Label>
+                      <Input className="h-8 text-sm" value={infoForm.businessName}
+                        onChange={e => setInfoForm(f => ({ ...f, businessName: e.target.value }))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Country</Label>
+                      <Select value={infoForm.country || null}
+                        onValueChange={v => setInfoForm(f => ({ ...f, country: v ?? '' }))}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="USA">USA</SelectItem>
+                          <SelectItem value="CANADA">Canada</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Business Type</Label>
+                      <Select value={infoForm.businessType || null}
+                        onValueChange={v => setInfoForm(f => ({ ...f, businessType: v ?? '' }))}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          {BUSINESS_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Company Type</Label>
+                      <Select value={infoForm.companyType || null}
+                        onValueChange={v => setInfoForm(f => ({ ...f, companyType: v ?? '' }))}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          {COMPANY_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">QB Plan</Label>
+                      <Input className="h-8 text-sm" value={infoForm.qbPlan}
+                        onChange={e => setInfoForm(f => ({ ...f, qbPlan: e.target.value }))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Support Number</Label>
+                      <Input className="h-8 text-sm" value={infoForm.supportNumber}
+                        placeholder="+15141234567"
+                        onChange={e => setInfoForm(f => ({ ...f, supportNumber: e.target.value }))} />
+                    </div>
+                    <div className="col-span-2 flex flex-col gap-1">
+                      <Label className="text-xs">Business Activity</Label>
+                      <textarea
+                        value={infoForm.companyActivity}
+                        onChange={e => setInfoForm(f => ({ ...f, companyActivity: e.target.value }))}
+                        rows={3}
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
                       />
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs px-2"
-                        disabled={updateCompanyMutation.isPending}
-                        onClick={() => {
-                          updateCompanyMutation.mutate(
-                            { id: companyId, data: { supportNumber: supportNumberInput.trim() || undefined } },
-                            { onSuccess: () => setEditSupportNumber(false) },
-                          );
-                        }}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs px-2"
-                        onClick={() => setEditSupportNumber(false)}
-                      >
-                        Cancel
-                      </Button>
-                      {updateCompanyMutation.isError && (
-                        <span className="text-xs text-destructive">
-                          {updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error'}
-                        </span>
-                      )}
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      {company.supportNumber ? (
-                        <p className="text-sm font-medium">{company.supportNumber}</p>
-                      ) : (
-                        <p className={`text-sm font-medium ${isAdmin ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                          {isAdmin ? 'Not set' : '—'}
-                        </p>
-                      )}
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          title="Edit support number"
-                          onClick={() => {
-                            setSupportNumberInput(company.supportNumber ?? '');
-                            setEditSupportNumber(true);
-                          }}
-                          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {company.companyActivity && (
-                  <div className="col-span-2 sm:col-span-3">
-                    <Field label="Activity" value={company.companyActivity} />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <Field label="Business Name"  value={company.businessName} />
+                    <Field label="Country"        value={company.country} />
+                    <Field label="Business Type"  value={BUSINESS_TYPES.find(t => t.value === company.businessType)?.label ?? company.businessType} />
+                    <Field label="Company Type"   value={COMPANY_TYPES.find(t => t.value === company.companyType)?.label ?? company.companyType} />
+                    <Field label="QB Plan"        value={company.qbPlan} />
+                    <Field label="Support #"      value={company.supportNumber} />
+                    {company.companyActivity && (
+                      <div className="col-span-2 sm:col-span-3">
+                        <Field label="Activity" value={company.companyActivity} />
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            {company.contactInfo && (
+            {/* Contact */}
+            <Card>
+              {isAdmin ? (
+                <EditableCardHeader
+                  title="Contact"
+                  editing={editSection === 'contact'}
+                  saving={updateCompanyMutation.isPending}
+                  onEdit={() => startEdit('contact')}
+                  onSave={() => saveSection('contact')}
+                  onCancel={cancelEdit}
+                  error={editSection === 'contact' && updateCompanyMutation.isError
+                    ? (updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error') : null}
+                />
+              ) : (
+                <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Contact</CardTitle></CardHeader>
+              )}
+              <CardContent>
+                {editSection === 'contact' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { key: 'personalName', label: 'Name' },
+                      { key: 'privateEmail', label: 'Email' },
+                      { key: 'privatePhone', label: 'Phone' },
+                      { key: 'storeNumber',  label: 'Store Phone' },
+                    ].map(({ key, label }) => (
+                      <div key={key} className="flex flex-col gap-1">
+                        <Label className="text-xs">{label}</Label>
+                        <Input className="h-8 text-sm"
+                          value={contactForm[key as keyof typeof contactForm]}
+                          onChange={e => setContactForm(f => ({ ...f, [key]: e.target.value }))} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <Field label="Name"             value={company.contactInfo?.personalName} />
+                    <Field label="Email"            value={company.contactInfo?.privateEmail} />
+                    <Field label="Phone"            value={company.contactInfo?.privatePhone} />
+                    <Field label="Store Phone"      value={company.contactInfo?.storeNumber} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Legal (Canada) */}
+            {(company.legalInfo || isAdmin) && (
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Contact</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  <Field label="Name" value={company.contactInfo.personalName} />
-                  <Field label="Email" value={company.contactInfo.privateEmail} />
-                  <Field label="Phone" value={company.contactInfo.privatePhone} />
-                  <Field label="Store Phone Number" value={company.contactInfo.storeNumber} />
+                {isAdmin ? (
+                  <EditableCardHeader
+                    title="Legal (Canada)"
+                    editing={editSection === 'legal'}
+                    saving={updateCompanyMutation.isPending}
+                    onEdit={() => startEdit('legal')}
+                    onSave={() => saveSection('legal')}
+                    onCancel={cancelEdit}
+                    error={editSection === 'legal' && updateCompanyMutation.isError
+                      ? (updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error') : null}
+                  />
+                ) : (
+                  <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Legal (Canada)</CardTitle></CardHeader>
+                )}
+                <CardContent>
+                  {editSection === 'legal' ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { key: 'neq',         label: 'NEQ' },
+                        { key: 'revenueQcId', label: 'Revenue QC ID' },
+                        { key: 'craBn',       label: 'CRA BN' },
+                      ].map(({ key, label }) => (
+                        <div key={key} className="flex flex-col gap-1">
+                          <Label className="text-xs">{label}</Label>
+                          <Input className="h-8 text-sm"
+                            value={legalForm[key as keyof typeof legalForm]}
+                            onChange={e => setLegalForm(f => ({ ...f, [key]: e.target.value }))} />
+                        </div>
+                      ))}
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Fiscal Year End</Label>
+                        <FiscalYearPicker
+                          value={legalForm.fiscalYear}
+                          onChange={v => setLegalForm(f => ({ ...f, fiscalYear: v }))}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                      <Field label="NEQ"           value={company.legalInfo?.neq} />
+                      <Field label="Revenue QC ID" value={company.legalInfo?.revenueQcId} />
+                      <Field label="CRA BN"        value={company.legalInfo?.craBn} />
+                      <Field label="Fiscal Year"   value={formatFiscalYear(company.legalInfo?.fiscalYear)} />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
 
-            {company.legalInfo && (
+            {/* Accountant */}
+            <Card>
+              {isAdmin ? (
+                <EditableCardHeader
+                  title="Accountant"
+                  editing={editSection === 'accountant'}
+                  saving={updateCompanyMutation.isPending}
+                  onEdit={() => startEdit('accountant')}
+                  onSave={() => saveSection('accountant')}
+                  onCancel={cancelEdit}
+                  error={editSection === 'accountant' && updateCompanyMutation.isError
+                    ? (updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error') : null}
+                />
+              ) : (
+                <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Accountant</CardTitle></CardHeader>
+              )}
+              <CardContent>
+                {editSection === 'accountant' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { key: 'accountantName',  label: 'Name' },
+                      { key: 'accountantEmail', label: 'Email' },
+                      { key: 'accountantPhone', label: 'Phone' },
+                    ].map(({ key, label }) => (
+                      <div key={key} className="flex flex-col gap-1">
+                        <Label className="text-xs">{label}</Label>
+                        <Input className="h-8 text-sm"
+                          value={accountantForm[key as keyof typeof accountantForm]}
+                          onChange={e => setAccountantForm(f => ({ ...f, [key]: e.target.value }))} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <Field label="Name"  value={company.accountant?.name} />
+                    <Field label="Email" value={company.accountant?.email} />
+                    <Field label="Phone" value={company.accountant?.phone} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Billing (admin only) */}
+            {isAdmin && (
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Legal (Canada)</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  <Field label="NEQ" value={company.legalInfo.neq} />
-                  <Field label="Revenue QC ID" value={company.legalInfo.revenueQcId} />
-                  <Field label="CRA BN" value={company.legalInfo.craBn} />
-                  <Field label="Fiscal Year" value={formatFiscalYear(company.legalInfo.fiscalYear)} />
+                <EditableCardHeader
+                  title="Billing"
+                  editing={editSection === 'billing'}
+                  saving={updateCompanyMutation.isPending}
+                  onEdit={() => startEdit('billing')}
+                  onSave={() => saveSection('billing')}
+                  onCancel={cancelEdit}
+                  error={editSection === 'billing' && updateCompanyMutation.isError
+                    ? (updateCompanyMutation.error instanceof Error ? updateCompanyMutation.error.message : 'Error') : null}
+                />
+                <CardContent>
+                  {editSection === 'billing' ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Billing Email</Label>
+                        <Input className="h-8 text-sm" type="email"
+                          value={billingForm.billingEmail}
+                          onChange={e => setBillingForm(f => ({ ...f, billingEmail: e.target.value }))} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-xs">New Password <span className="text-muted-foreground">(leave blank to keep)</span></Label>
+                        <Input className="h-8 text-sm" type="password"
+                          value={billingForm.billingPassword}
+                          placeholder="Enter new password…"
+                          onChange={e => setBillingForm(f => ({ ...f, billingPassword: e.target.value }))} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                      <Field label="Billing Email" value={company.billing?.billingEmail} />
+                      {company.billing?.billingPassword && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Password</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium font-mono">
+                              {showBillingPw ? company.billing.billingPassword : '••••••••••'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setShowBillingPw(v => !v)}
+                              className="text-muted-foreground hover:text-foreground transition-colors"
+                              title={showBillingPw ? 'Hide password' : 'Show password'}
+                            >
+                              {showBillingPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
 
-            {company.accountant && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Accountant</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  <Field label="Name" value={company.accountant.name} />
-                  <Field label="Email" value={company.accountant.email} />
-                  <Field label="Phone" value={company.accountant.phone} />
-                </CardContent>
-              </Card>
-            )}
-
+            {/* Assigned User (admin only) */}
             {isAdmin && (
               <Card>
                 <CardHeader className="pb-3">
