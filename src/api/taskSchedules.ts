@@ -52,10 +52,14 @@ export async function updateSchedule(
   return res.json();
 }
 
-export async function deleteSchedule(token: string, id: number): Promise<void> {
-  const res = await fetch(`${BASE}/${id}`, {
-    method: 'DELETE',
+export async function toggleSchedule(token: string, id: number): Promise<AppTaskSchedule> {
+  const res = await fetch(`${BASE}/${id}/toggle`, {
+    method: 'PATCH',
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error('Failed to delete schedule');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message ?? 'Failed to toggle schedule');
+  }
+  return res.json();
 }

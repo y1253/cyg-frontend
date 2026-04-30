@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Check, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Ban, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +28,7 @@ import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
-import { useDeleteSchedule, useUpdateSchedule } from '@/hooks/useTaskSchedules';
+import { useToggleSchedule, useUpdateSchedule } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { AddTaskDialog } from './AddTaskDialog';
@@ -93,6 +93,85 @@ function CycleBadge({ days }: { days: number }) {
   );
 }
 
+// ─── Completion checkbox with celebration animation ───────────────────────────
+
+const PARTICLE_CONFIG = [
+  { angle:   0, dist: 18, color: '#4ade80' },
+  { angle:  45, dist: 20, color: '#34d399' },
+  { angle:  90, dist: 18, color: '#2dd4bf' },
+  { angle: 135, dist: 22, color: '#86efac' },
+  { angle: 180, dist: 18, color: '#4ade80' },
+  { angle: 225, dist: 20, color: '#6ee7b7' },
+  { angle: 270, dist: 18, color: '#34d399' },
+  { angle: 315, dist: 22, color: '#a7f3d0' },
+];
+
+function CompletionCheckbox({
+  resolved,
+  pending,
+  celebrating,
+  onToggle,
+}: {
+  resolved: boolean;
+  pending: boolean;
+  celebrating: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={pending}
+      aria-label={resolved ? 'Mark as open' : 'Mark as resolved'}
+      className="relative shrink-0 w-6 h-6 flex items-center justify-center disabled:opacity-40 group"
+    >
+      {/* Particle burst — only while celebrating */}
+      {celebrating && PARTICLE_CONFIG.map((p, i) => {
+        const rad = (p.angle * Math.PI) / 180;
+        const tx = Math.round(Math.cos(rad) * p.dist);
+        const ty = Math.round(Math.sin(rad) * p.dist);
+        return (
+          <span
+            key={i}
+            aria-hidden
+            className="absolute top-1/2 left-1/2 w-1.5 h-1.5 rounded-full pointer-events-none animate-todo-particle"
+            style={{ backgroundColor: p.color, '--tx': `${tx}px`, '--ty': `${ty}px`, animationDelay: `${i * 18}ms` } as React.CSSProperties}
+          />
+        );
+      })}
+
+      {/* SVG circle + animated checkmark */}
+      <svg
+        viewBox="0 0 20 20"
+        className={`w-5 h-5 overflow-visible ${celebrating ? 'animate-todo-circle-spring' : ''}`}
+        aria-hidden
+      >
+        {/* Ring / filled circle */}
+        <circle
+          cx="10" cy="10" r="8.5"
+          strokeWidth="1.5"
+          fill={resolved ? '#22c55e' : 'none'}
+          stroke={resolved ? '#22c55e' : 'currentColor'}
+          className={`transition-colors duration-200 ${!resolved ? 'text-muted-foreground group-hover:text-foreground' : ''}`}
+        />
+        {/* Checkmark — draws itself in when celebrating, static otherwise */}
+        {resolved && (
+          <path
+            d="M5 10.5 L8.5 14 L15 7.5"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={celebrating ? 'animate-todo-check-draw' : ''}
+            style={{ strokeDasharray: 16, strokeDashoffset: celebrating ? 16 : 0 }}
+          />
+        )}
+      </svg>
+    </button>
+  );
+}
+
 // ─── Todo row ─────────────────────────────────────────────────────────────────
 
 function TodoRow({
@@ -122,6 +201,21 @@ function TodoRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemoveCycle, setConfirmRemoveCycle] = useState(false);
 
+  // `celebrating` fires immediately on click (particles + spring)
+  const [celebrating, setCelebrating] = useState(false);
+  // `rowPulse` fires when the server confirms resolve (checkmark draw + row glow)
+  const [rowPulse, setRowPulse] = useState(false);
+  const prevResolved = useRef(todo.resolved);
+
+  useEffect(() => {
+    if (!prevResolved.current && todo.resolved) {
+      setRowPulse(true);
+      const t = setTimeout(() => setRowPulse(false), 800);
+      return () => clearTimeout(t);
+    }
+    prevResolved.current = todo.resolved;
+  }, [todo.resolved]);
+
   const isRecurring = !!todo.scheduleId;
   const tier = getTodoUrgency(todo.dueDate);
   const badge = urgencyBadge[tier];
@@ -132,28 +226,25 @@ function TodoRow({
   const hasDescription = !!todo.task.description;
   const hasNote = !!scheduleNote;
 
+  function handleToggle() {
+    if (!todo.resolved) {
+      setCelebrating(true);
+      setTimeout(() => setCelebrating(false), 800);
+    }
+    onToggle();
+  }
+
   return (
     <>
-      <div className={`rounded-lg border px-4 py-3 transition-all ${bg}`}>
+      <div className={`rounded-lg border px-4 py-3 transition-all ${bg} ${rowPulse ? 'animate-todo-row-pulse' : ''}`}>
         {/* Main row */}
         <div className="flex items-center gap-3">
-          {/* Checkbox toggle */}
-          <button
-            type="button"
-            onClick={onToggle}
-            disabled={togglePending}
-            aria-label={todo.resolved ? 'Mark as open' : 'Mark as resolved'}
-            className="shrink-0 disabled:opacity-50"
-          >
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors
-              ${todo.resolved
-                ? 'bg-green-500 border-green-500'
-                : 'border-muted-foreground hover:border-primary bg-background'
-              }`}
-            >
-              {todo.resolved && <Check size={11} className="text-white" strokeWidth={3} />}
-            </div>
-          </button>
+          <CompletionCheckbox
+            resolved={todo.resolved}
+            pending={togglePending}
+            celebrating={celebrating || rowPulse}
+            onToggle={handleToggle}
+          />
 
           {/* Cycle badge */}
           {isRecurring && cycleDays && !todo.resolved && (
@@ -930,82 +1021,114 @@ function NotesSection({ companyId }: { companyId: number }) {
 
 function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
   const updateMutation = useUpdateSchedule(companyId);
-  const deleteMutation = useDeleteSchedule(companyId);
+  const toggleMutation = useToggleSchedule(companyId);
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycle, setEditCycle] = useState('');
   const [editNote, setEditNote] = useState('');
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
 
-  const activeSchedules = schedules.filter(s => !s.deletedAt);
+  const query = search.trim().toLowerCase();
+  const filtered = query
+    ? schedules.filter(
+        s =>
+          s.task.title.toLowerCase().includes(query) ||
+          (s.note ?? '').toLowerCase().includes(query),
+      )
+    : schedules;
 
-  if (activeSchedules.length === 0) {
+  const active = filtered.filter(s => !s.deletedAt);
+  const disabled = filtered.filter(s => !!s.deletedAt);
+
+  if (schedules.length === 0) {
     return <p className="text-sm text-muted-foreground">No recurring schedules set up for this company yet.</p>;
   }
 
-  return (
-    <div className="flex flex-col gap-2">
-      {activeSchedules.map(s => (
-        <div key={s.id} className="rounded-lg border bg-blue-50/60 border-blue-200 px-4 py-3 flex items-start gap-3">
-          <RefreshCw size={14} className="text-blue-500 shrink-0 mt-1" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium leading-snug">{s.task.title}</p>
-            {editId === s.id ? (
-              <div className="flex flex-col gap-2 mt-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Every</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={editCycle}
-                    onChange={e => setEditCycle(e.target.value)}
-                    className="h-7 w-20 text-xs px-2"
-                    autoFocus
-                  />
-                  <span className="text-xs text-muted-foreground">days</span>
-                </div>
-                <textarea
-                  value={editNote}
-                  onChange={e => setEditNote(e.target.value)}
-                  placeholder="Company-specific note (optional)…"
-                  rows={2}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+  function renderSchedule(s: AppTaskSchedule) {
+    const isDisabled = !!s.deletedAt;
+    return (
+      <div
+        key={s.id}
+        className={`rounded-lg border px-4 py-3 flex items-start gap-3 transition-opacity ${
+          isDisabled
+            ? 'bg-muted/40 border-muted-foreground/20 opacity-60'
+            : 'bg-blue-50/60 border-blue-200'
+        }`}
+      >
+        <RefreshCw
+          size={14}
+          className={`shrink-0 mt-1 ${isDisabled ? 'text-muted-foreground' : 'text-blue-500'}`}
+        />
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium leading-snug ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
+            {s.task.title}
+          </p>
+          {editId === s.id ? (
+            <div className="flex flex-col gap-2 mt-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={editCycle}
+                  onChange={e => setEditCycle(e.target.value)}
+                  className="h-7 w-20 text-xs px-2"
+                  autoFocus
                 />
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs px-2"
-                    disabled={updateMutation.isPending}
-                    onClick={() => {
-                      const n = Number(editCycle);
-                      if (n >= 1) {
-                        updateMutation.mutate(
-                          { id: s.id, cycle: n, note: editNote.trim() || null },
-                          { onSuccess: () => setEditId(null) },
-                        );
-                      }
-                    }}
-                  >
-                    {updateMutation.isPending ? 'Saving…' : 'Save'}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => setEditId(null)}>
-                    Cancel
-                  </Button>
-                </div>
+                <span className="text-xs text-muted-foreground">days</span>
               </div>
-            ) : (
-              <div className="mt-0.5">
-                <p className="text-xs text-muted-foreground">Every {s.cycle} days</p>
-                {s.note && (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed">
-                    📝 {s.note}
-                  </p>
-                )}
+              <textarea
+                value={editNote}
+                onChange={e => setEditNote(e.target.value)}
+                placeholder="Company-specific note (optional)…"
+                rows={2}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2"
+                  disabled={updateMutation.isPending}
+                  onClick={() => {
+                    const n = Number(editCycle);
+                    if (n >= 1) {
+                      updateMutation.mutate(
+                        { id: s.id, cycle: n, note: editNote.trim() || null },
+                        { onSuccess: () => setEditId(null) },
+                      );
+                    }
+                  }}
+                >
+                  {updateMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => setEditId(null)}>
+                  Cancel
+                </Button>
               </div>
-            )}
-          </div>
-          {editId !== s.id && (
-            <div className="flex items-center gap-1 shrink-0">
+            </div>
+          ) : (
+            <div className="mt-0.5">
+              <p className="text-xs text-muted-foreground">Every {s.cycle} days</p>
+              {s.note && (
+                <p className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
+                  isDisabled
+                    ? 'text-muted-foreground bg-muted/60 border-muted-foreground/20'
+                    : 'text-amber-700 bg-amber-50 border-amber-200'
+                }`}>
+                  📝 {s.note}
+                </p>
+              )}
+              {isDisabled && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                  <Ban size={10} /> Disabled
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        {editId !== s.id && (
+          <div className="flex items-center gap-1 shrink-0">
+            {!isDisabled && (
               <button
                 type="button"
                 title="Edit schedule"
@@ -1014,47 +1137,66 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
               >
                 <Pencil size={13} />
               </button>
-              <button
-                type="button"
-                title="Delete schedule"
-                onClick={() => setDeleteId(s.id)}
-                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          )}
-        </div>
-      ))}
-
-      {/* Delete confirm dialog */}
-      <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Delete Schedule</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Stop recurring schedule for{' '}
-            <span className="font-medium text-foreground">
-              {activeSchedules.find(s => s.id === deleteId)?.task.title}
-            </span>?
-            Existing todos won't be deleted.
-          </p>
-          <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleteMutation.isPending}
-              onClick={() => {
-                if (deleteId !== null) {
-                  deleteMutation.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
-                }
-              }}
+            )}
+            <button
+              type="button"
+              title={isDisabled ? 'Enable schedule' : 'Disable schedule'}
+              disabled={toggleMutation.isPending}
+              onClick={() => toggleMutation.mutate(s.id)}
+              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+                isDisabled
+                  ? 'text-muted-foreground hover:text-green-600 hover:bg-green-50'
+                  : 'text-muted-foreground hover:text-orange-600 hover:bg-orange-50'
+              }`}
             >
-              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
-            </Button>
+              {isDisabled ? <Power size={13} /> : <Ban size={13} />}
+            </button>
           </div>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Search bar */}
+      <div className="relative">
+        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search schedules…"
+          className="h-8 pl-8 text-xs"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 && (
+        <p className="text-sm text-muted-foreground">No schedules match your search.</p>
+      )}
+
+      {active.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {active.map(s => renderSchedule(s))}
+        </div>
+      )}
+
+      {disabled.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {active.length > 0 && (
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">Disabled</p>
+          )}
+          {disabled.map(s => renderSchedule(s))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1167,9 +1309,10 @@ export function CompanyDetailPage() {
   const openTodos = company.todos.filter(t => !t.resolved);
   const resolvedTodos = company.todos.filter(t => t.resolved);
 
-  // Build a map: scheduleId → { cycle, note }
+  // Build a map: scheduleId → { cycle, note } — active only so disabled schedules don't surface notes
   const scheduleMap = new Map<number, { cycle: number; note: string | null }>(
-    schedules.map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note }])
+    schedules.filter((s: AppTaskSchedule) => !s.deletedAt)
+      .map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note }])
   );
 
   function getCycleDays(todo: TodoItem): number | null {
