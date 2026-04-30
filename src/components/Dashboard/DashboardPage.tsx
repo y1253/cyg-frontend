@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Building2, CheckCircle2, Clock, Search } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { ChevronRight, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -14,118 +13,151 @@ import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
 import type { CompanySummary } from '@/api/companies';
 
-// ─── Urgency dot ──────────────────────────────────────────────────────────────
-
-function UrgencyDot({ overdue, urgent }: { overdue: number; urgent: number }) {
-  if (overdue > 0)
-    return <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />;
-  if (urgent > 0)
-    return <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-500 shrink-0" />;
-  return <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" />;
-}
+type StatusFilter = 'all' | 'overdue' | 'urgent' | 'unassigned';
 
 // ─── Company row ──────────────────────────────────────────────────────────────
 
 function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: () => void }) {
+  const hasOverdue = company.overdueTodos > 0;
+  const hasUrgent  = company.urgentTodos > company.overdueTodos;
+
+  const accentClass = hasOverdue
+    ? 'border-l-red-400'
+    : hasUrgent
+    ? 'border-l-amber-400'
+    : 'border-l-border';
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3 hover:bg-muted/50 transition-colors"
+      className={`group w-full text-left flex items-center gap-5 px-5 py-3.5 border-b last:border-b-0 border-l-[3px] ${accentClass} hover:bg-muted/50 transition-colors`}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        <UrgencyDot overdue={company.overdueTodos} urgent={company.urgentTodos} />
-        <div className="min-w-0">
-          <p className="font-medium text-sm truncate">{company.businessName}</p>
-          <p className="text-xs text-muted-foreground">
-            {company.country ?? '—'} ·{' '}
-            {company.assignedUser ? (
-              company.assignedUser.name
-            ) : (
-              <span className="text-orange-600 font-medium">Unassigned</span>
-            )}
-          </p>
-        </div>
+      {/* Name + meta */}
+      <div className="flex-1 flex items-baseline gap-3 min-w-0">
+        <p className="font-medium text-[13px] truncate shrink-0 max-w-[280px]">
+          {company.businessName}
+        </p>
+        <p className="text-[11px] text-muted-foreground truncate hidden sm:block">
+          {company.country ?? '—'}
+          {' · '}
+          {company.assignedUser ? (
+            company.assignedUser.name
+          ) : (
+            <span className="text-orange-500 font-medium">Unassigned</span>
+          )}
+        </p>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
-        {company.overdueTodos > 0 && (
-          <span className="text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+      {/* Status badges */}
+      <div className="flex items-center gap-2 shrink-0">
+        {hasOverdue && (
+          <span className="text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 leading-none">
             {company.overdueTodos} overdue
           </span>
         )}
-        {company.urgentTodos > company.overdueTodos && (
-          <span className="text-xs font-medium text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-0.5">
+        {hasUrgent && (
+          <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-none">
             {company.urgentTodos - company.overdueTodos} urgent
           </span>
         )}
-        <span className="text-xs text-muted-foreground">{company.totalTodos} tasks</span>
-        <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+        <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
+          {company.totalTodos === 0 ? 'no tasks' : `${company.totalTodos} tasks`}
+        </span>
       </div>
+
+      <ChevronRight
+        size={14}
+        className="text-muted-foreground/25 group-hover:text-muted-foreground/60 transition-colors shrink-0"
+      />
     </button>
   );
 }
 
-// ─── Stat card ────────────────────────────────────────────────────────────────
+// ─── Skeleton row ─────────────────────────────────────────────────────────────
 
-function StatCard({
-  label,
-  value,
-  color,
-  icon,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  icon: React.ReactNode;
-}) {
+function SkeletonRow({ wide }: { wide?: boolean }) {
   return (
-    <Card>
-      <CardContent className="pt-5 flex items-start justify-between">
-        <div>
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
-          <p className={`text-3xl font-bold ${color}`}>{value}</p>
-        </div>
-        <div className={`mt-0.5 ${color} opacity-70`}>{icon}</div>
-      </CardContent>
-    </Card>
+    <div className="flex items-center gap-5 px-5 py-3.5 border-b last:border-b-0 border-l-[3px] border-l-border animate-pulse">
+      <div className={`h-3 bg-muted rounded ${wide ? 'w-56' : 'w-40'}`} />
+      <div className="h-2.5 bg-muted rounded w-32 hidden sm:block" />
+      <div className="ml-auto h-2.5 bg-muted rounded w-14" />
+    </div>
+  );
+}
+
+// ─── Stats strip ──────────────────────────────────────────────────────────────
+
+function StatsStrip({
+  count,
+  total,
+  urgent,
+  overdue,
+}: {
+  count: number;
+  total: number;
+  urgent: number;
+  overdue: number;
+}) {
+  const sep = <span className="text-muted-foreground/25 select-none">·</span>;
+  return (
+    <div className="flex items-center gap-2.5 text-[12px] tabular-nums">
+      <span>
+        <span className="font-medium">{count}</span>
+        <span className="text-muted-foreground ml-1">companies</span>
+      </span>
+      {sep}
+      <span>
+        <span className="font-medium">{total}</span>
+        <span className="text-muted-foreground ml-1">open tasks</span>
+      </span>
+      {urgent > 0 && (
+        <>
+          {sep}
+          <span className="font-medium text-amber-600">{urgent}</span>
+          <span className="text-muted-foreground">urgent</span>
+        </>
+      )}
+      {overdue > 0 && (
+        <>
+          {sep}
+          <span className="font-medium text-red-600">{overdue}</span>
+          <span className="text-muted-foreground">overdue</span>
+        </>
+      )}
+    </div>
   );
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type StatusFilter = 'all' | 'overdue' | 'urgent' | 'unassigned';
-
 export function DashboardPage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const isAdmin = user?.role === 'ADMIN';
+  const navigate  = useNavigate();
+  const isAdmin   = user?.role === 'ADMIN';
 
   const { data: companies = [], isLoading } = useCompanies();
 
-  const [search, setSearch] = useState('');
+  const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  const totalTodos = companies.reduce((s, c) => s + c.totalTodos, 0);
-  const urgentTodos = companies.reduce((s, c) => s + c.urgentTodos, 0);
+  const totalTodos   = companies.reduce((s, c) => s + c.totalTodos,   0);
+  const urgentTodos  = companies.reduce((s, c) => s + c.urgentTodos,  0);
   const overdueTodos = companies.reduce((s, c) => s + c.overdueTodos, 0);
-  const unassigned = companies.filter(c => c.assignedUser === null);
-  const noSupportNumber = companies.filter(c => !c.supportNumber);
+  const urgentOnly   = urgentTodos - overdueTodos;
 
   const filteredCompanies = useMemo(() => {
     const q = search.trim().toLowerCase();
     return companies.filter(c => {
       if (q) {
-        const matchesName = c.businessName.toLowerCase().includes(q);
-        const matchesUser = c.assignedUser?.name.toLowerCase().includes(q) ?? false;
-        if (!matchesName && !matchesUser) return false;
+        const name = c.businessName.toLowerCase().includes(q);
+        const user = c.assignedUser?.name.toLowerCase().includes(q) ?? false;
+        if (!name && !user) return false;
       }
       if (isAdmin && statusFilter !== 'all') {
-        if (statusFilter === 'overdue' && c.overdueTodos === 0) return false;
-        if (statusFilter === 'urgent' && c.urgentTodos <= c.overdueTodos) return false;
-        if (statusFilter === 'unassigned' && c.assignedUser !== null) return false;
+        if (statusFilter === 'overdue'    && c.overdueTodos === 0)            return false;
+        if (statusFilter === 'urgent'     && c.urgentTodos <= c.overdueTodos) return false;
+        if (statusFilter === 'unassigned' && c.assignedUser !== null)         return false;
       }
       return true;
     });
@@ -133,129 +165,92 @@ export function DashboardPage() {
 
   const isFiltered = search.trim() !== '' || (isAdmin && statusFilter !== 'all');
 
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month:   'long',
+    day:     'numeric',
+  });
+
   return (
-    <div className="p-6 max-w-4xl mx-auto flex flex-col gap-6">
-      {/* Welcome */}
-      <div>
-        <h2 className="text-2xl font-semibold">Welcome back, {user?.name}</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {isAdmin
-            ? 'All companies and tasks are shown below.'
-            : 'Your assigned companies and tasks are shown below.'}
-        </p>
+    <div className="px-6 py-6 max-w-4xl mx-auto flex flex-col gap-5">
+
+      {/* Page header */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-[15px] font-semibold tracking-tight">
+            {isAdmin ? 'All Companies' : 'My Companies'}
+          </h1>
+          <p className="text-[11px] text-muted-foreground mt-0.5">{today}</p>
+        </div>
+        {!isLoading && (
+          <StatsStrip
+            count={companies.length}
+            total={totalTodos}
+            urgent={urgentOnly}
+            overdue={overdueTodos}
+          />
+        )}
       </div>
 
-      {/* Stats */}
-      {!isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard
-            label="Total Open Tasks"
-            value={totalTodos}
-            color="text-foreground"
-            icon={<CheckCircle2 size={22} />}
+      {/* Search + filter */}
+      <div className="flex items-center gap-2">
+        <div className="relative max-w-xs w-full">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
-          <StatCard
-            label="Urgent (< 5 days)"
-            value={urgentTodos}
-            color="text-yellow-600"
-            icon={<Clock size={22} />}
-          />
-          <StatCard
-            label="Overdue"
-            value={overdueTodos}
-            color="text-red-600"
-            icon={<AlertCircle size={22} />}
+          <Input
+            className="pl-8 h-8 text-[12px]"
+            placeholder="Search companies or assignees…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
           />
         </div>
-      )}
-
-      {/* Unassigned companies banner (admin only) */}
-      {isAdmin && !isLoading && unassigned.length > 0 && (
-        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
-          <AlertCircle className="text-orange-500 shrink-0 mt-0.5" size={18} />
-          <div className="text-sm">
-            <span className="font-semibold text-orange-700">
-              {unassigned.length === 1 ? '1 company has' : `${unassigned.length} companies have`} no assigned user:
-            </span>{' '}
-            <span className="text-orange-700">{unassigned.map(c => c.businessName).join(', ')}</span>
-            <span className="text-orange-600"> — click a company below to assign a user.</span>
-          </div>
-        </div>
-      )}
-
-      {/* No support number banner (admin only) */}
-      {isAdmin && !isLoading && noSupportNumber.length > 0 && (
-        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
-          <AlertCircle className="text-orange-500 shrink-0 mt-0.5" size={18} />
-          <div className="text-sm">
-            <span className="font-semibold text-orange-700">
-              {noSupportNumber.length === 1 ? '1 company has' : `${noSupportNumber.length} companies have`} no support number:
-            </span>{' '}
-            <span className="text-orange-700">{noSupportNumber.map(c => c.businessName).join(', ')}</span>
-            <span className="text-orange-600"> — click a company below to assign one.</span>
-          </div>
-        </div>
-      )}
+        {isAdmin && (
+          <Select
+            value={statusFilter}
+            onValueChange={v => setStatusFilter((v ?? 'all') as StatusFilter)}
+          >
+            <SelectTrigger className="w-28 h-8 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="overdue">Overdue</SelectItem>
+              <SelectItem value="urgent">Urgent</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        {isFiltered && !isLoading && (
+          <span className="text-[11px] text-muted-foreground">
+            {filteredCompanies.length} of {companies.length}
+          </span>
+        )}
+      </div>
 
       {/* Company list */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Building2 size={16} className="text-muted-foreground" />
-          <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-            {isAdmin ? 'All Companies' : 'My Companies'}{' '}
-            ({isFiltered ? `${filteredCompanies.length} of ${companies.length}` : companies.length})
-          </h3>
+      {isLoading ? (
+        <div className="rounded-lg border bg-background overflow-hidden">
+          {[52, 40, 60, 35, 50, 45].map((w, i) => (
+            <SkeletonRow key={i} wide={w > 48} />
+          ))}
         </div>
-
-        {/* Search + filter bar */}
-        {!isLoading && companies.length > 0 && (
-          <div className="flex gap-2 mb-3">
-            <div className="relative flex-1">
-              <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-              <Input
-                className="pl-8"
-                placeholder="Search companies…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            {isAdmin && (
-              <Select
-                value={statusFilter}
-                onValueChange={v => setStatusFilter((v ?? 'all') as StatusFilter)}
-              >
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="overdue">Overdue</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        )}
-
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : filteredCompanies.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {isFiltered ? 'No companies match your search.' : 'No companies found.'}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {filteredCompanies.map(company => (
-              <CompanyRow
-                key={company.id}
-                company={company}
-                onClick={() => navigate(`/companies/${company.id}`)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      ) : filteredCompanies.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-4">
+          {isFiltered ? 'No companies match your search.' : 'No companies yet.'}
+        </p>
+      ) : (
+        <div className="rounded-lg border bg-background overflow-hidden">
+          {filteredCompanies.map(company => (
+            <CompanyRow
+              key={company.id}
+              company={company}
+              onClick={() => navigate(`/companies/${company.id}`)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { formatPhone } from '@/lib/utils';
 import type { FormData } from '../RegisterPage';
 
 interface Props {
@@ -47,8 +48,8 @@ export function Step7Accountant({ data, onChange }: Props) {
             id="accountantPhone"
             type="tel"
             value={data.accountantPhone}
-            onChange={e => onChange({ accountantPhone: e.target.value })}
-            placeholder="+1 (555) 000-0000"
+            onChange={e => onChange({ accountantPhone: formatPhone(e.target.value) })}
+            placeholder="929-545-1253"
           />
         </div>
       </div>

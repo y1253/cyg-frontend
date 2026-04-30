@@ -41,7 +41,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen">
       {/* Top navbar */}
       <header className="h-14 shrink-0 bg-background border-b flex items-center justify-between px-6 z-10">
         <span className="font-bold text-base tracking-tight">CYG Finance</span>
@@ -60,8 +60,8 @@ export function AppLayout() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
+      {/* Sidebar + main — flex-1 with min-h-0 so footer is always visible */}
+      <div className="flex flex-1 min-h-0">
         <aside className="w-52 shrink-0 bg-background border-r flex flex-col">
           <nav className="flex-1 p-3 flex flex-col gap-1 overflow-y-auto">
             <SideNavLink
@@ -86,11 +86,18 @@ export function AppLayout() {
           </nav>
         </aside>
 
-        {/* Main content */}
         <main className="flex-1 overflow-y-auto bg-muted/40">
           <Outlet />
         </main>
       </div>
+
+      {/* Footer — always pinned to bottom */}
+      <footer className="shrink-0 border-t bg-background px-6 py-2">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground/50 tracking-wide">
+          <span>CYG Finance</span>
+          <span>© {new Date().getFullYear()} · Bookkeeping Management Platform</span>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -314,6 +314,16 @@ function TodoRow({
 
 // ─── Info field ───────────────────────────────────────────────────────────────
 
+function formatFiscalYear(date: string | null | undefined): string | null {
+  if (!date) return null;
+  const m = date.match(/^2000-(\d{2})-(\d{2})/);
+  if (!m) return date;
+  return new Date(2000, parseInt(m[1]) - 1, parseInt(m[2])).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 function Field({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
@@ -1153,7 +1163,7 @@ export function CompanyDetailPage() {
                   <Field label="NEQ" value={company.legalInfo.neq} />
                   <Field label="Revenue QC ID" value={company.legalInfo.revenueQcId} />
                   <Field label="CRA BN" value={company.legalInfo.craBn} />
-                  <Field label="Fiscal Year" value={company.legalInfo.fiscalYear} />
+                  <Field label="Fiscal Year" value={formatFiscalYear(company.legalInfo.fiscalYear)} />
                 </CardContent>
               </Card>
             )}

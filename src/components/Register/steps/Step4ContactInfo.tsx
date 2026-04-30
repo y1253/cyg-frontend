@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { formatPhone } from '@/lib/utils';
 import type { FormData } from '../RegisterPage';
 
 interface Props {
@@ -47,8 +48,8 @@ export function Step4ContactInfo({ data, onChange }: Props) {
             id="privatePhone"
             type="tel"
             value={data.privatePhone}
-            onChange={e => onChange({ privatePhone: e.target.value })}
-            placeholder="+1 (555) 000-0000"
+            onChange={e => onChange({ privatePhone: formatPhone(e.target.value) })}
+            placeholder="929-545-1253"
           />
         </div>
       </div>
@@ -61,8 +62,8 @@ export function Step4ContactInfo({ data, onChange }: Props) {
           id="storeNumber"
           type="tel"
           value={data.storeNumber}
-          onChange={e => onChange({ storeNumber: e.target.value })}
-          placeholder="+1 (555) 000-0000"
+          onChange={e => onChange({ storeNumber: formatPhone(e.target.value) })}
+          placeholder="929-545-1253"
         />
       </div>
     </div>
