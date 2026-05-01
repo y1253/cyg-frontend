@@ -146,7 +146,7 @@ export function TasksPage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Delete <span className="font-medium text-foreground">{deleteTask?.title}</span>?
-            Existing company todos for this task will remain.
+            All todos and schedules for this task will be permanently removed.
           </p>
           {deleteMutation.isError && (
             <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
@@ -191,9 +191,17 @@ function TaskRow({
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-background px-4 py-3">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
+          {task.isImportant && (
+            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300">
+              Important
+            </span>
+          )}
           <p className="font-medium text-sm">{task.title}</p>
           {task.isGeneral && (
             <Badge variant="secondary" className="text-xs">General</Badge>
+          )}
+          {task.isGeneral && (
+            <span className="text-xs text-muted-foreground">every {task.defaultCycle}d</span>
           )}
           <span className="text-xs text-muted-foreground">
             {task.openTodos} open {task.openTodos === 1 ? 'todo' : 'todos'}

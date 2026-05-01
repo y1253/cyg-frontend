@@ -5,6 +5,7 @@ import {
   createSchedule,
   updateSchedule,
   toggleSchedule,
+  toggleScheduleImportant,
 } from '@/api/taskSchedules';
 
 export function useTaskSchedules(companyId: number) {
@@ -49,6 +50,17 @@ export function useToggleSchedule(companyId: number) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
       qc.invalidateQueries({ queryKey: ['company', companyId] });
+    },
+  });
+}
+
+export function useToggleScheduleImportant(companyId: number) {
+  const { token } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => toggleScheduleImportant(token!, id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
     },
   });
 }

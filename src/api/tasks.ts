@@ -10,6 +10,8 @@ export interface AppTask {
   description: string | null;
   note: string | null;
   isGeneral: boolean;
+  defaultCycle: number;
+  isImportant: boolean;
   createdAt: string;
   openTodos: number;
 }
@@ -19,6 +21,8 @@ export interface CreateTaskData {
   description?: string;
   note?: string;
   isGeneral?: boolean;
+  defaultCycle?: number;
+  isImportant?: boolean;
 }
 
 export interface UpdateTaskData {
@@ -26,6 +30,8 @@ export interface UpdateTaskData {
   description?: string;
   note?: string;
   isGeneral?: boolean;
+  defaultCycle?: number;
+  isImportant?: boolean;
 }
 
 export interface AssignTaskData {

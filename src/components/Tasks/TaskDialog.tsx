@@ -24,6 +24,8 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
   const [description, setDescription] = useState('');
   const [note, setNote] = useState('');
   const [isGeneral, setIsGeneral] = useState(false);
+  const [defaultCycle, setDefaultCycle] = useState(30);
+  const [isImportant, setIsImportant] = useState(false);
 
   const createMutation = useCreateTask();
   const updateMutation = useUpdateTask();
@@ -36,6 +38,8 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       setDescription(task?.description ?? '');
       setNote(task?.note ?? '');
       setIsGeneral(task?.isGeneral ?? false);
+      setDefaultCycle(task?.defaultCycle ?? 30);
+      setIsImportant(task?.isImportant ?? false);
       createMutation.reset();
       updateMutation.reset();
     }
@@ -51,6 +55,8 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       description: description.trim() || undefined,
       note: note.trim() || undefined,
       isGeneral,
+      defaultCycle,
+      isImportant,
     };
 
     if (isEdit && task) {
@@ -106,6 +112,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             />
           </div>
 
+          {/* General task toggle */}
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
               role="checkbox"
@@ -127,6 +134,50 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
               <p className="text-sm font-medium">General task</p>
               <p className="text-xs text-muted-foreground">
                 Automatically assigned to all companies (current and future)
+              </p>
+            </div>
+          </label>
+
+          {/* Default cycle — only visible for general tasks */}
+          {isGeneral && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="task-default-cycle">Default cycle (days)</Label>
+              <Input
+                id="task-default-cycle"
+                type="number"
+                min={1}
+                value={defaultCycle}
+                onChange={e => setDefaultCycle(Math.max(1, Number(e.target.value) || 1))}
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">
+                How often this task repeats for each company.
+              </p>
+            </div>
+          )}
+
+          {/* Important toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              role="checkbox"
+              aria-checked={isImportant}
+              tabIndex={0}
+              onClick={() => setIsImportant(v => !v)}
+              onKeyDown={e => e.key === ' ' && setIsImportant(v => !v)}
+              className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-ring ${
+                isImportant ? 'bg-amber-500' : 'bg-input'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  isImportant ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Mark as important</p>
+              <p className="text-xs text-muted-foreground">
+                Important tasks are highlighted and sorted to the top in each company.
               </p>
             </div>
           </label>

@@ -55,3 +55,4 @@ export async function removeTodoCycle(token: string, id: number): Promise<void> 
     throw new Error(body.message ?? 'Failed to remove cycle');
   }
 }
+

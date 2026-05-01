@@ -6,6 +6,7 @@ export interface AppTaskSchedule {
   companyId: number;
   cycle: number;
   note: string | null;
+  isImportant: boolean;
   createdAt: string;
   deletedAt: string | null;
   task: { id: number; title: string; description: string | null };
@@ -60,6 +61,18 @@ export async function toggleSchedule(token: string, id: number): Promise<AppTask
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.message ?? 'Failed to toggle schedule');
+  }
+  return res.json();
+}
+
+export async function toggleScheduleImportant(token: string, id: number): Promise<{ id: number; isImportant: boolean }> {
+  const res = await fetch(`${BASE}/${id}/toggle-important`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message ?? 'Failed to toggle important');
   }
   return res.json();
 }

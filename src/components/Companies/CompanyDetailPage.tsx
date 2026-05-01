@@ -28,7 +28,7 @@ import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
-import { useToggleSchedule, useUpdateSchedule } from '@/hooks/useTaskSchedules';
+import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { AddTaskDialog } from './AddTaskDialog';
@@ -58,16 +58,18 @@ const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = 
 };
 
 // Border+bg for open todos
-function rowBg(tier: UrgencyTier, isRecurring: boolean): string {
+function rowBg(tier: UrgencyTier, isRecurring: boolean, isImportant: boolean): string {
   if (isRecurring) {
     if (tier === 'overdue') return 'border-red-300 bg-blue-50/80';
     if (tier === 'soon')    return 'border-orange-300 bg-blue-50/80';
     if (tier === 'warning') return 'border-yellow-300 bg-blue-50/80';
+    if (isImportant)        return 'border-amber-300 bg-blue-50/60';
     return 'border-blue-200 bg-blue-50/60';
   }
   if (tier === 'overdue') return 'border-red-200 bg-red-50';
   if (tier === 'soon')    return 'border-orange-200 bg-orange-50';
   if (tier === 'warning') return 'border-yellow-200 bg-yellow-50';
+  if (isImportant)        return 'border-amber-300 bg-amber-50/50';
   return 'border-border bg-background';
 }
 
@@ -179,6 +181,7 @@ function TodoRow({
   cycleDays,
   scheduleNote,
   isAdmin,
+  isImportant,
   onToggle,
   togglePending,
   onDelete,
@@ -189,6 +192,7 @@ function TodoRow({
   cycleDays: number | null;
   scheduleNote: string | null;
   isAdmin: boolean;
+  isImportant: boolean;
   onToggle: () => void;
   togglePending: boolean;
   onDelete: () => void;
@@ -221,7 +225,7 @@ function TodoRow({
   const badge = urgencyBadge[tier];
   const bg = todo.resolved
     ? 'border-border bg-muted/20 opacity-70'
-    : rowBg(tier, isRecurring);
+    : rowBg(tier, isRecurring, isImportant);
 
   const hasDescription = !!todo.task.description;
   const hasNote = !!scheduleNote;
@@ -254,6 +258,11 @@ function TodoRow({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
+              {isImportant && !todo.resolved && (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300 shrink-0">
+                  Important
+                </span>
+              )}
               <p className={`text-sm font-medium leading-snug ${todo.resolved ? 'line-through text-muted-foreground' : ''}`}>
                 {todo.task.title}
               </p>
@@ -1022,6 +1031,7 @@ function NotesSection({ companyId }: { companyId: number }) {
 function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
   const updateMutation = useUpdateSchedule(companyId);
   const toggleMutation = useToggleSchedule(companyId);
+  const toggleImportantMutation = useToggleScheduleImportant(companyId);
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycle, setEditCycle] = useState('');
@@ -1060,9 +1070,16 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
           className={`shrink-0 mt-1 ${isDisabled ? 'text-muted-foreground' : 'text-blue-500'}`}
         />
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium leading-snug ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
-            {s.task.title}
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className={`text-sm font-medium leading-snug ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
+              {s.task.title}
+            </p>
+            {s.isImportant && !isDisabled && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300">
+                Important
+              </span>
+            )}
+          </div>
           {editId === s.id ? (
             <div className="flex flex-col gap-2 mt-1.5">
               <div className="flex items-center gap-2">
@@ -1129,14 +1146,29 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
         {editId !== s.id && (
           <div className="flex items-center gap-1 shrink-0">
             {!isDisabled && (
-              <button
-                type="button"
-                title="Edit schedule"
-                onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); setEditNote(s.note ?? ''); }}
-                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <Pencil size={13} />
-              </button>
+              <>
+                <button
+                  type="button"
+                  title={s.isImportant ? 'Remove important' : 'Mark as important'}
+                  disabled={toggleImportantMutation.isPending}
+                  onClick={() => toggleImportantMutation.mutate(s.id)}
+                  className={`w-7 h-7 flex items-center justify-center rounded text-xs font-bold transition-colors ${
+                    s.isImportant
+                      ? 'text-amber-600 bg-amber-100 hover:bg-amber-200'
+                      : 'text-muted-foreground hover:text-amber-600 hover:bg-amber-50'
+                  }`}
+                >
+                  !
+                </button>
+                <button
+                  type="button"
+                  title="Edit schedule"
+                  onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); setEditNote(s.note ?? ''); }}
+                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <Pencil size={13} />
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -1306,13 +1338,13 @@ export function CompanyDetailPage() {
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
 
   const regularUsers = users.filter(u => u.role === 'USER');
-  const openTodos = company.todos.filter(t => !t.resolved);
   const resolvedTodos = company.todos.filter(t => t.resolved);
+  // openTodos sorted after scheduleMap is built — see below
 
-  // Build a map: scheduleId → { cycle, note } — active only so disabled schedules don't surface notes
-  const scheduleMap = new Map<number, { cycle: number; note: string | null }>(
+  // Build a map: scheduleId → { cycle, note, isImportant } — active only so disabled schedules don't surface notes
+  const scheduleMap = new Map<number, { cycle: number; note: string | null; isImportant: boolean }>(
     schedules.filter((s: AppTaskSchedule) => !s.deletedAt)
-      .map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note }])
+      .map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note, isImportant: s.isImportant }])
   );
 
   function getCycleDays(todo: TodoItem): number | null {
@@ -1325,6 +1357,16 @@ export function CompanyDetailPage() {
     return scheduleMap.get(todo.scheduleId)?.note ?? null;
   }
 
+  function getScheduleImportant(todo: TodoItem): boolean {
+    if (!todo.scheduleId) return false;
+    return scheduleMap.get(todo.scheduleId)?.isImportant ?? false;
+  }
+
+  const openTodos = company.todos
+    .filter(t => !t.resolved)
+    .sort((a, b) => Number(getScheduleImportant(b)) - Number(getScheduleImportant(a)));
+
+
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
     assignMutation.mutate({ companyId, userId: val === '' ? null : Number(val) });
@@ -1336,6 +1378,7 @@ export function CompanyDetailPage() {
       cycleDays: getCycleDays(todo),
       scheduleNote: getScheduleNote(todo),
       isAdmin,
+      isImportant: getScheduleImportant(todo),
       onToggle: () => resolveMutation.mutate(todo.id),
       togglePending: resolveMutation.isPending,
       onDelete: () => deleteMutation.mutate(todo.id),
