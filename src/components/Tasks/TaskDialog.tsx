@@ -38,6 +38,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
   const [defaultCycleDay, setDefaultCycleDay] = useState(0);
   const [defaultCycleNth, setDefaultCycleNth] = useState(1);
   const [isImportant, setIsImportant] = useState(false);
+  const [canBeDisabled, setCanBeDisabled] = useState(false);
 
   const createMutation = useCreateTask();
   const updateMutation = useUpdateTask();
@@ -53,6 +54,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       setDefaultCycleDay(task?.defaultCycleDay ?? 0);
       setDefaultCycleNth(task?.defaultCycleNth ?? 1);
       setIsImportant(task?.isImportant ?? false);
+      setCanBeDisabled(task?.canBeDisabled ?? false);
       createMutation.reset();
       updateMutation.reset();
     }
@@ -72,6 +74,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       defaultCycleDay: defaultCycleType !== 'DAYS' ? defaultCycleDay : undefined,
       defaultCycleNth: defaultCycleType === 'MONTHLY_WEEKDAY' ? defaultCycleNth : undefined,
       isImportant,
+      canBeDisabled,
     };
 
     if (isEdit && task) {
@@ -228,6 +231,32 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
               <p className="text-sm font-medium">Mark as important</p>
               <p className="text-xs text-muted-foreground">
                 Important tasks are highlighted and sorted to the top in each company.
+              </p>
+            </div>
+          </label>
+
+          {/* Can be disabled toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              role="checkbox"
+              aria-checked={canBeDisabled}
+              tabIndex={0}
+              onClick={() => setCanBeDisabled(v => !v)}
+              onKeyDown={e => e.key === ' ' && setCanBeDisabled(v => !v)}
+              className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-ring ${
+                canBeDisabled ? 'bg-blue-500' : 'bg-input'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  canBeDisabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Allow disabling schedule</p>
+              <p className="text-xs text-muted-foreground">
+                When enabled, admins can disable this task's schedule per company.
               </p>
             </div>
           </label>

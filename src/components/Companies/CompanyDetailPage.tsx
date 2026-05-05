@@ -1297,19 +1297,21 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                 </button>
               </>
             )}
-            <button
-              type="button"
-              title={isDisabled ? 'Enable schedule' : 'Disable schedule'}
-              disabled={toggleMutation.isPending}
-              onClick={() => toggleMutation.mutate(s.id)}
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
-                isDisabled
-                  ? 'text-muted-foreground hover:text-green-600 hover:bg-green-50'
-                  : 'text-muted-foreground hover:text-orange-600 hover:bg-orange-50'
-              }`}
-            >
-              {isDisabled ? <Power size={13} /> : <Ban size={13} />}
-            </button>
+            {s.task.canBeDisabled && (
+              <button
+                type="button"
+                title={isDisabled ? 'Enable schedule' : 'Disable schedule'}
+                disabled={toggleMutation.isPending}
+                onClick={() => toggleMutation.mutate(s.id)}
+                className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+                  isDisabled
+                    ? 'text-muted-foreground hover:text-green-600 hover:bg-green-50'
+                    : 'text-muted-foreground hover:text-orange-600 hover:bg-orange-50'
+                }`}
+              >
+                {isDisabled ? <Power size={13} /> : <Ban size={13} />}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1483,6 +1485,8 @@ export function CompanyDetailPage() {
     .filter(t => !t.resolved)
     .sort((a, b) => Number(getSchedule(b)?.isImportant ?? false) - Number(getSchedule(a)?.isImportant ?? false));
 
+  const importantTodos = openTodos.filter(t => getSchedule(t)?.isImportant ?? false);
+  const otherTodos = openTodos.filter(t => !(getSchedule(t)?.isImportant ?? false));
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
@@ -1544,10 +1548,14 @@ export function CompanyDetailPage() {
         </p>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
             <p className="text-2xl font-bold">{openTodos.length}</p>
             <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
+          </div>
+          <div className="rounded-lg border bg-background px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-amber-600">{importantTodos.length}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Important</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
             <p className="text-2xl font-bold text-yellow-600">
@@ -1919,7 +1927,20 @@ export function CompanyDetailPage() {
               <p className="text-sm text-muted-foreground">All tasks resolved.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {openTodos.map(todo => (
+                {importantTodos.length > 0 && (
+                  <>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 px-1">
+                      Important · {importantTodos.length}
+                    </p>
+                    {importantTodos.map(todo => (
+                      <TodoRow key={todo.id} {...todoRowProps(todo)} />
+                    ))}
+                    {otherTodos.length > 0 && (
+                      <div className="border-t border-border my-1" />
+                    )}
+                  </>
+                )}
+                {otherTodos.map(todo => (
                   <TodoRow key={todo.id} {...todoRowProps(todo)} />
                 ))}
               </div>

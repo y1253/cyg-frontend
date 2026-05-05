@@ -106,6 +106,9 @@ export function TasksPage() {
               onToggleImportant={() =>
                 updateMutation.mutate({ id: task.id, data: { isImportant: !task.isImportant } })
               }
+              onToggleCanBeDisabled={() =>
+                updateMutation.mutate({ id: task.id, data: { canBeDisabled: !task.canBeDisabled } })
+              }
             />
           ))}
         </div>
@@ -172,12 +175,14 @@ function TaskRow({
   onDelete,
   onAssign,
   onToggleImportant,
+  onToggleCanBeDisabled,
 }: {
   task: AppTask;
   onEdit: () => void;
   onDelete: () => void;
   onAssign: () => void;
   onToggleImportant: () => void;
+  onToggleCanBeDisabled: () => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-background px-4 py-3">
@@ -205,6 +210,17 @@ function TaskRow({
           }`}
         >
           Important
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCanBeDisabled}
+          className={`h-7 px-2 rounded text-[11px] font-semibold transition-colors ${
+            task.canBeDisabled
+              ? 'text-blue-700 bg-blue-100 hover:bg-blue-200 border border-blue-300'
+              : 'text-muted-foreground hover:text-blue-700 hover:bg-blue-50 border border-transparent'
+          }`}
+        >
+          Can disable
         </button>
         <Button
           variant="ghost"

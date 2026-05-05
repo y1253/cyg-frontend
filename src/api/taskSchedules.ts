@@ -14,7 +14,7 @@ export interface AppTaskSchedule {
   isImportant: boolean;
   createdAt: string;
   deletedAt: string | null;
-  task: { id: number; title: string; description: string | null };
+  task: { id: number; title: string; description: string | null; canBeDisabled: boolean };
 }
 
 export async function fetchSchedulesByCompany(token: string, companyId: number): Promise<AppTaskSchedule[]> {

@@ -17,6 +17,7 @@ export interface AppTask {
   defaultCycleDay?: number | null;
   defaultCycleNth?: number | null;
   isImportant: boolean;
+  canBeDisabled: boolean;
   createdAt: string;
   openTodos: number;
 }
@@ -30,6 +31,7 @@ export interface CreateTaskData {
   defaultCycleDay?: number;
   defaultCycleNth?: number;
   isImportant?: boolean;
+  canBeDisabled?: boolean;
 }
 
 export interface UpdateTaskData {
@@ -41,6 +43,7 @@ export interface UpdateTaskData {
   defaultCycleDay?: number;
   defaultCycleNth?: number;
   isImportant?: boolean;
+  canBeDisabled?: boolean;
 }
 
 export interface AssignTaskData {
