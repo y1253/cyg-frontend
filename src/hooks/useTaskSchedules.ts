@@ -6,6 +6,7 @@ import {
   updateSchedule,
   toggleSchedule,
   toggleScheduleImportant,
+  type CycleType,
 } from '@/api/taskSchedules';
 
 export function useTaskSchedules(companyId: number) {
@@ -34,8 +35,21 @@ export function useUpdateSchedule(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, cycle, note }: { id: number; cycle?: number; note?: string | null }) =>
-      updateSchedule(token!, id, { cycle, note }),
+    mutationFn: ({
+      id,
+      cycle,
+      cycleType,
+      cycleDay,
+      cycleNth,
+      note,
+    }: {
+      id: number;
+      cycle?: number;
+      cycleType?: CycleType;
+      cycleDay?: number | null;
+      cycleNth?: number | null;
+      note?: string | null;
+    }) => updateSchedule(token!, id, { cycle, cycleType, cycleDay, cycleNth, note }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
     },

@@ -8,13 +8,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useCreateTask, useUpdateTask } from '@/hooks/useTasks';
-import type { AppTask } from '@/api/tasks';
+import type { AppTask, TaskCycleType } from '@/api/tasks';
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+function ordinal(n: number) { return ORDINALS[n] ?? `${n}th`; }
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task?: AppTask | null; // null/undefined = create mode
+  task?: AppTask | null;
 }
 
 export function TaskDialog({ open, onOpenChange, task }: Props) {
@@ -22,9 +33,10 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [note, setNote] = useState('');
-  const [isGeneral, setIsGeneral] = useState(false);
+  const [defaultCycleType, setDefaultCycleType] = useState<TaskCycleType>('DAYS');
   const [defaultCycle, setDefaultCycle] = useState(30);
+  const [defaultCycleDay, setDefaultCycleDay] = useState(0);
+  const [defaultCycleNth, setDefaultCycleNth] = useState(1);
   const [isImportant, setIsImportant] = useState(false);
 
   const createMutation = useCreateTask();
@@ -36,9 +48,10 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
     if (open) {
       setTitle(task?.title ?? '');
       setDescription(task?.description ?? '');
-      setNote(task?.note ?? '');
-      setIsGeneral(task?.isGeneral ?? false);
+      setDefaultCycleType(task?.defaultCycleType ?? 'DAYS');
       setDefaultCycle(task?.defaultCycle ?? 30);
+      setDefaultCycleDay(task?.defaultCycleDay ?? 0);
+      setDefaultCycleNth(task?.defaultCycleNth ?? 1);
       setIsImportant(task?.isImportant ?? false);
       createMutation.reset();
       updateMutation.reset();
@@ -53,9 +66,11 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
     const data = {
       title: title.trim(),
       description: description.trim() || undefined,
-      note: note.trim() || undefined,
-      isGeneral,
-      defaultCycle,
+      isGeneral: true,
+      defaultCycleType,
+      defaultCycle: defaultCycleType === 'DAYS' ? defaultCycle : undefined,
+      defaultCycleDay: defaultCycleType !== 'DAYS' ? defaultCycleDay : undefined,
+      defaultCycleNth: defaultCycleType === 'MONTHLY_WEEKDAY' ? defaultCycleNth : undefined,
       isImportant,
     };
 
@@ -100,61 +115,96 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <textarea
-              id="task-note"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="Extra reminder shown on every occurrence of this task…"
-              rows={2}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-            />
+          {/* Default recurrence */}
+          <div className="flex flex-col gap-2">
+            <Label>Default recurrence</Label>
+            <Select value={defaultCycleType} onValueChange={v => setDefaultCycleType(v as TaskCycleType)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DAYS">Every N days</SelectItem>
+                <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
+                <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
+                <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {defaultCycleType === 'DAYS' && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={defaultCycle}
+                  onChange={e => setDefaultCycle(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+              </div>
+            )}
+
+            {defaultCycleType === 'MONTHLY_DATE' && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Day</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={defaultCycleDay}
+                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">of each month</span>
+              </div>
+            )}
+
+            {defaultCycleType === 'WEEKLY_DAY' && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Select value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WEEKDAYS.map((day, i) => (
+                      <SelectItem key={i} value={String(i)}>{day}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {defaultCycleType === 'MONTHLY_WEEKDAY' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Select value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
+                  <SelectTrigger className="w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4].map(n => (
+                      <SelectItem key={n} value={String(n)}>{ordinal(n)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WEEKDAYS.map((day, i) => (
+                      <SelectItem key={i} value={String(i)}>{day}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              How often this task repeats for each company.
+            </p>
           </div>
-
-          {/* General task toggle */}
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <div
-              role="checkbox"
-              aria-checked={isGeneral}
-              tabIndex={0}
-              onClick={() => setIsGeneral(v => !v)}
-              onKeyDown={e => e.key === ' ' && setIsGeneral(v => !v)}
-              className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-ring ${
-                isGeneral ? 'bg-primary' : 'bg-input'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  isGeneral ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </div>
-            <div>
-              <p className="text-sm font-medium">General task</p>
-              <p className="text-xs text-muted-foreground">
-                Automatically assigned to all companies (current and future)
-              </p>
-            </div>
-          </label>
-
-          {/* Default cycle — only visible for general tasks */}
-          {isGeneral && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-default-cycle">Default cycle (days)</Label>
-              <Input
-                id="task-default-cycle"
-                type="number"
-                min={1}
-                value={defaultCycle}
-                onChange={e => setDefaultCycle(Math.max(1, Number(e.target.value) || 1))}
-                className="w-32"
-              />
-              <p className="text-xs text-muted-foreground">
-                How often this task repeats for each company.
-              </p>
-            </div>
-          )}
 
           {/* Important toggle */}
           <label className="flex items-center gap-3 cursor-pointer select-none">

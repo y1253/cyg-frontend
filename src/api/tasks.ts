@@ -4,6 +4,8 @@ function authHeaders(token: string) {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
+export type TaskCycleType = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY';
+
 export interface AppTask {
   id: number;
   title: string;
@@ -11,6 +13,9 @@ export interface AppTask {
   note: string | null;
   isGeneral: boolean;
   defaultCycle: number;
+  defaultCycleType?: TaskCycleType;
+  defaultCycleDay?: number | null;
+  defaultCycleNth?: number | null;
   isImportant: boolean;
   createdAt: string;
   openTodos: number;
@@ -19,18 +24,22 @@ export interface AppTask {
 export interface CreateTaskData {
   title: string;
   description?: string;
-  note?: string;
   isGeneral?: boolean;
   defaultCycle?: number;
+  defaultCycleType?: TaskCycleType;
+  defaultCycleDay?: number;
+  defaultCycleNth?: number;
   isImportant?: boolean;
 }
 
 export interface UpdateTaskData {
   title?: string;
   description?: string;
-  note?: string;
   isGeneral?: boolean;
   defaultCycle?: number;
+  defaultCycleType?: TaskCycleType;
+  defaultCycleDay?: number;
+  defaultCycleNth?: number;
   isImportant?: boolean;
 }
 

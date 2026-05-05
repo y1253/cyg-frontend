@@ -1,31 +1,38 @@
 import { useMemo, useState } from 'react';
 import { Pencil, Plus, Trash2, Building2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useTasks, useDeleteTask } from '@/hooks/useTasks';
+import { useTasks, useDeleteTask, useUpdateTask } from '@/hooks/useTasks';
 import { TaskDialog } from './TaskDialog';
 import { AssignTaskDialog } from './AssignTaskDialog';
 import type { AppTask } from '@/api/tasks';
 
-type TypeFilter = 'all' | 'general' | 'specific';
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+
+function formatTaskCycle(task: AppTask): string {
+  switch (task.defaultCycleType) {
+    case 'MONTHLY_DATE':
+      return `Every ${ORDINALS[task.defaultCycleDay ?? 1] ?? `${task.defaultCycleDay}th`} of the month`;
+    case 'WEEKLY_DAY':
+      return `Every ${WEEKDAYS[task.defaultCycleDay ?? 0]}`;
+    case 'MONTHLY_WEEKDAY':
+      return `Every ${ORDINALS[task.defaultCycleNth ?? 1] ?? `${task.defaultCycleNth}th`} ${WEEKDAYS[task.defaultCycleDay ?? 0]}`;
+    default:
+      return `Every ${task.defaultCycle}d`;
+  }
+}
 
 export function TasksPage() {
   const { data: tasks = [], isLoading } = useTasks();
   const deleteMutation = useDeleteTask();
+  const updateMutation = useUpdateTask();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTask, setEditTask] = useState<AppTask | null>(null);
@@ -33,23 +40,18 @@ export function TasksPage() {
   const [deleteTask, setDeleteTask] = useState<AppTask | null>(null);
 
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
+    if (!q) return tasks;
     return tasks.filter(t => {
-      if (q) {
-        const matchesTitle = t.title.toLowerCase().includes(q);
-        const matchesDesc = t.description?.toLowerCase().includes(q) ?? false;
-        if (!matchesTitle && !matchesDesc) return false;
-      }
-      if (typeFilter === 'general' && !t.isGeneral) return false;
-      if (typeFilter === 'specific' && t.isGeneral) return false;
-      return true;
+      const matchesTitle = t.title.toLowerCase().includes(q);
+      const matchesDesc = t.description?.toLowerCase().includes(q) ?? false;
+      return matchesTitle || matchesDesc;
     });
-  }, [tasks, search, typeFilter]);
+  }, [tasks, search]);
 
-  const isFiltered = search.trim() !== '' || typeFilter !== 'all';
+  const isFiltered = search.trim() !== '';
 
   function handleDeleteConfirm() {
     if (!deleteTask) return;
@@ -73,31 +75,16 @@ export function TasksPage() {
         </Button>
       </div>
 
-      {/* Search + type filter */}
+      {/* Search */}
       {!isLoading && tasks.length > 0 && (
-        <div className="flex gap-2 mb-4">
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              placeholder="Search tasks…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <Select
-            value={typeFilter}
-            onValueChange={v => setTypeFilter((v ?? 'all') as TypeFilter)}
-          >
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
-              <SelectItem value="general">General</SelectItem>
-              <SelectItem value="specific">Specific</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="relative mb-4">
+          <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder="Search tasks…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
       )}
 
@@ -116,6 +103,9 @@ export function TasksPage() {
               onEdit={() => setEditTask(task)}
               onDelete={() => setDeleteTask(task)}
               onAssign={() => setAssignTask(task)}
+              onToggleImportant={() =>
+                updateMutation.mutate({ id: task.id, data: { isImportant: !task.isImportant } })
+              }
             />
           ))}
         </div>
@@ -181,28 +171,20 @@ function TaskRow({
   onEdit,
   onDelete,
   onAssign,
+  onToggleImportant,
 }: {
   task: AppTask;
   onEdit: () => void;
   onDelete: () => void;
   onAssign: () => void;
+  onToggleImportant: () => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-background px-4 py-3">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          {task.isImportant && (
-            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300">
-              Important
-            </span>
-          )}
           <p className="font-medium text-sm">{task.title}</p>
-          {task.isGeneral && (
-            <Badge variant="secondary" className="text-xs">General</Badge>
-          )}
-          {task.isGeneral && (
-            <span className="text-xs text-muted-foreground">every {task.defaultCycle}d</span>
-          )}
+          <span className="text-xs text-muted-foreground">{formatTaskCycle(task)}</span>
           <span className="text-xs text-muted-foreground">
             {task.openTodos} open {task.openTodos === 1 ? 'todo' : 'todos'}
           </span>
@@ -213,6 +195,17 @@ function TaskRow({
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={onToggleImportant}
+          className={`h-7 px-2 rounded text-[11px] font-semibold transition-colors ${
+            task.isImportant
+              ? 'text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300'
+              : 'text-muted-foreground hover:text-amber-700 hover:bg-amber-50 border border-transparent'
+          }`}
+        >
+          Important
+        </button>
         <Button
           variant="ghost"
           size="sm"

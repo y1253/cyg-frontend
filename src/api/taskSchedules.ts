@@ -1,10 +1,15 @@
 const BASE = '/api/task-schedules';
 
+export type CycleType = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY';
+
 export interface AppTaskSchedule {
   id: number;
   taskId: number;
   companyId: number;
   cycle: number;
+  cycleType: CycleType;
+  cycleDay: number | null;
+  cycleNth: number | null;
   note: string | null;
   isImportant: boolean;
   createdAt: string;
@@ -39,7 +44,13 @@ export async function createSchedule(
 export async function updateSchedule(
   token: string,
   id: number,
-  data: { cycle?: number; note?: string | null },
+  data: {
+    cycle?: number;
+    cycleType?: CycleType;
+    cycleDay?: number | null;
+    cycleNth?: number | null;
+    note?: string | null;
+  },
 ): Promise<AppTaskSchedule> {
   const res = await fetch(`${BASE}/${id}`, {
     method: 'PATCH',

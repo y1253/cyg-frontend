@@ -80,17 +80,40 @@ function formatDate(iso: string | null) {
   });
 }
 
+// ─── Cycle format helpers ─────────────────────────────────────────────────────
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+
+function ordinal(n: number): string {
+  return ORDINALS[n] ?? `${n}th`;
+}
+
+function formatCycle(s: AppTaskSchedule): string {
+  switch (s.cycleType) {
+    case 'MONTHLY_DATE':
+      return `Every ${ordinal(s.cycleDay ?? 1)} of the month`;
+    case 'WEEKLY_DAY':
+      return `Every ${WEEKDAYS[s.cycleDay ?? 0]}`;
+    case 'MONTHLY_WEEKDAY':
+      return `Every ${ordinal(s.cycleNth ?? 1)} ${WEEKDAYS[s.cycleDay ?? 0]}`;
+    default:
+      return `Every ${s.cycle} days`;
+  }
+}
+
 // ─── Cycle badge (circular) ───────────────────────────────────────────────────
 
-function CycleBadge({ days }: { days: number }) {
+function CycleBadge({ schedule }: { schedule: AppTaskSchedule }) {
+  const label = formatCycle(schedule);
   return (
     <span
-      title={`Repeats every ${days} days`}
+      title={label}
       className="w-9 h-9 rounded-full bg-blue-100 border-2 border-blue-300 text-blue-700
                  flex flex-col items-center justify-center shrink-0 leading-none gap-0.5"
     >
       <RefreshCw size={9} />
-      <span className="text-[9px] font-bold">{days}d</span>
+      <span className="text-[9px] font-bold leading-tight text-center px-0.5">{label.replace('Every ', '')}</span>
     </span>
   );
 }
@@ -178,7 +201,7 @@ function CompletionCheckbox({
 
 function TodoRow({
   todo,
-  cycleDays,
+  schedule,
   scheduleNote,
   isAdmin,
   isImportant,
@@ -189,7 +212,7 @@ function TodoRow({
   onRemoveCycle,
 }: {
   todo: TodoItem;
-  cycleDays: number | null;
+  schedule: AppTaskSchedule | null;
   scheduleNote: string | null;
   isAdmin: boolean;
   isImportant: boolean;
@@ -214,7 +237,7 @@ function TodoRow({
   useEffect(() => {
     if (!prevResolved.current && todo.resolved) {
       setRowPulse(true);
-      const t = setTimeout(() => setRowPulse(false), 800);
+      const t = setTimeout(() => setRowPulse(false), 1600);
       return () => clearTimeout(t);
     }
     prevResolved.current = todo.resolved;
@@ -233,7 +256,7 @@ function TodoRow({
   function handleToggle() {
     if (!todo.resolved) {
       setCelebrating(true);
-      setTimeout(() => setCelebrating(false), 800);
+      setTimeout(() => setCelebrating(false), 1200);
     }
     onToggle();
   }
@@ -251,8 +274,8 @@ function TodoRow({
           />
 
           {/* Cycle badge */}
-          {isRecurring && cycleDays && !todo.resolved && (
-            <CycleBadge days={cycleDays} />
+          {isRecurring && schedule && !todo.resolved && (
+            <CycleBadge schedule={schedule} />
           )}
 
           {/* Content */}
@@ -1028,13 +1051,18 @@ function NotesSection({ companyId }: { companyId: number }) {
 
 // ─── Schedules section (admin only) ──────────────────────────────────────────
 
+type CycleTypeLocal = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY';
+
 function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
   const updateMutation = useUpdateSchedule(companyId);
   const toggleMutation = useToggleSchedule(companyId);
   const toggleImportantMutation = useToggleScheduleImportant(companyId);
 
   const [editId, setEditId] = useState<number | null>(null);
+  const [editCycleType, setEditCycleType] = useState<CycleTypeLocal>('DAYS');
   const [editCycle, setEditCycle] = useState('');
+  const [editCycleDay, setEditCycleDay] = useState(0);
+  const [editCycleNth, setEditCycleNth] = useState(1);
   const [editNote, setEditNote] = useState('');
   const [search, setSearch] = useState('');
 
@@ -1082,18 +1110,90 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
           </div>
           {editId === s.id ? (
             <div className="flex flex-col gap-2 mt-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Every</span>
-                <Input
-                  type="number"
-                  min={1}
-                  value={editCycle}
-                  onChange={e => setEditCycle(e.target.value)}
-                  className="h-7 w-20 text-xs px-2"
-                  autoFocus
-                />
-                <span className="text-xs text-muted-foreground">days</span>
-              </div>
+              {/* Cycle type selector */}
+              <Select value={editCycleType} onValueChange={v => setEditCycleType(v as CycleTypeLocal)}>
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DAYS">Every N days</SelectItem>
+                  <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
+                  <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
+                  <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Contextual cycle inputs */}
+              {editCycleType === 'DAYS' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Every</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={editCycle}
+                    onChange={e => setEditCycle(e.target.value)}
+                    className="h-7 w-20 text-xs px-2"
+                    autoFocus
+                  />
+                  <span className="text-xs text-muted-foreground">days</span>
+                </div>
+              )}
+              {editCycleType === 'MONTHLY_DATE' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Day</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={editCycleDay}
+                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                    className="h-7 w-20 text-xs px-2"
+                    autoFocus
+                  />
+                  <span className="text-xs text-muted-foreground">of each month</span>
+                </div>
+              )}
+              {editCycleType === 'WEEKLY_DAY' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Every</span>
+                  <Select value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
+                    <SelectTrigger className="h-7 text-xs w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEEKDAYS.map((day, i) => (
+                        <SelectItem key={i} value={String(i)}>{day}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {editCycleType === 'MONTHLY_WEEKDAY' && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground">Every</span>
+                  <Select value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
+                    <SelectTrigger className="h-7 text-xs w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4].map(n => (
+                        <SelectItem key={n} value={String(n)}>{ordinal(n)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
+                    <SelectTrigger className="h-7 text-xs w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEEKDAYS.map((day, i) => (
+                        <SelectItem key={i} value={String(i)}>{day}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <textarea
                 value={editNote}
                 onChange={e => setEditNote(e.target.value)}
@@ -1107,13 +1207,33 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                   className="h-7 text-xs px-2"
                   disabled={updateMutation.isPending}
                   onClick={() => {
-                    const n = Number(editCycle);
-                    if (n >= 1) {
-                      updateMutation.mutate(
-                        { id: s.id, cycle: n, note: editNote.trim() || null },
-                        { onSuccess: () => setEditId(null) },
-                      );
+                    const payload: {
+                      id: number;
+                      cycleType: CycleTypeLocal;
+                      cycle?: number;
+                      cycleDay?: number | null;
+                      cycleNth?: number | null;
+                      note: string | null;
+                    } = { id: s.id, cycleType: editCycleType, note: editNote.trim() || null };
+
+                    if (editCycleType === 'DAYS') {
+                      const n = Number(editCycle);
+                      if (n < 1) return;
+                      payload.cycle = n;
+                      payload.cycleDay = null;
+                      payload.cycleNth = null;
+                    } else if (editCycleType === 'MONTHLY_DATE') {
+                      payload.cycleDay = editCycleDay;
+                      payload.cycleNth = null;
+                    } else if (editCycleType === 'WEEKLY_DAY') {
+                      payload.cycleDay = editCycleDay;
+                      payload.cycleNth = null;
+                    } else {
+                      payload.cycleDay = editCycleDay;
+                      payload.cycleNth = editCycleNth;
                     }
+
+                    updateMutation.mutate(payload as any, { onSuccess: () => setEditId(null) });
                   }}
                 >
                   {updateMutation.isPending ? 'Saving…' : 'Save'}
@@ -1125,7 +1245,7 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
             </div>
           ) : (
             <div className="mt-0.5">
-              <p className="text-xs text-muted-foreground">Every {s.cycle} days</p>
+              <p className="text-xs text-muted-foreground">{formatCycle(s)}</p>
               {s.note && (
                 <p className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
                   isDisabled
@@ -1163,7 +1283,14 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                 <button
                   type="button"
                   title="Edit schedule"
-                  onClick={() => { setEditId(s.id); setEditCycle(String(s.cycle)); setEditNote(s.note ?? ''); }}
+                  onClick={() => {
+                    setEditId(s.id);
+                    setEditCycleType(s.cycleType as CycleTypeLocal);
+                    setEditCycle(String(s.cycle));
+                    setEditCycleDay(s.cycleDay ?? 0);
+                    setEditCycleNth(s.cycleNth ?? 1);
+                    setEditNote(s.note ?? '');
+                  }}
                   className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
                   <Pencil size={13} />
@@ -1341,30 +1468,20 @@ export function CompanyDetailPage() {
   const resolvedTodos = company.todos.filter(t => t.resolved);
   // openTodos sorted after scheduleMap is built — see below
 
-  // Build a map: scheduleId → { cycle, note, isImportant } — active only so disabled schedules don't surface notes
-  const scheduleMap = new Map<number, { cycle: number; note: string | null; isImportant: boolean }>(
+  // Build a map: scheduleId → schedule — active only so disabled schedules don't surface notes
+  const scheduleMap = new Map<number, AppTaskSchedule>(
     schedules.filter((s: AppTaskSchedule) => !s.deletedAt)
-      .map((s: AppTaskSchedule) => [s.id, { cycle: s.cycle, note: s.note, isImportant: s.isImportant }])
+      .map((s: AppTaskSchedule) => [s.id, s])
   );
 
-  function getCycleDays(todo: TodoItem): number | null {
+  function getSchedule(todo: TodoItem): AppTaskSchedule | null {
     if (!todo.scheduleId) return null;
-    return scheduleMap.get(todo.scheduleId)?.cycle ?? null;
-  }
-
-  function getScheduleNote(todo: TodoItem): string | null {
-    if (!todo.scheduleId) return null;
-    return scheduleMap.get(todo.scheduleId)?.note ?? null;
-  }
-
-  function getScheduleImportant(todo: TodoItem): boolean {
-    if (!todo.scheduleId) return false;
-    return scheduleMap.get(todo.scheduleId)?.isImportant ?? false;
+    return scheduleMap.get(todo.scheduleId) ?? null;
   }
 
   const openTodos = company.todos
     .filter(t => !t.resolved)
-    .sort((a, b) => Number(getScheduleImportant(b)) - Number(getScheduleImportant(a)));
+    .sort((a, b) => Number(getSchedule(b)?.isImportant ?? false) - Number(getSchedule(a)?.isImportant ?? false));
 
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -1373,12 +1490,13 @@ export function CompanyDetailPage() {
   }
 
   function todoRowProps(todo: TodoItem) {
+    const sched = getSchedule(todo);
     return {
       todo,
-      cycleDays: getCycleDays(todo),
-      scheduleNote: getScheduleNote(todo),
+      schedule: sched,
+      scheduleNote: sched?.note ?? null,
       isAdmin,
-      isImportant: getScheduleImportant(todo),
+      isImportant: sched?.isImportant ?? false,
       onToggle: () => resolveMutation.mutate(todo.id),
       togglePending: resolveMutation.isPending,
       onDelete: () => deleteMutation.mutate(todo.id),
