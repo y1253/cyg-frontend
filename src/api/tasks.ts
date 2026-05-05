@@ -47,6 +47,7 @@ export interface AssignTaskData {
   companyId: number;
   dueDate?: string;
   cycle?: number;
+  note?: string;
 }
 
 async function throwOnError(res: Response) {

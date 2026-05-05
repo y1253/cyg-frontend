@@ -222,7 +222,7 @@ function TodoRow({
   onSetCycle: (cycle: number) => void;
   onRemoveCycle: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [addCycleOpen, setAddCycleOpen] = useState(false);
   const [cycleInput, setCycleInput] = useState('30');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1494,7 +1494,7 @@ export function CompanyDetailPage() {
     return {
       todo,
       schedule: sched,
-      scheduleNote: sched?.note ?? null,
+      scheduleNote: sched?.note ?? todo.note ?? null,
       isAdmin,
       isImportant: sched?.isImportant ?? false,
       onToggle: () => resolveMutation.mutate(todo.id),

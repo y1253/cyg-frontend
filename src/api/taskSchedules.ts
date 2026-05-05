@@ -27,7 +27,15 @@ export async function fetchSchedulesByCompany(token: string, companyId: number):
 
 export async function createSchedule(
   token: string,
-  data: { taskId: number; companyId: number; cycle: number; note?: string },
+  data: {
+    taskId: number;
+    companyId: number;
+    cycle?: number;
+    cycleType?: CycleType;
+    cycleDay?: number;
+    cycleNth?: number;
+    note?: string;
+  },
 ): Promise<AppTaskSchedule> {
   const res = await fetch(BASE, {
     method: 'POST',

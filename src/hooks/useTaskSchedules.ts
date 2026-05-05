@@ -22,8 +22,15 @@ export function useCreateSchedule(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { taskId: number; companyId: number; cycle: number; note?: string }) =>
-      createSchedule(token!, data),
+    mutationFn: (data: {
+      taskId: number;
+      companyId: number;
+      cycle?: number;
+      cycleType?: CycleType;
+      cycleDay?: number;
+      cycleNth?: number;
+      note?: string;
+    }) => createSchedule(token!, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
       qc.invalidateQueries({ queryKey: ['company', companyId] });
