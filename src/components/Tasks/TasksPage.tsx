@@ -15,6 +15,7 @@ import type { AppTask } from '@/api/tasks';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatTaskCycle(task: AppTask): string {
   switch (task.defaultCycleType) {
@@ -24,6 +25,10 @@ function formatTaskCycle(task: AppTask): string {
       return `Every ${WEEKDAYS[task.defaultCycleDay ?? 0]}`;
     case 'MONTHLY_WEEKDAY':
       return `Every ${ORDINALS[task.defaultCycleNth ?? 1] ?? `${task.defaultCycleNth}th`} ${WEEKDAYS[task.defaultCycleDay ?? 0]}`;
+    case 'QUARTERLY':
+      return `Every quarter (${ORDINALS[task.defaultCycleDay ?? 1] ?? `${task.defaultCycleDay}th`} of month)`;
+    case 'YEARLY':
+      return `Yearly on ${MONTHS[(task.defaultCycleNth ?? 1) - 1]} ${ORDINALS[task.defaultCycleDay ?? 1] ?? `${task.defaultCycleDay}th`}`;
     default:
       return `Every ${task.defaultCycle}d`;
   }

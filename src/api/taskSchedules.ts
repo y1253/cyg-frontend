@@ -1,6 +1,6 @@
 const BASE = '/api/task-schedules';
 
-export type CycleType = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY';
+export type CycleType = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY' | 'QUARTERLY' | 'YEARLY';
 
 export interface AppTaskSchedule {
   id: number;

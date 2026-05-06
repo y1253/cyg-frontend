@@ -15,6 +15,7 @@ import type { CycleType } from "@/api/taskSchedules";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ORDINALS = ["1st", "2nd", "3rd", "4th"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 interface Props {
   open: boolean;
@@ -71,6 +72,12 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
     }
     if (cycleType === "WEEKLY_DAY") {
       return { ...base, cycleDay: Number(cycleDay) };
+    }
+    if (cycleType === "QUARTERLY") {
+      return { ...base, cycleDay: Number(cycleDay) };
+    }
+    if (cycleType === "YEARLY") {
+      return { ...base, cycleDay: Number(cycleDay), cycleNth: Number(cycleNth) };
     }
     // MONTHLY_WEEKDAY
     return { ...base, cycleDay: Number(cycleDay), cycleNth: Number(cycleNth) };
@@ -166,6 +173,8 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                   <option value="MONTHLY_DATE">Monthly — specific date</option>
                   <option value="WEEKLY_DAY">Weekly — specific day</option>
                   <option value="MONTHLY_WEEKDAY">Monthly — Nth weekday</option>
+                  <option value="QUARTERLY">Quarterly — specific date</option>
+                  <option value="YEARLY">Yearly — specific date</option>
                 </select>
               </div>
 
@@ -257,6 +266,61 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Repeats on the {ORDINALS[Number(cycleNth) - 1]} {WEEKDAYS[Number(cycleDay)]} of each month.
+                  </p>
+                </div>
+              )}
+
+              {cycleType === "QUARTERLY" && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="add-cycle-quarterly">Day of month</Label>
+                  <select
+                    id="add-cycle-quarterly"
+                    value={cycleDay}
+                    onChange={(e) => setCycleDay(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Repeats every 3 months on the {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
+                  </p>
+                </div>
+              )}
+
+              {cycleType === "YEARLY" && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex gap-3">
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Label htmlFor="add-cycle-yearly-month">Month</Label>
+                      <select
+                        id="add-cycle-yearly-month"
+                        value={cycleNth}
+                        onChange={(e) => setCycleNth(e.target.value)}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {MONTHS.map((m, i) => (
+                          <option key={i + 1} value={i + 1}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Label htmlFor="add-cycle-yearly-day">Day</Label>
+                      <select
+                        id="add-cycle-yearly-day"
+                        value={cycleDay}
+                        onChange={(e) => setCycleDay(e.target.value)}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Repeats every year on {MONTHS[Number(cycleNth) - 1]} {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
                   </p>
                 </div>
               )}

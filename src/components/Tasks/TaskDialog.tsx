@@ -20,6 +20,7 @@ import type { AppTask, TaskCycleType } from '@/api/tasks';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function ordinal(n: number) { return ORDINALS[n] ?? `${n}th`; }
 
 interface Props {
@@ -72,7 +73,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       defaultCycleType,
       defaultCycle: defaultCycleType === 'DAYS' ? defaultCycle : undefined,
       defaultCycleDay: defaultCycleType !== 'DAYS' ? defaultCycleDay : undefined,
-      defaultCycleNth: defaultCycleType === 'MONTHLY_WEEKDAY' ? defaultCycleNth : undefined,
+      defaultCycleNth: (defaultCycleType === 'MONTHLY_WEEKDAY' || defaultCycleType === 'YEARLY') ? defaultCycleNth : undefined,
       isImportant,
       canBeDisabled,
     };
@@ -130,6 +131,8 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
                 <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
                 <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
                 <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
+                <SelectItem value="QUARTERLY">Quarterly — specific date</SelectItem>
+                <SelectItem value="YEARLY">Yearly — specific date</SelectItem>
               </SelectContent>
             </Select>
 
@@ -201,6 +204,44 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {defaultCycleType === 'QUARTERLY' && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Day</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={defaultCycleDay}
+                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">of month (every 3 months)</span>
+              </div>
+            )}
+
+            {defaultCycleType === 'YEARLY' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((m, i) => (
+                      <SelectItem key={i + 1} value={String(i + 1)}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={defaultCycleDay}
+                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-24"
+                />
               </div>
             )}
 

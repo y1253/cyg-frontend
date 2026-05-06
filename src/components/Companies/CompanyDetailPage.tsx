@@ -97,6 +97,10 @@ function formatCycle(s: AppTaskSchedule): string {
       return `Every ${WEEKDAYS[s.cycleDay ?? 0]}`;
     case 'MONTHLY_WEEKDAY':
       return `Every ${ordinal(s.cycleNth ?? 1)} ${WEEKDAYS[s.cycleDay ?? 0]}`;
+    case 'QUARTERLY':
+      return `Every quarter (${ordinal(s.cycleDay ?? 1)} of month)`;
+    case 'YEARLY':
+      return `Every year on ${MONTHS[(s.cycleNth ?? 1) - 1]?.label ?? 'Jan'} ${ordinal(s.cycleDay ?? 1)}`;
     default:
       return `Every ${s.cycle} days`;
   }
@@ -1051,7 +1055,7 @@ function NotesSection({ companyId }: { companyId: number }) {
 
 // ─── Schedules section (admin only) ──────────────────────────────────────────
 
-type CycleTypeLocal = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY';
+type CycleTypeLocal = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY' | 'QUARTERLY' | 'YEARLY';
 
 function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
   const updateMutation = useUpdateSchedule(companyId);
@@ -1120,6 +1124,8 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                   <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
                   <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
                   <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
+                  <SelectItem value="QUARTERLY">Quarterly — specific date</SelectItem>
+                  <SelectItem value="YEARLY">Yearly — specific date</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1193,6 +1199,43 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                   </Select>
                 </div>
               )}
+              {editCycleType === 'QUARTERLY' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Day</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={editCycleDay}
+                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                    className="h-7 w-20 text-xs px-2"
+                    autoFocus
+                  />
+                  <span className="text-xs text-muted-foreground">of month (every 3 months)</span>
+                </div>
+              )}
+              {editCycleType === 'YEARLY' && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Select value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
+                    <SelectTrigger className="h-7 text-xs w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m, i) => (
+                        <SelectItem key={i + 1} value={String(i + 1)}>{m.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={editCycleDay}
+                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                    className="h-7 w-20 text-xs px-2"
+                  />
+                </div>
+              )}
 
               <textarea
                 value={editNote}
@@ -1228,6 +1271,12 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                     } else if (editCycleType === 'WEEKLY_DAY') {
                       payload.cycleDay = editCycleDay;
                       payload.cycleNth = null;
+                    } else if (editCycleType === 'QUARTERLY') {
+                      payload.cycleDay = editCycleDay;
+                      payload.cycleNth = null;
+                    } else if (editCycleType === 'YEARLY') {
+                      payload.cycleDay = editCycleDay;
+                      payload.cycleNth = editCycleNth;
                     } else {
                       payload.cycleDay = editCycleDay;
                       payload.cycleNth = editCycleNth;
