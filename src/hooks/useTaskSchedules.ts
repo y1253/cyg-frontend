@@ -49,6 +49,7 @@ export function useUpdateSchedule(companyId: number) {
       cycleDay,
       cycleNth,
       note,
+      startDate,
     }: {
       id: number;
       cycle?: number;
@@ -56,9 +57,11 @@ export function useUpdateSchedule(companyId: number) {
       cycleDay?: number | null;
       cycleNth?: number | null;
       note?: string | null;
-    }) => updateSchedule(token!, id, { cycle, cycleType, cycleDay, cycleNth, note }),
+      startDate?: string | null;
+    }) => updateSchedule(token!, id, { cycle, cycleType, cycleDay, cycleNth, note, startDate }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
+      qc.invalidateQueries({ queryKey: ['company', companyId] });
     },
   });
 }

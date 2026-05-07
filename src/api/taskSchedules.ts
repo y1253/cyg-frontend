@@ -11,7 +11,10 @@ export interface AppTaskSchedule {
   cycleDay: number | null;
   cycleNth: number | null;
   note: string | null;
+  userNotes: { note: string; userId: number; userName: string }[];
   isImportant: boolean;
+  startDate: string | null;
+  nextTodoDate: string | null;
   createdAt: string;
   deletedAt: string | null;
   task: { id: number; title: string; description: string | null; canBeDisabled: boolean };
@@ -58,6 +61,7 @@ export async function updateSchedule(
     cycleDay?: number | null;
     cycleNth?: number | null;
     note?: string | null;
+    startDate?: string | null;
   },
 ): Promise<AppTaskSchedule> {
   const res = await fetch(`${BASE}/${id}`, {

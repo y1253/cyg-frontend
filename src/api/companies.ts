@@ -83,7 +83,6 @@ export async function fetchCompanies(token: string): Promise<CompanySummary[]> {
 export interface TodoItem {
   id: number;
   scheduleId: number | null;
-  note: string | null;
   dueDate: string | null;
   resolved: boolean;
   resolvedAt: string | null;

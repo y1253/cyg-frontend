@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Ban, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { format } from 'date-fns';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +32,7 @@ import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useT
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
 import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant } from '@/hooks/useTaskSchedules';
+import { useUpsertScheduleNote, useDeleteScheduleNote } from '@/hooks/useScheduleNotes';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { AddTaskDialog } from './AddTaskDialog';
@@ -206,7 +210,8 @@ function CompletionCheckbox({
 function TodoRow({
   todo,
   schedule,
-  scheduleNote,
+  adminNote,
+  userNotes,
   isAdmin,
   isImportant,
   onToggle,
@@ -217,7 +222,8 @@ function TodoRow({
 }: {
   todo: TodoItem;
   schedule: AppTaskSchedule | null;
-  scheduleNote: string | null;
+  adminNote: string | null;
+  userNotes: { note: string; userId: number; userName: string }[];
   isAdmin: boolean;
   isImportant: boolean;
   onToggle: () => void;
@@ -255,7 +261,7 @@ function TodoRow({
     : rowBg(tier, isRecurring, isImportant);
 
   const hasDescription = !!todo.task.description;
-  const hasNote = !!scheduleNote;
+  const hasNote = !!adminNote || userNotes.length > 0;
 
   function handleToggle() {
     if (!todo.resolved) {
@@ -367,11 +373,16 @@ function TodoRow({
                 {todo.task.description}
               </p>
             )}
-            {hasNote && (
+            {adminNote && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
-                📝 {scheduleNote}
+                📝 {adminNote}
               </p>
             )}
+            {userNotes.map((un, i) => (
+              <p key={i} className="text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
+                🗒️ <span className="font-medium">{un.userName}:</span> {un.note}
+              </p>
+            ))}
           </div>
         )}
 
@@ -610,13 +621,11 @@ function TabBar({
   onChange,
   openCount,
   resolvedCount,
-  isAdmin,
 }: {
   active: Tab;
   onChange: (t: Tab) => void;
   openCount: number;
   resolvedCount: number;
-  isAdmin: boolean;
 }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'details', label: 'Details' },
@@ -624,7 +633,7 @@ function TabBar({
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
     { key: 'links', label: 'Links' },
     { key: 'notes', label: 'Notes' },
-    ...(isAdmin ? [{ key: 'schedules' as Tab, label: 'Schedules' }] : []),
+    { key: 'schedules' as Tab, label: 'Schedules' },
   ];
 
   return (
@@ -1057,10 +1066,22 @@ function NotesSection({ companyId }: { companyId: number }) {
 
 type CycleTypeLocal = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY' | 'QUARTERLY' | 'YEARLY';
 
-function SchedulesSection({ companyId, schedules }: { companyId: number; schedules: AppTaskSchedule[] }) {
+function SchedulesSection({
+  companyId,
+  schedules,
+  isAdmin,
+  currentUserId,
+}: {
+  companyId: number;
+  schedules: AppTaskSchedule[];
+  isAdmin: boolean;
+  currentUserId: number;
+}) {
   const updateMutation = useUpdateSchedule(companyId);
   const toggleMutation = useToggleSchedule(companyId);
   const toggleImportantMutation = useToggleScheduleImportant(companyId);
+  const upsertNoteMutation = useUpsertScheduleNote(companyId);
+  const deleteNoteMutation = useDeleteScheduleNote(companyId);
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycleType, setEditCycleType] = useState<CycleTypeLocal>('DAYS');
@@ -1068,6 +1089,9 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
   const [editCycleDay, setEditCycleDay] = useState(0);
   const [editCycleNth, setEditCycleNth] = useState(1);
   const [editNote, setEditNote] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [userNoteEditId, setUserNoteEditId] = useState<number | null>(null);
+  const [userNoteInput, setUserNoteInput] = useState('');
   const [search, setSearch] = useState('');
 
   const query = search.trim().toLowerCase();
@@ -1244,6 +1268,44 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                 rows={2}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
               />
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs text-muted-foreground">Start date (optional)</span>
+                <div className="flex items-center gap-1.5">
+                  <Popover>
+                    <PopoverTrigger>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs px-2 gap-1.5 w-44 justify-start font-normal"
+                      >
+                        <CalendarIcon size={12} />
+                        {editStartDate
+                          ? format(new Date(editStartDate + 'T00:00:00'), 'MMM d, yyyy')
+                          : 'Pick a date'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={editStartDate ? new Date(editStartDate + 'T00:00:00') : undefined}
+                        onSelect={date => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {editStartDate && (
+                    <button
+                      type="button"
+                      onClick={() => setEditStartDate('')}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Clear start date"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground">Removes unresolved todos due before this date.</p>
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
@@ -1257,7 +1319,8 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                       cycleDay?: number | null;
                       cycleNth?: number | null;
                       note: string | null;
-                    } = { id: s.id, cycleType: editCycleType, note: editNote.trim() || null };
+                      startDate: string | null;
+                    } = { id: s.id, cycleType: editCycleType, note: editNote.trim() || null, startDate: editStartDate || null };
 
                     if (editCycleType === 'DAYS') {
                       const n = Number(editCycle);
@@ -1295,6 +1358,16 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
           ) : (
             <div className="mt-0.5">
               <p className="text-xs text-muted-foreground">{formatCycle(s)}</p>
+              {s.nextTodoDate && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Next: {formatDate(s.nextTodoDate)}
+                </p>
+              )}
+              {isAdmin && s.startDate && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Start date: {formatDate(s.startDate)}
+                </p>
+              )}
               {s.note && (
                 <p className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
                   isDisabled
@@ -1304,6 +1377,82 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                   📝 {s.note}
                 </p>
               )}
+              {/* All user notes (teal) */}
+              {s.userNotes.map((un, i) => (
+                <p key={i} className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
+                  isDisabled
+                    ? 'text-muted-foreground bg-muted/60 border-muted-foreground/20'
+                    : 'text-teal-700 bg-teal-50 border-teal-200'
+                }`}>
+                  🗒️ <span className="font-medium">{un.userName}:</span> {un.note}
+                </p>
+              ))}
+              {/* User note edit/add form */}
+              {userNoteEditId === s.id ? (
+                <div className="flex flex-col gap-1.5 mt-1.5">
+                  <textarea
+                    value={userNoteInput}
+                    onChange={e => setUserNoteInput(e.target.value)}
+                    placeholder="Your note…"
+                    rows={2}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs px-2"
+                      disabled={upsertNoteMutation.isPending || deleteNoteMutation.isPending}
+                      onClick={() => {
+                        const trimmed = userNoteInput.trim();
+                        if (trimmed) {
+                          upsertNoteMutation.mutate(
+                            { scheduleId: s.id, note: trimmed },
+                            { onSuccess: () => setUserNoteEditId(null) },
+                          );
+                        } else {
+                          deleteNoteMutation.mutate(s.id, { onSuccess: () => setUserNoteEditId(null) });
+                        }
+                      }}
+                    >
+                      {upsertNoteMutation.isPending ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs px-2"
+                      onClick={() => setUserNoteEditId(null)}
+                    >
+                      Cancel
+                    </Button>
+                    {s.userNotes.some(n => n.userId === currentUserId) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs px-2 text-destructive hover:text-destructive"
+                        disabled={deleteNoteMutation.isPending}
+                        onClick={() => deleteNoteMutation.mutate(s.id, { onSuccess: () => setUserNoteEditId(null) })}
+                      >
+                        Delete Note
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                !isDisabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserNoteEditId(s.id);
+                      setUserNoteInput(s.userNotes.find(n => n.userId === currentUserId)?.note ?? '');
+                    }}
+                    className="text-xs text-muted-foreground hover:text-teal-600 mt-1 inline-flex items-center gap-1"
+                  >
+                    <Pencil size={11} />
+                    {s.userNotes.some(n => n.userId === currentUserId) ? 'Edit your note' : 'Add your note'}
+                  </button>
+                )
+              )}
               {isDisabled && (
                 <span className="inline-flex items-center gap-1 text-xs text-muted-foreground mt-1">
                   <Ban size={10} /> Disabled
@@ -1312,7 +1461,7 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
             </div>
           )}
         </div>
-        {editId !== s.id && (
+        {editId !== s.id && isAdmin && (
           <div className="flex items-center gap-1 shrink-0">
             {!isDisabled && (
               <>
@@ -1339,6 +1488,7 @@ function SchedulesSection({ companyId, schedules }: { companyId: number; schedul
                     setEditCycleDay(s.cycleDay ?? 0);
                     setEditCycleNth(s.cycleNth ?? 1);
                     setEditNote(s.note ?? '');
+                    setEditStartDate(s.startDate ? s.startDate.slice(0, 10) : '');
                   }}
                   className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
@@ -1547,7 +1697,8 @@ export function CompanyDetailPage() {
     return {
       todo,
       schedule: sched,
-      scheduleNote: sched?.note ?? todo.note ?? null,
+      adminNote: sched?.note ?? null,
+      userNotes: sched?.userNotes ?? [],
       isAdmin,
       isImportant: sched?.isImportant ?? false,
       onToggle: () => resolveMutation.mutate(todo.id),
@@ -1623,7 +1774,6 @@ export function CompanyDetailPage() {
           onChange={setTab}
           openCount={openTodos.length}
           resolvedCount={resolvedTodos.length}
-          isAdmin={isAdmin}
         />
       </div>
 
@@ -2021,16 +2171,23 @@ export function CompanyDetailPage() {
           <NotesSection companyId={companyId} />
         )}
 
-        {/* ── Schedules tab (admin only) ── */}
-        {tab === 'schedules' && isAdmin && (
+        {/* ── Schedules tab ── */}
+        {tab === 'schedules' && (
           <div className="flex flex-col gap-4 max-w-3xl">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold">Recurring Schedules</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Manage repeating tasks assigned to this company.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {isAdmin ? 'Manage repeating tasks assigned to this company.' : 'Repeating tasks for this company.'}
+                </p>
               </div>
             </div>
-            <SchedulesSection companyId={companyId} schedules={schedules} />
+            <SchedulesSection
+              companyId={companyId}
+              schedules={schedules}
+              isAdmin={isAdmin}
+              currentUserId={user!.id}
+            />
           </div>
         )}
       </div>
