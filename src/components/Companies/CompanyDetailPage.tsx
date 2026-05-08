@@ -1272,24 +1272,17 @@ function SchedulesSection({
                 <span className="text-xs text-muted-foreground">Start date (optional)</span>
                 <div className="flex items-center gap-1.5">
                   <Popover>
-                    <PopoverTrigger>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs px-2 gap-1.5 w-44 justify-start font-normal"
-                      >
-                        <CalendarIcon size={12} />
-                        {editStartDate
-                          ? format(new Date(editStartDate + 'T00:00:00'), 'MMM d, yyyy')
-                          : 'Pick a date'}
-                      </Button>
+                    <PopoverTrigger className="inline-flex h-7 items-center gap-1.5 w-44 justify-start rounded-md border border-input bg-background px-2 text-xs font-normal shadow-xs hover:bg-accent hover:text-accent-foreground">
+                      <CalendarIcon size={12} />
+                      {editStartDate
+                        ? format(new Date(editStartDate + 'T00:00:00'), 'MMM d, yyyy')
+                        : 'Pick a date'}
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
                       <Calendar
                         mode="single"
                         selected={editStartDate ? new Date(editStartDate + 'T00:00:00') : undefined}
                         onSelect={date => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
-                        initialFocus
                       />
                     </PopoverContent>
                   </Popover>
