@@ -79,7 +79,7 @@ function rowBg(tier: UrgencyTier, isRecurring: boolean, isImportant: boolean): s
 
 function formatDate(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString(undefined, {
     month: 'short', day: 'numeric', year: 'numeric',
   });
 }
@@ -1283,6 +1283,7 @@ function SchedulesSection({
                         mode="single"
                         selected={editStartDate ? new Date(editStartDate + 'T00:00:00') : undefined}
                         onSelect={date => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                        disabled={{ before: new Date() }}
                       />
                     </PopoverContent>
                   </Popover>

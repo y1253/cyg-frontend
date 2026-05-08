@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pencil, Plus, Trash2, Building2, Search } from 'lucide-react';
+import { Pencil, Plus, Trash2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dialog';
 import { useTasks, useDeleteTask, useUpdateTask } from '@/hooks/useTasks';
 import { TaskDialog } from './TaskDialog';
-import { AssignTaskDialog } from './AssignTaskDialog';
 import type { AppTask } from '@/api/tasks';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -41,7 +40,6 @@ export function TasksPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTask, setEditTask] = useState<AppTask | null>(null);
-  const [assignTask, setAssignTask] = useState<AppTask | null>(null);
   const [deleteTask, setDeleteTask] = useState<AppTask | null>(null);
 
   const [search, setSearch] = useState('');
@@ -107,7 +105,6 @@ export function TasksPage() {
               task={task}
               onEdit={() => setEditTask(task)}
               onDelete={() => setDeleteTask(task)}
-              onAssign={() => setAssignTask(task)}
               onToggleImportant={() =>
                 updateMutation.mutate({ id: task.id, data: { isImportant: !task.isImportant } })
               }
@@ -127,13 +124,6 @@ export function TasksPage() {
         open={!!editTask}
         onOpenChange={open => { if (!open) setEditTask(null); }}
         task={editTask}
-      />
-
-      {/* Assign dialog */}
-      <AssignTaskDialog
-        open={!!assignTask}
-        onOpenChange={open => { if (!open) setAssignTask(null); }}
-        task={assignTask}
       />
 
       {/* Delete confirmation */}
@@ -178,14 +168,12 @@ function TaskRow({
   task,
   onEdit,
   onDelete,
-  onAssign,
   onToggleImportant,
   onToggleCanBeDisabled,
 }: {
   task: AppTask;
   onEdit: () => void;
   onDelete: () => void;
-  onAssign: () => void;
   onToggleImportant: () => void;
   onToggleCanBeDisabled: () => void;
 }) {
@@ -227,15 +215,6 @@ function TaskRow({
         >
           Can disable
         </button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-          title="Assign to company"
-          onClick={onAssign}
-        >
-          <Building2 size={15} />
-        </Button>
         <Button
           variant="ghost"
           size="sm"
