@@ -31,8 +31,7 @@ import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
-import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant } from '@/hooks/useTaskSchedules';
-import { useUpsertScheduleNote, useDeleteScheduleNote } from '@/hooks/useScheduleNotes';
+import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { AddTaskDialog } from './AddTaskDialog';
@@ -211,7 +210,7 @@ function TodoRow({
   todo,
   schedule,
   adminNote,
-  userNotes,
+  userNote,
   isAdmin,
   isImportant,
   onToggle,
@@ -223,7 +222,7 @@ function TodoRow({
   todo: TodoItem;
   schedule: AppTaskSchedule | null;
   adminNote: string | null;
-  userNotes: { note: string; userId: number; userName: string }[];
+  userNote: string | null;
   isAdmin: boolean;
   isImportant: boolean;
   onToggle: () => void;
@@ -261,7 +260,7 @@ function TodoRow({
     : rowBg(tier, isRecurring, isImportant);
 
   const hasDescription = !!todo.task.description;
-  const hasNote = !!adminNote || userNotes.length > 0;
+  const hasNote = !!adminNote || !!userNote;
 
   function handleToggle() {
     if (!todo.resolved) {
@@ -378,11 +377,11 @@ function TodoRow({
                 📝 {adminNote}
               </p>
             )}
-            {userNotes.map((un, i) => (
-              <p key={i} className="text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
-                🗒️ <span className="font-medium">{un.userName}:</span> {un.note}
+            {userNote && (
+              <p className="text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
+                🗒️ {userNote}
               </p>
-            ))}
+            )}
           </div>
         )}
 
@@ -1070,18 +1069,15 @@ function SchedulesSection({
   companyId,
   schedules,
   isAdmin,
-  currentUserId,
 }: {
   companyId: number;
   schedules: AppTaskSchedule[];
   isAdmin: boolean;
-  currentUserId: number;
 }) {
   const updateMutation = useUpdateSchedule(companyId);
   const toggleMutation = useToggleSchedule(companyId);
   const toggleImportantMutation = useToggleScheduleImportant(companyId);
-  const upsertNoteMutation = useUpsertScheduleNote(companyId);
-  const deleteNoteMutation = useDeleteScheduleNote(companyId);
+  const updateUserNoteMutation = useUpdateScheduleUserNote(companyId);
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycleType, setEditCycleType] = useState<CycleTypeLocal>('DAYS');
@@ -1371,23 +1367,23 @@ function SchedulesSection({
                   📝 {s.note}
                 </p>
               )}
-              {/* All user notes (teal) */}
-              {s.userNotes.map((un, i) => (
-                <p key={i} className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
+              {/* Shared user note (teal) */}
+              {s.userNote && (
+                <p className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${
                   isDisabled
                     ? 'text-muted-foreground bg-muted/60 border-muted-foreground/20'
                     : 'text-teal-700 bg-teal-50 border-teal-200'
                 }`}>
-                  🗒️ <span className="font-medium">{un.userName}:</span> {un.note}
+                  🗒️ {s.userNote}
                 </p>
-              ))}
+              )}
               {/* User note edit/add form */}
               {userNoteEditId === s.id ? (
                 <div className="flex flex-col gap-1.5 mt-1.5">
                   <textarea
                     value={userNoteInput}
                     onChange={e => setUserNoteInput(e.target.value)}
-                    placeholder="Your note…"
+                    placeholder="Add a note…"
                     rows={2}
                     className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
                     autoFocus
@@ -1396,20 +1392,15 @@ function SchedulesSection({
                     <Button
                       size="sm"
                       className="h-7 text-xs px-2"
-                      disabled={upsertNoteMutation.isPending || deleteNoteMutation.isPending}
+                      disabled={updateUserNoteMutation.isPending}
                       onClick={() => {
-                        const trimmed = userNoteInput.trim();
-                        if (trimmed) {
-                          upsertNoteMutation.mutate(
-                            { scheduleId: s.id, note: trimmed },
-                            { onSuccess: () => setUserNoteEditId(null) },
-                          );
-                        } else {
-                          deleteNoteMutation.mutate(s.id, { onSuccess: () => setUserNoteEditId(null) });
-                        }
+                        updateUserNoteMutation.mutate(
+                          { id: s.id, note: userNoteInput.trim() || null },
+                          { onSuccess: () => setUserNoteEditId(null) },
+                        );
                       }}
                     >
-                      {upsertNoteMutation.isPending ? 'Saving…' : 'Save'}
+                      {updateUserNoteMutation.isPending ? 'Saving…' : 'Save'}
                     </Button>
                     <Button
                       size="sm"
@@ -1419,17 +1410,6 @@ function SchedulesSection({
                     >
                       Cancel
                     </Button>
-                    {s.userNotes.some(n => n.userId === currentUserId) && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs px-2 text-destructive hover:text-destructive"
-                        disabled={deleteNoteMutation.isPending}
-                        onClick={() => deleteNoteMutation.mutate(s.id, { onSuccess: () => setUserNoteEditId(null) })}
-                      >
-                        Delete Note
-                      </Button>
-                    )}
                   </div>
                 </div>
               ) : (
@@ -1438,12 +1418,12 @@ function SchedulesSection({
                     type="button"
                     onClick={() => {
                       setUserNoteEditId(s.id);
-                      setUserNoteInput(s.userNotes.find(n => n.userId === currentUserId)?.note ?? '');
+                      setUserNoteInput(s.userNote ?? '');
                     }}
                     className="text-xs text-muted-foreground hover:text-teal-600 mt-1 inline-flex items-center gap-1"
                   >
                     <Pencil size={11} />
-                    {s.userNotes.some(n => n.userId === currentUserId) ? 'Edit your note' : 'Add your note'}
+                    {s.userNote ? 'Edit note' : 'Add note'}
                   </button>
                 )
               )}
@@ -1692,7 +1672,7 @@ export function CompanyDetailPage() {
       todo,
       schedule: sched,
       adminNote: sched?.note ?? null,
-      userNotes: sched?.userNotes ?? [],
+      userNote: sched?.userNote ?? null,
       isAdmin,
       isImportant: sched?.isImportant ?? false,
       onToggle: () => resolveMutation.mutate(todo.id),
@@ -2180,7 +2160,6 @@ export function CompanyDetailPage() {
               companyId={companyId}
               schedules={schedules}
               isAdmin={isAdmin}
-              currentUserId={user!.id}
             />
           </div>
         )}

@@ -11,7 +11,7 @@ export interface AppTaskSchedule {
   cycleDay: number | null;
   cycleNth: number | null;
   note: string | null;
-  userNotes: { note: string; userId: number; userName: string }[];
+  userNote: string | null;
   isImportant: boolean;
   startDate: string | null;
   nextTodoDate: string | null;
@@ -98,4 +98,13 @@ export async function toggleScheduleImportant(token: string, id: number): Promis
     throw new Error(body.message ?? 'Failed to toggle important');
   }
   return res.json();
+}
+
+export async function updateScheduleUserNote(token: string, id: number, note: string | null): Promise<void> {
+  const res = await fetch(`${BASE}/${id}/user-note`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ note: note ?? undefined }),
+  });
+  if (!res.ok) throw new Error('Failed to update note');
 }

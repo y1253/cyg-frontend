@@ -6,6 +6,7 @@ import {
   updateSchedule,
   toggleSchedule,
   toggleScheduleImportant,
+  updateScheduleUserNote,
   type CycleType,
 } from '@/api/taskSchedules';
 
@@ -83,6 +84,18 @@ export function useToggleScheduleImportant(companyId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => toggleScheduleImportant(token!, id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
+    },
+  });
+}
+
+export function useUpdateScheduleUserNote(companyId: number) {
+  const { token } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string | null }) =>
+      updateScheduleUserNote(token!, id, note),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
     },
