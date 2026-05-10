@@ -1279,7 +1279,7 @@ function SchedulesSection({
                         mode="single"
                         selected={editStartDate ? new Date(editStartDate + 'T00:00:00') : undefined}
                         onSelect={date => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
-                        disabled={{ before: new Date() }}
+                        classNames={{ today: 'rounded-md bg-muted text-foreground ring-2 ring-primary/50' }}
                       />
                     </PopoverContent>
                   </Popover>
@@ -1294,7 +1294,7 @@ function SchedulesSection({
                     </button>
                   )}
                 </div>
-                <p className="text-[10px] text-muted-foreground">Removes unresolved todos due before this date.</p>
+                <p className="text-[10px] text-muted-foreground">Past dates will backfill all todos up to today.</p>
               </div>
               <div className="flex items-center gap-2">
                 <Button
