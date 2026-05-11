@@ -1664,8 +1664,15 @@ export function CompanyDetailPage() {
     return scheduleMap.get(todo.scheduleId) ?? null;
   }
 
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+
   const openTodos = company.todos
-    .filter(t => !t.resolved)
+    .filter(t => {
+      if (t.resolved) return false;
+      if (!t.dueDate) return true;
+      return new Date(t.dueDate.slice(0, 10) + 'T00:00:00') <= todayMidnight;
+    })
     .sort((a, b) => Number(getSchedule(b)?.isImportant ?? false) - Number(getSchedule(a)?.isImportant ?? false));
 
   const importantTodos = openTodos.filter(t => getSchedule(t)?.isImportant ?? false);
