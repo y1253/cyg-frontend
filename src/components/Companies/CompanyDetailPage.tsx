@@ -30,7 +30,6 @@ import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
-import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
 import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
@@ -38,7 +37,6 @@ import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
-import type { CompanyNote } from '@/api/notes';
 
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
@@ -84,6 +82,34 @@ function overdueLabel(dueDate: string): string {
   const due = new Date(dueDate.slice(0, 10) + 'T00:00:00');
   const days = Math.round((today.getTime() - due.getTime()) / 86_400_000);
   return days === 1 ? '1 day overdue' : `${days} days overdue`;
+}
+
+function renderWithLinks(text: string): React.ReactNode {
+  // Matches https://... , http://... , www.xxx , and bare domains like hi.com
+  const urlRegex = /https?:\/\/[^\s]+|(?:[a-zA-Z][a-zA-Z0-9\-]*\.)+[a-zA-Z]{2,6}(?:\/[^\s]*)?/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  while ((match = urlRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const raw = match[0].replace(/[.,;:!?)\]]+$/, ''); // strip trailing punctuation
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    parts.push(
+      <a
+        key={match.index}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 underline cursor-pointer hover:text-blue-800 break-all"
+        onClick={e => e.stopPropagation()}
+      >
+        {raw}
+      </a>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <>{parts}</>;
 }
 
 function formatDate(iso: string | null) {
@@ -384,12 +410,12 @@ function TodoRow({
             )}
             {adminNote && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
-                📝 {adminNote}
+                📝 {renderWithLinks(adminNote)}
               </p>
             )}
             {userNote && (
               <p className="text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 whitespace-pre-wrap leading-relaxed">
-                🗒️ {userNote}
+                🗒️ {renderWithLinks(userNote)}
               </p>
             )}
           </div>
@@ -623,7 +649,7 @@ function FiscalYearPicker({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'notes' | 'schedules';
+type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules';
 
 function TabBar({
   active,
@@ -641,7 +667,6 @@ function TabBar({
     { key: 'tasks',   label: `Tasks (${openCount})` },
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
     { key: 'links', label: 'Links' },
-    { key: 'notes', label: 'Notes' },
     { key: 'schedules' as Tab, label: 'Schedules' },
   ];
 
@@ -853,201 +878,6 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
           <p className="text-sm text-muted-foreground">
             Delete <span className="font-medium text-foreground">
               {links.find(l => l.id === deleteId)?.label}
-            </span>?
-          </p>
-          <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleteMutation.isPending}
-              onClick={() => {
-                if (deleteId !== null) {
-                  deleteMutation.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
-                }
-              }}
-            >
-              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-// ─── Notes section ───────────────────────────────────────────────────────────
-
-function NotesSection({ companyId }: { companyId: number }) {
-  const { data: notes = [], isLoading } = useNotes(companyId);
-  const createMutation = useCreateNote(companyId);
-  const updateMutation = useUpdateNote(companyId);
-  const deleteMutation = useDeleteNote(companyId);
-
-  const [addOpen, setAddOpen] = useState(false);
-  const [addTitle, setAddTitle] = useState('');
-  const [addNote, setAddNote] = useState('');
-
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editNote, setEditNote] = useState('');
-
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-
-  function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (!addTitle || !addNote) return;
-    createMutation.mutate(
-      { companyId, title: addTitle, note: addNote },
-      {
-        onSuccess: () => {
-          setAddOpen(false);
-          setAddTitle('');
-          setAddNote('');
-        },
-      },
-    );
-  }
-
-  function openEdit(n: CompanyNote) {
-    setEditId(n.id);
-    setEditTitle(n.title);
-    setEditNote(n.note);
-  }
-
-  function handleUpdate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editId) return;
-    updateMutation.mutate(
-      { id: editId, data: { title: editTitle, note: editNote } },
-      { onSuccess: () => setEditId(null) },
-    );
-  }
-
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading notes…</p>;
-
-  return (
-    <div className="flex flex-col gap-3 max-w-3xl">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Only you can see your notes.</p>
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(v => !v)}>
-          <Plus size={14} /> Add Note
-        </Button>
-      </div>
-
-      {/* Inline add form */}
-      {addOpen && (
-        <form onSubmit={handleAdd} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
-          <p className="text-sm font-medium">New Note</p>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-note-title">Title</Label>
-            <Input
-              id="add-note-title"
-              value={addTitle}
-              onChange={e => setAddTitle(e.target.value)}
-              placeholder="Note title"
-              autoFocus
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-note-body">Note</Label>
-            <textarea
-              id="add-note-body"
-              value={addNote}
-              onChange={e => setAddNote(e.target.value)}
-              placeholder="Write your note here…"
-              rows={4}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-            />
-          </div>
-          {createMutation.isError && (
-            <p className="text-xs text-destructive">
-              {createMutation.error instanceof Error ? createMutation.error.message : 'Error'}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button type="submit" size="sm" disabled={!addTitle || !addNote || createMutation.isPending}>
-              {createMutation.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {/* Empty state */}
-      {notes.length === 0 && !addOpen && (
-        <p className="text-sm text-muted-foreground">No notes yet.</p>
-      )}
-
-      {/* Notes list */}
-      {notes.map(n => (
-        <div key={n.id}>
-          {editId === n.id ? (
-            <form onSubmit={handleUpdate} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Title</Label>
-                <Input value={editTitle} onChange={e => setEditTitle(e.target.value)} autoFocus />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Note</Label>
-                <textarea
-                  value={editNote}
-                  onChange={e => setEditNote(e.target.value)}
-                  rows={4}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-                />
-              </div>
-              {updateMutation.isError && (
-                <p className="text-xs text-destructive">
-                  {updateMutation.error instanceof Error ? updateMutation.error.message : 'Error'}
-                </p>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setEditId(null)}>Cancel</Button>
-                <Button type="submit" size="sm" disabled={updateMutation.isPending}>
-                  {updateMutation.isPending ? 'Saving…' : 'Save'}
-                </Button>
-              </div>
-            </form>
-          ) : (
-            <div className="rounded-lg border bg-background px-4 py-3 flex flex-col gap-1.5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium leading-snug">{n.title}</p>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    title="Edit note"
-                    onClick={() => openEdit(n)}
-                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    title="Delete note"
-                    onClick={() => setDeleteId(n.id)}
-                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{n.note}</p>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">
-                {new Date(n.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-              </p>
-            </div>
-          )}
-        </div>
-      ))}
-
-      {/* Delete confirm dialog */}
-      <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Delete Note</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Delete <span className="font-medium text-foreground">
-              {notes.find(n => n.id === deleteId)?.title}
             </span>?
           </p>
           <div className="flex justify-end gap-2 mt-2">
@@ -1289,6 +1119,9 @@ function SchedulesSection({
                         mode="single"
                         selected={editStartDate ? new Date(editStartDate + 'T00:00:00') : undefined}
                         onSelect={date => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                        captionLayout="dropdown"
+                        startMonth={new Date(2020, 0)}
+                        endMonth={new Date(new Date().getFullYear() + 3, 11)}
                         classNames={{ today: 'rounded-md bg-muted text-foreground ring-2 ring-primary/50' }}
                       />
                     </PopoverContent>
@@ -1374,7 +1207,7 @@ function SchedulesSection({
                     ? 'text-muted-foreground bg-muted/60 border-muted-foreground/20'
                     : 'text-amber-700 bg-amber-50 border-amber-200'
                 }`}>
-                  📝 {s.note}
+                  📝 {renderWithLinks(s.note)}
                 </p>
               )}
               {/* Shared user note (teal) */}
@@ -1384,7 +1217,7 @@ function SchedulesSection({
                     ? 'text-muted-foreground bg-muted/60 border-muted-foreground/20'
                     : 'text-teal-700 bg-teal-50 border-teal-200'
                 }`}>
-                  🗒️ {s.userNote}
+                  🗒️ {renderWithLinks(s.userNote)}
                 </p>
               )}
               {/* User note edit/add form */}
@@ -1664,15 +1497,8 @@ export function CompanyDetailPage() {
     return scheduleMap.get(todo.scheduleId) ?? null;
   }
 
-  const todayMidnight = new Date();
-  todayMidnight.setHours(0, 0, 0, 0);
-
   const openTodos = company.todos
-    .filter(t => {
-      if (t.resolved) return false;
-      if (!t.dueDate) return true;
-      return new Date(t.dueDate.slice(0, 10) + 'T00:00:00') <= todayMidnight;
-    })
+    .filter(t => !t.resolved)
     .sort((a, b) => Number(getSchedule(b)?.isImportant ?? false) - Number(getSchedule(a)?.isImportant ?? false));
 
   const importantTodos = openTodos.filter(t => getSchedule(t)?.isImportant ?? false);
@@ -2155,11 +1981,6 @@ export function CompanyDetailPage() {
         {/* ── Links tab ── */}
         {tab === 'links' && (
           <LinksSection companyId={companyId} isAdmin={isAdmin} />
-        )}
-
-        {/* ── Notes tab ── */}
-        {tab === 'notes' && (
-          <NotesSection companyId={companyId} />
         )}
 
         {/* ── Schedules tab ── */}
