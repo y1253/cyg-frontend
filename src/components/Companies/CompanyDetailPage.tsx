@@ -46,16 +46,18 @@ type UrgencyTier = 'overdue' | 'soon' | 'warning' | 'normal';
 
 function getTodoUrgency(dueDate: string | null): UrgencyTier {
   if (!dueDate) return 'normal';
-  const diffDays = (new Date(dueDate).getTime() - Date.now()) / 86_400_000;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate.slice(0, 10) + 'T00:00:00');
+  const diffDays = (due.getTime() - today.getTime()) / 86_400_000;
   if (diffDays < 0) return 'overdue';
-  if (diffDays < 2) return 'soon';
-  if (diffDays < 5) return 'warning';
+  if (diffDays < 1) return 'soon';
   return 'normal';
 }
 
 const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = {
   overdue: { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' },
-  soon: { label: '< 2 days', className: 'bg-orange-100 text-orange-700 border-orange-200' },
+  soon: { label: 'Due today', className: 'bg-orange-100 text-orange-700 border-orange-200' },
   warning: { label: '< 5 days', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
   normal: { label: '', className: '' },
 };
@@ -74,6 +76,14 @@ function rowBg(tier: UrgencyTier, isRecurring: boolean, isImportant: boolean): s
   if (tier === 'warning') return 'border-yellow-200 bg-yellow-50';
   if (isImportant)        return 'border-amber-300 bg-amber-50/50';
   return 'border-border bg-background';
+}
+
+function overdueLabel(dueDate: string): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate.slice(0, 10) + 'T00:00:00');
+  const days = Math.round((today.getTime() - due.getTime()) / 86_400_000);
+  return days === 1 ? '1 day overdue' : `${days} days overdue`;
 }
 
 function formatDate(iso: string | null) {
@@ -300,7 +310,7 @@ function TodoRow({
               </p>
               {!todo.resolved && badge.label && (
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${badge.className}`}>
-                  {badge.label}
+                  {tier === 'overdue' && todo.dueDate ? overdueLabel(todo.dueDate) : badge.label}
                 </span>
               )}
             </div>
