@@ -100,6 +100,7 @@ export interface CompanyDetail {
   companyActivity: string | null;
   status: boolean;
   createdAt: string;
+  deletedAt: string | null;
   contactInfo: {
     personalName: string | null;
     privateEmail: string | null;
@@ -183,6 +184,44 @@ export async function deleteCompany(token: string, id: number): Promise<void> {
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? 'Failed to delete company');
+  }
+}
+
+// ─── Deleted companies ────────────────────────────────────────────────────────
+
+export interface DeletedCompanySummary {
+  id: number;
+  businessName: string;
+  country: string | null;
+  businessType: string | null;
+  deletedAt: string;
+}
+
+export async function fetchDeletedCompanies(token: string): Promise<DeletedCompanySummary[]> {
+  const res = await fetch(`${API}/companies/deleted`, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error('Failed to fetch deleted companies');
+  return res.json() as Promise<DeletedCompanySummary[]>;
+}
+
+export async function restoreCompany(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API}/companies/${id}/restore`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to restore company');
+  }
+}
+
+export async function permanentDeleteCompany(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API}/companies/${id}/permanent`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to permanently delete company');
   }
 }
 

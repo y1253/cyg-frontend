@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -33,6 +33,7 @@ import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/u
 import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
+import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeletedCompanies';
 import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
@@ -254,6 +255,7 @@ function TodoRow({
   onDelete,
   onSetCycle,
   onRemoveCycle,
+  expandSignal,
 }: {
   todo: TodoItem;
   schedule: AppTaskSchedule | null;
@@ -266,8 +268,14 @@ function TodoRow({
   onDelete: () => void;
   onSetCycle: (cycle: number) => void;
   onRemoveCycle: () => void;
+  expandSignal?: { expanded: boolean; seq: number };
 }) {
   const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    if (expandSignal && expandSignal.seq > 0) setExpanded(expandSignal.expanded);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandSignal?.seq]);
   const [addCycleOpen, setAddCycleOpen] = useState(false);
   const [cycleInput, setCycleInput] = useState('30');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1389,6 +1397,8 @@ export function CompanyDetailPage() {
 
   const [tab, setTab] = useState<Tab>('tasks');
   const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
+  const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data: company, isLoading, isError } = useCompany(companyId);
@@ -1397,6 +1407,9 @@ export function CompanyDetailPage() {
   const assignMutation = useAssignCompany();
   const updateCompanyMutation = useUpdateCompany();
   const deleteCompanyMutation = useDeleteCompany();
+  const restoreMutation = useRestoreCompany();
+  const permDeleteMutation = usePermanentDeleteCompany();
+  const [showPermDeleteConfirm, setShowPermDeleteConfirm] = useState(false);
   const resolveMutation = useResolveTodo(companyId);
   const deleteMutation = useDeleteTodo(companyId);
   const setCycleMutation = useSetTodoCycle(companyId);
@@ -1523,11 +1536,51 @@ export function CompanyDetailPage() {
       onDelete: () => deleteMutation.mutate(todo.id),
       onSetCycle: (cycle: number) => setCycleMutation.mutate({ id: todo.id, cycle }),
       onRemoveCycle: () => removeCycleMutation.mutate(todo.id),
+      expandSignal,
     };
   }
 
+  const isArchived = !!company.deletedAt;
+
   return (
     <div className="flex flex-col h-full">
+      {/* Archive banner */}
+      {isArchived && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3">
+          <Archive size={15} className="text-amber-600 shrink-0" />
+          <p className="text-sm text-amber-800 flex-1">
+            This company was archived on{' '}
+            <span className="font-medium">
+              {new Date(company.deletedAt!).toLocaleDateString(undefined, {
+                month: 'long', day: 'numeric', year: 'numeric',
+              })}
+            </span>
+            . It is hidden from the main list.
+          </p>
+          {isAdmin && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 border-green-300 text-green-700 hover:bg-green-50"
+                disabled={restoreMutation.isPending}
+                onClick={() => restoreMutation.mutate(companyId, { onSuccess: () => navigate('/admin/archived') })}
+              >
+                <RefreshCw size={12} /> Restore
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 border-red-300 text-destructive hover:bg-red-50"
+                onClick={() => setShowPermDeleteConfirm(true)}
+              >
+                <Trash2 size={12} /> Delete Permanently
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Page header */}
       <div className="px-6 pt-6 pb-0">
         <div className="flex items-center gap-3 mb-1">
@@ -1535,7 +1588,7 @@ export function CompanyDetailPage() {
           <Badge variant={company.status ? 'default' : 'secondary'}>
             {company.status ? 'Active' : 'Inactive'}
           </Badge>
-          {isAdmin && (
+          {isAdmin && !isArchived && (
             <Button
               variant="ghost"
               size="sm"
@@ -1926,8 +1979,21 @@ export function CompanyDetailPage() {
         {/* ── Tasks tab ── */}
         {tab === 'tasks' && (
           <div className="flex flex-col gap-4 max-w-3xl">
-            {isAdmin && (
-              <div className="flex justify-end">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !tasksAllExpanded;
+                  setExpandSignal(s => ({ expanded: next, seq: s.seq + 1 }));
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                {tasksAllExpanded
+                  ? <><ChevronUp size={13} /> Collapse All</>
+                  : <><ChevronDown size={13} /> Expand All</>
+                }
+              </button>
+              {isAdmin && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1936,8 +2002,8 @@ export function CompanyDetailPage() {
                 >
                   <Plus size={14} /> Add Task
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
 
             {openTodos.length === 0 ? (
               <p className="text-sm text-muted-foreground">All tasks resolved.</p>
@@ -2034,6 +2100,37 @@ export function CompanyDetailPage() {
               }
             >
               {deleteCompanyMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent delete confirmation (for archived companies) */}
+      <Dialog open={showPermDeleteConfirm} onOpenChange={setShowPermDeleteConfirm}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Permanently</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Permanently delete <span className="font-semibold text-foreground">{company.businessName}</span>?
+            All associated data (tasks, schedules, notes, links) will be erased and cannot be recovered.
+          </p>
+          {permDeleteMutation.isError && (
+            <p className="text-xs text-destructive">
+              {permDeleteMutation.error instanceof Error ? permDeleteMutation.error.message : 'Error'}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setShowPermDeleteConfirm(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={permDeleteMutation.isPending}
+              onClick={() =>
+                permDeleteMutation.mutate(companyId, {
+                  onSuccess: () => navigate('/admin/archived'),
+                })
+              }
+            >
+              {permDeleteMutation.isPending ? 'Deleting…' : 'Delete Permanently'}
             </Button>
           </div>
         </DialogContent>

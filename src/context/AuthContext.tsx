@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../api/auth';
 
@@ -37,6 +37,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setToken(null);
   }
+
+  useEffect(() => {
+    if (!token) return;
+
+    const TIMEOUT_MS = 30 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+
+    function resetTimer() {
+      clearTimeout(timer);
+      timer = setTimeout(logout, TIMEOUT_MS);
+    }
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, resetTimer));
+    resetTimer();
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach(e => window.removeEventListener(e, resetTimer));
+    };
+  }, [token]);
 
   return (
     <AuthContext.Provider value={{ user, token, setUser, setToken, logout }}>

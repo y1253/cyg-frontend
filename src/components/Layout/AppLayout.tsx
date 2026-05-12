@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { ClipboardList, LayoutDashboard, LogOut, Users2 } from 'lucide-react';
+import { Archive, ClipboardList, LayoutDashboard, LogOut, Users2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
@@ -80,6 +80,11 @@ export function AppLayout() {
                   to="/admin/users"
                   icon={<Users2 size={16} />}
                   label="Users"
+                />
+                <SideNavLink
+                  to="/admin/archived"
+                  icon={<Archive size={16} />}
+                  label="Archived"
                 />
               </>
             )}
