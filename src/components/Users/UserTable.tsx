@@ -1,3 +1,4 @@
+import { Camera } from 'lucide-react';
 import type { AppUser } from '../../api/users';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
+            <TableHead>Face</TableHead>
             <TableHead>Created</TableHead>
             <TableHead className="w-[160px]"></TableHead>
           </TableRow>
@@ -35,13 +37,13 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                 Loading...
               </TableCell>
             </TableRow>
           ) : users.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                 {emptyMessage ?? 'No users found.'}
               </TableCell>
             </TableRow>
@@ -58,6 +60,14 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
                   <Badge variant={u.role === 'ADMIN' ? 'default' : 'secondary'}>
                     {u.role}
                   </Badge>
+                </TableCell>
+                <TableCell>
+                  <span title={u.luxandId ? 'Face enrolled' : 'No face enrolled'}>
+                    <Camera
+                      size={15}
+                      className={u.luxandId ? 'text-teal-500' : 'text-muted-foreground/30'}
+                    />
+                  </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {new Date(u.createdAt).toLocaleDateString()}

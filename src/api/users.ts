@@ -4,6 +4,7 @@ export interface AppUser {
   id: number;
   name: string;
   email: string;
+  luxandId?: string | null;
   role: string;
   createdAt: string;
 }
@@ -11,7 +12,6 @@ export interface AppUser {
 export interface CreateUserData {
   name: string;
   email: string;
-  password: string;
   role: string;
 }
 
@@ -69,7 +69,6 @@ export interface UpdateUserData {
   name?: string;
   email?: string;
   role?: string;
-  password?: string;
 }
 
 export async function updateUser(token: string, id: number, data: UpdateUserData): Promise<AppUser> {
@@ -94,4 +93,19 @@ export async function deleteUser(token: string, id: number): Promise<void> {
     const body = await res.json().catch(() => ({})) as { message?: string };
     throw new Error(body.message ?? 'Failed to delete user');
   }
+}
+
+export async function enrollFace(token: string, userId: number, imageBlob: Blob): Promise<AppUser> {
+  const form = new FormData();
+  form.append('photo', imageBlob, 'capture.jpg');
+  const res = await fetch(`${API}/users/${userId}/enroll-face`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(body.message ?? 'Face enrollment failed');
+  }
+  return res.json() as Promise<AppUser>;
 }

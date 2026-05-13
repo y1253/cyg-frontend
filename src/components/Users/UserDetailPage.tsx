@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Building2,
+  Camera,
   CheckCircle2,
   Mail,
   Shield,
@@ -10,7 +12,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { WebcamCapture } from "@/components/ui/WebcamCapture";
 import { useUser } from "@/hooks/useUser";
+import { useEnrollFace } from "@/hooks/useEnrollFace";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -24,6 +34,18 @@ export function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: user, isLoading, isError } = useUser(Number(id));
+  const enrollMutation = useEnrollFace();
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
+
+  function handleEnroll(blob: Blob) {
+    if (!user) return;
+    setEnrollError('');
+    enrollMutation.mutate(
+      { userId: user.id, blob },
+      { onSuccess: () => setEnrollOpen(false) },
+    );
+  }
 
   if (isLoading) {
     return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
@@ -31,6 +53,8 @@ export function UserDetailPage() {
   if (isError || !user) {
     return <div className="p-8 text-destructive text-sm">User not found.</div>;
   }
+
+  const faceEnrolled = !!user.luxandId;
 
   return (
     <div className="p-6 max-w-3xl mx-auto flex flex-col gap-6">
@@ -56,12 +80,28 @@ export function UserDetailPage() {
             <Badge variant={user.role === "ADMIN" ? "default" : "secondary"}>
               {user.role}
             </Badge>
+            <Badge
+              variant="outline"
+              className={faceEnrolled ? "border-teal-500 text-teal-600" : "text-muted-foreground"}
+            >
+              <Camera size={11} className="mr-1" />
+              {faceEnrolled ? "Face enrolled" : "No face enrolled"}
+            </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">{user.email}</p>
           <p className="text-xs text-muted-foreground mt-1">
             Member since {formatDate(user.createdAt)}
           </p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 gap-1.5"
+          onClick={() => { setEnrollError(''); enrollMutation.reset(); setEnrollOpen(true); }}
+        >
+          <Camera size={14} />
+          {faceEnrolled ? "Re-enroll Face" : "Enroll Face"}
+        </Button>
       </div>
 
       {/* Details card */}
@@ -85,10 +125,7 @@ export function UserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-0.5">Role</p>
-            <Badge
-              variant={user.role === "ADMIN" ? "default" : "secondary"}
-              className="text-xs"
-            >
+            <Badge variant={user.role === "ADMIN" ? "default" : "secondary"} className="text-xs">
               {user.role}
             </Badge>
           </div>
@@ -97,10 +134,14 @@ export function UserDetailPage() {
             <p className="text-sm font-medium">{formatDate(user.createdAt)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-0.5">
-              Assigned Companies
-            </p>
+            <p className="text-xs text-muted-foreground mb-0.5">Assigned Companies</p>
             <p className="text-sm font-medium">{user.companies.length}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">Face Login</p>
+            <span className={`text-sm font-medium ${faceEnrolled ? "text-teal-600" : "text-muted-foreground"}`}>
+              {faceEnrolled ? "Enrolled" : "Not enrolled"}
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -128,32 +169,19 @@ export function UserDetailPage() {
                 className="w-full text-left rounded-lg border bg-background px-4 py-3 hover:bg-muted/50 transition-colors flex items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${company.status ? "bg-green-500" : "bg-muted-foreground/40"}`}
-                  />
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${company.status ? "bg-green-500" : "bg-muted-foreground/40"}`} />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {company.businessName}
-                    </p>
+                    <p className="text-sm font-medium truncate">{company.businessName}</p>
                     <p className="text-xs text-muted-foreground">
                       {company.country ?? "—"}
                       {company.supportNumber && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          <span className="font-medium text-foreground">
-                            {company.supportNumber}
-                          </span>
-                        </>
+                        <> · <span className="font-medium text-foreground">{company.supportNumber}</span></>
                       )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Badge
-                    variant={company.status ? "default" : "secondary"}
-                    className="text-xs"
-                  >
+                  <Badge variant={company.status ? "default" : "secondary"} className="text-xs">
                     {company.status ? "Active" : "Inactive"}
                   </Badge>
                   {company.openTodos > 0 && (
@@ -162,18 +190,8 @@ export function UserDetailPage() {
                       {company.openTodos}
                     </span>
                   )}
-                  <svg
-                    className="w-4 h-4 text-muted-foreground"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
+                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </div>
               </button>
@@ -181,6 +199,46 @@ export function UserDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Face enrollment dialog */}
+      <Dialog open={enrollOpen} onOpenChange={setEnrollOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {faceEnrolled ? `Re-enroll Face — ${user.name}` : `Enroll Face — ${user.name}`}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 mt-2">
+            <p className="text-sm text-muted-foreground">
+              {faceEnrolled
+                ? "Capturing a new photo will replace the existing face enrollment."
+                : "Capture a clear photo of the user's face to enable face recognition login."}
+            </p>
+
+            {enrollMutation.isPending ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+                Enrolling…
+              </div>
+            ) : (
+              <WebcamCapture
+                onCapture={handleEnroll}
+                label="Capture & Enroll"
+                onError={msg => setEnrollError(msg)}
+              />
+            )}
+
+            {(enrollError || enrollMutation.isError) && (
+              <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+                {enrollError || (enrollMutation.error instanceof Error ? enrollMutation.error.message : 'Enrollment failed. Try again.')}
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
 import type { AppUser } from '../../api/users';
 import { useRoles } from '../../hooks/useRoles';
 import { useUpdateUser } from '../../hooks/useUpdateUser';
@@ -24,7 +23,6 @@ interface FormState {
   name: string;
   email: string;
   role: string | null;
-  password: string;
 }
 
 interface Props {
@@ -33,14 +31,13 @@ interface Props {
 }
 
 export function EditUserDialog({ user, onOpenChange }: Props) {
-  const [form, setForm] = useState<FormState>({ name: '', email: '', role: null, password: '' });
-  const [showPassword, setShowPassword] = useState(false);
+  const [form, setForm] = useState<FormState>({ name: '', email: '', role: null });
   const { data: roles = [] } = useRoles();
   const updateMutation = useUpdateUser();
 
   useEffect(() => {
     if (user) {
-      setForm({ name: user.name, email: user.email, role: user.role, password: '' });
+      setForm({ name: user.name, email: user.email, role: user.role });
       updateMutation.reset();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -53,14 +50,8 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user || !form.role) return;
-    const data: Record<string, string> = {
-      name: form.name,
-      email: form.email,
-      role: form.role,
-    };
-    if (form.password) data.password = form.password;
     updateMutation.mutate(
-      { id: user.id, data },
+      { id: user.id, data: { name: form.name, email: form.email, role: form.role } },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
@@ -110,30 +101,6 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-password">New Password <span className="text-muted-foreground font-normal">(leave blank to keep current)</span></Label>
-            <div className="relative">
-              <Input
-                id="edit-password"
-                type={showPassword ? 'text' : 'password'}
-                value={form.password}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                placeholder="Min. 8 characters"
-                minLength={form.password ? 8 : undefined}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(v => !v)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
           </div>
 
           {updateMutation.isError && (
