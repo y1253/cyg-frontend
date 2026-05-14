@@ -49,7 +49,7 @@ function getTodoUrgency(dueDate: string | null): UrgencyTier {
   today.setHours(0, 0, 0, 0);
   const due = new Date(dueDate.slice(0, 10) + 'T00:00:00');
   const diffDays = (due.getTime() - today.getTime()) / 86_400_000;
-  if (diffDays <= -25) return 'urgent';
+  if (diffDays < -25) return 'urgent';
   if (diffDays < 0) return 'overdue';
   if (diffDays < 1) return 'soon';
   return 'normal';
@@ -1783,8 +1783,8 @@ export function CompanyDetailPage() {
             <p className="text-xs text-muted-foreground mt-0.5">Important</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-yellow-600">
-              {openTodos.filter(t => ['overdue','soon','warning'].includes(getTodoUrgency(t.dueDate))).length}
+            <p className="text-2xl font-bold text-red-600">
+              {openTodos.filter(t => ['overdue','urgent'].includes(getTodoUrgency(t.dueDate))).length}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">Urgent</p>
           </div>
