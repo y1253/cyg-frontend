@@ -8,6 +8,9 @@ export function useEnrollFace() {
   return useMutation({
     mutationFn: ({ userId, blob }: { userId: number; blob: Blob }) =>
       enrollFace(token!, userId, blob),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: (_data, { userId }) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['user', userId] });
+    },
   });
 }

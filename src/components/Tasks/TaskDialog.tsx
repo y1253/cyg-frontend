@@ -40,6 +40,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
   const [defaultCycleNth, setDefaultCycleNth] = useState(1);
   const [isImportant, setIsImportant] = useState(false);
   const [canBeDisabled, setCanBeDisabled] = useState(false);
+  const [isSnoozable, setIsSnoozable] = useState(false);
 
   const createMutation = useCreateTask();
   const updateMutation = useUpdateTask();
@@ -56,6 +57,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       setDefaultCycleNth(task?.defaultCycleNth ?? 1);
       setIsImportant(task?.isImportant ?? false);
       setCanBeDisabled(task?.canBeDisabled ?? false);
+      setIsSnoozable(task?.isSnoozable ?? false);
       createMutation.reset();
       updateMutation.reset();
     }
@@ -76,6 +78,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
       defaultCycleNth: (defaultCycleType === 'MONTHLY_WEEKDAY' || defaultCycleType === 'YEARLY') ? defaultCycleNth : undefined,
       isImportant,
       canBeDisabled,
+      isSnoozable,
     };
 
     if (isEdit && task) {
@@ -298,6 +301,32 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
               <p className="text-sm font-medium">Allow disabling schedule</p>
               <p className="text-xs text-muted-foreground">
                 When enabled, admins can disable this task's schedule per company.
+              </p>
+            </div>
+          </label>
+
+          {/* Snoozable toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              role="checkbox"
+              aria-checked={isSnoozable}
+              tabIndex={0}
+              onClick={() => setIsSnoozable(v => !v)}
+              onKeyDown={e => e.key === ' ' && setIsSnoozable(v => !v)}
+              className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-ring ${
+                isSnoozable ? 'bg-slate-500' : 'bg-input'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  isSnoozable ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Allow snooze</p>
+              <p className="text-xs text-muted-foreground">
+                Users can snooze todos for this task to hide them temporarily.
               </p>
             </div>
           </label>

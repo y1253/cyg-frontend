@@ -56,3 +56,26 @@ export async function removeTodoCycle(token: string, id: number): Promise<void> 
   }
 }
 
+export async function snoozeTodo(token: string, id: number, days: number): Promise<void> {
+  const res = await fetch(`${API}/todos/${id}/snooze`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to snooze');
+  }
+}
+
+export async function unsnoozeTodo(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API}/todos/${id}/unsnooze`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to unsnooze');
+  }
+}
+

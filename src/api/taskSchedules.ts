@@ -17,6 +17,7 @@ export interface AppTaskSchedule {
   nextTodoDate: string | null;
   createdAt: string;
   deletedAt: string | null;
+  isManuallyAdded: boolean;
   task: { id: number; title: string; description: string | null; canBeDisabled: boolean };
 }
 
@@ -107,4 +108,15 @@ export async function updateScheduleUserNote(token: string, id: number, note: st
     body: JSON.stringify({ note: note ?? undefined }),
   });
   if (!res.ok) throw new Error('Failed to update note');
+}
+
+export async function deleteSchedule(token: string, id: number): Promise<void> {
+  const res = await fetch(`${BASE}/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message ?? 'Failed to delete schedule');
+  }
 }

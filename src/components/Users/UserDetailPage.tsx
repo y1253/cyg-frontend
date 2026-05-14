@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -22,6 +22,75 @@ import { WebcamCapture } from "@/components/ui/WebcamCapture";
 import { useUser } from "@/hooks/useUser";
 import { useEnrollFace } from "@/hooks/useEnrollFace";
 
+const ENROLL_PARTICLES = [
+  { angle:   0, dist: 36, color: '#2dd4bf' },
+  { angle:  45, dist: 40, color: '#14b8a6' },
+  { angle:  90, dist: 36, color: '#0d9488' },
+  { angle: 135, dist: 44, color: '#5eead4' },
+  { angle: 180, dist: 36, color: '#2dd4bf' },
+  { angle: 225, dist: 40, color: '#99f6e4' },
+  { angle: 270, dist: 36, color: '#14b8a6' },
+  { angle: 315, dist: 44, color: '#0d9488' },
+];
+
+function FaceEnrollSuccess({ name }: { name: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 gap-5 select-none">
+      {/* Animated circle + checkmark + particles */}
+      <div className="relative flex items-center justify-center w-24 h-24">
+        {ENROLL_PARTICLES.map((p, i) => {
+          const rad = (p.angle * Math.PI) / 180;
+          const tx = Math.round(Math.cos(rad) * p.dist);
+          const ty = Math.round(Math.sin(rad) * p.dist);
+          return (
+            <span
+              key={i}
+              aria-hidden
+              className="absolute top-1/2 left-1/2 w-2.5 h-2.5 rounded-full pointer-events-none"
+              style={{
+                backgroundColor: p.color,
+                '--tx': `${tx}px`,
+                '--ty': `${ty}px`,
+                animation: `face-enroll-particle 1.1s cubic-bezier(0.22,1,0.36,1) ${i * 30}ms forwards`,
+              } as React.CSSProperties}
+            />
+          );
+        })}
+        <svg
+          viewBox="0 0 80 80"
+          className="w-24 h-24 overflow-visible"
+          aria-hidden
+          style={{ animation: 'face-enroll-pop 0.75s cubic-bezier(0.34,1.56,0.64,1) both' }}
+        >
+          <circle cx="40" cy="40" r="36" fill="#0d9488" />
+          <path
+            d="M22 41 L33 52 L58 28"
+            fill="none"
+            stroke="white"
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              strokeDasharray: 22,
+              strokeDashoffset: 22,
+              animation: 'face-enroll-check 0.55s cubic-bezier(0.16,1,0.3,1) 0.3s forwards',
+            }}
+          />
+        </svg>
+      </div>
+
+      {/* Text */}
+      <div
+        className="flex flex-col items-center gap-1 text-center"
+        style={{ animation: 'face-enroll-text 0.45s ease-out 0.5s both' }}
+      >
+        <p className="text-lg font-semibold text-teal-700">Face Enrolled!</p>
+        <p className="text-sm text-muted-foreground">{name} can now log in with face recognition.</p>
+      </div>
+    </div>
+  );
+}
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
     month: "long",
@@ -37,15 +106,30 @@ export function UserDetailPage() {
   const enrollMutation = useEnrollFace();
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollError, setEnrollError] = useState('');
+  const [enrollSuccess, setEnrollSuccess] = useState(false);
+  const [badgeGlow, setBadgeGlow] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleEnroll(blob: Blob) {
     if (!user) return;
     setEnrollError('');
     enrollMutation.mutate(
       { userId: user.id, blob },
-      { onSuccess: () => setEnrollOpen(false) },
+      {
+        onSuccess: () => {
+          setEnrollSuccess(true);
+          closeTimerRef.current = setTimeout(() => {
+            setEnrollOpen(false);
+            setEnrollSuccess(false);
+            setBadgeGlow(true);
+            setTimeout(() => setBadgeGlow(false), 1200);
+          }, 1800);
+        },
+      },
     );
   }
+
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
 
   if (isLoading) {
     return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
@@ -82,7 +166,7 @@ export function UserDetailPage() {
             </Badge>
             <Badge
               variant="outline"
-              className={faceEnrolled ? "border-teal-500 text-teal-600" : "text-muted-foreground"}
+              className={`${faceEnrolled ? "border-teal-500 text-teal-600" : "text-muted-foreground"} ${badgeGlow ? "animate-[face-badge-glow_1.1s_ease-out_forwards]" : ""}`}
             >
               <Camera size={11} className="mr-1" />
               {faceEnrolled ? "Face enrolled" : "No face enrolled"}
@@ -201,42 +285,51 @@ export function UserDetailPage() {
       </div>
 
       {/* Face enrollment dialog */}
-      <Dialog open={enrollOpen} onOpenChange={setEnrollOpen}>
+      <Dialog open={enrollOpen} onOpenChange={open => {
+        if (!open) { setEnrollSuccess(false); if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }
+        setEnrollOpen(open);
+      }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              {faceEnrolled ? `Re-enroll Face — ${user.name}` : `Enroll Face — ${user.name}`}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 mt-2">
-            <p className="text-sm text-muted-foreground">
-              {faceEnrolled
-                ? "Capturing a new photo will replace the existing face enrollment."
-                : "Capture a clear photo of the user's face to enable face recognition login."}
-            </p>
+          {enrollSuccess ? (
+            <FaceEnrollSuccess name={user.name} />
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {faceEnrolled ? `Re-enroll Face — ${user.name}` : `Enroll Face — ${user.name}`}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col gap-4 mt-2">
+                <p className="text-sm text-muted-foreground">
+                  {faceEnrolled
+                    ? "Capturing a new photo will replace the existing face enrollment."
+                    : "Capture a clear photo of the user's face to enable face recognition login."}
+                </p>
 
-            {enrollMutation.isPending ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
-                  <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-                Enrolling…
+                {enrollMutation.isPending ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                    Enrolling…
+                  </div>
+                ) : (
+                  <WebcamCapture
+                    onCapture={handleEnroll}
+                    label="Capture & Enroll"
+                    onError={msg => setEnrollError(msg)}
+                  />
+                )}
+
+                {(enrollError || enrollMutation.isError) && (
+                  <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+                    {enrollError || (enrollMutation.error instanceof Error ? enrollMutation.error.message : 'Enrollment failed. Try again.')}
+                  </p>
+                )}
               </div>
-            ) : (
-              <WebcamCapture
-                onCapture={handleEnroll}
-                label="Capture & Enroll"
-                onError={msg => setEnrollError(msg)}
-              />
-            )}
-
-            {(enrollError || enrollMutation.isError) && (
-              <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                {enrollError || (enrollMutation.error instanceof Error ? enrollMutation.error.message : 'Enrollment failed. Try again.')}
-              </p>
-            )}
-          </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

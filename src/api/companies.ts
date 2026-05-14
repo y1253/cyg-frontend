@@ -86,7 +86,8 @@ export interface TodoItem {
   dueDate: string | null;
   resolved: boolean;
   resolvedAt: string | null;
-  task: { id: number; title: string; description: string | null };
+  snoozedUntil: string | null;
+  task: { id: number; title: string; description: string | null; isSnoozable: boolean };
 }
 
 export interface CompanyDetail {

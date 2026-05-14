@@ -18,6 +18,7 @@ export interface AppTask {
   defaultCycleNth?: number | null;
   isImportant: boolean;
   canBeDisabled: boolean;
+  isSnoozable: boolean;
   createdAt: string;
   openTodos: number;
 }
@@ -32,6 +33,7 @@ export interface CreateTaskData {
   defaultCycleNth?: number;
   isImportant?: boolean;
   canBeDisabled?: boolean;
+  isSnoozable?: boolean;
 }
 
 export interface UpdateTaskData {
@@ -44,6 +46,7 @@ export interface UpdateTaskData {
   defaultCycleNth?: number;
   isImportant?: boolean;
   canBeDisabled?: boolean;
+  isSnoozable?: boolean;
 }
 
 export interface AssignTaskData {

@@ -28,9 +28,9 @@ import { useAssignCompany } from '@/hooks/useAssignCompany';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
-import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle } from '@/hooks/useTodoActions';
+import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
-import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote } from '@/hooks/useTaskSchedules';
+import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote, useDeleteSchedule } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeletedCompanies';
@@ -41,7 +41,7 @@ import type { CompanyLink } from '@/api/links';
 
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
-type UrgencyTier = 'overdue' | 'soon' | 'warning' | 'normal';
+type UrgencyTier = 'urgent' | 'overdue' | 'soon' | 'warning' | 'normal';
 
 function getTodoUrgency(dueDate: string | null): UrgencyTier {
   if (!dueDate) return 'normal';
@@ -49,12 +49,14 @@ function getTodoUrgency(dueDate: string | null): UrgencyTier {
   today.setHours(0, 0, 0, 0);
   const due = new Date(dueDate.slice(0, 10) + 'T00:00:00');
   const diffDays = (due.getTime() - today.getTime()) / 86_400_000;
+  if (diffDays <= -25) return 'urgent';
   if (diffDays < 0) return 'overdue';
   if (diffDays < 1) return 'soon';
   return 'normal';
 }
 
 const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = {
+  urgent:  { label: 'Urgent', className: 'bg-red-200 text-red-900 border-red-400' },
   overdue: { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' },
   soon: { label: 'Due today', className: 'bg-orange-100 text-orange-700 border-orange-200' },
   warning: { label: '< 5 days', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
@@ -64,12 +66,14 @@ const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = 
 // Border+bg for open todos
 function rowBg(tier: UrgencyTier, isRecurring: boolean, isImportant: boolean): string {
   if (isRecurring) {
+    if (tier === 'urgent')  return 'border-red-400 bg-red-100/80';
     if (tier === 'overdue') return 'border-red-300 bg-blue-50/80';
     if (tier === 'soon')    return 'border-orange-300 bg-blue-50/80';
     if (tier === 'warning') return 'border-yellow-300 bg-blue-50/80';
     if (isImportant)        return 'border-amber-300 bg-blue-50/60';
     return 'border-blue-200 bg-blue-50/60';
   }
+  if (tier === 'urgent')  return 'border-red-300 bg-red-100';
   if (tier === 'overdue') return 'border-red-200 bg-red-50';
   if (tier === 'soon')    return 'border-orange-200 bg-orange-50';
   if (tier === 'warning') return 'border-yellow-200 bg-yellow-50';
@@ -255,6 +259,8 @@ function TodoRow({
   onDelete,
   onSetCycle,
   onRemoveCycle,
+  onSnooze,
+  onUnsnooze,
   expandSignal,
 }: {
   todo: TodoItem;
@@ -268,6 +274,8 @@ function TodoRow({
   onDelete: () => void;
   onSetCycle: (cycle: number) => void;
   onRemoveCycle: () => void;
+  onSnooze: (days: number) => void;
+  onUnsnooze: () => void;
   expandSignal?: { expanded: boolean; seq: number };
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -280,6 +288,8 @@ function TodoRow({
   const [cycleInput, setCycleInput] = useState('30');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemoveCycle, setConfirmRemoveCycle] = useState(false);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeDaysInput, setSnoozeDaysInput] = useState('2');
 
   // `celebrating` fires immediately on click (particles + spring)
   const [celebrating, setCelebrating] = useState(false);
@@ -373,6 +383,22 @@ function TodoRow({
               </button>
             )}
 
+            {/* Snooze button — available to all users when task is snoozable */}
+            {todo.task.isSnoozable && !todo.resolved && (
+              <button
+                type="button"
+                title="Snooze"
+                onClick={() => { setSnoozeOpen(v => !v); setSnoozeDaysInput('2'); }}
+                className={`h-7 px-2 rounded text-[11px] font-semibold transition-colors ${
+                  snoozeOpen
+                    ? 'text-slate-700 bg-slate-100 border border-slate-300'
+                    : 'text-muted-foreground hover:text-slate-700 hover:bg-slate-50 border border-transparent'
+                }`}
+              >
+                Snooze
+              </button>
+            )}
+
             {/* Admin actions */}
             {isAdmin && !todo.resolved && (
               <>
@@ -460,6 +486,57 @@ function TodoRow({
             >
               Cancel
             </Button>
+          </div>
+        )}
+
+        {/* Inline snooze form */}
+        {snoozeOpen && todo.task.isSnoozable && !todo.resolved && (
+          <div className="mt-2 ml-8 flex flex-col gap-2 border-t border-border/50 pt-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Snooze for</span>
+              {[1, 2, 3, 7].map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setSnoozeDaysInput(String(d))}
+                  className={`h-6 px-2 rounded text-xs transition-colors ${
+                    snoozeDaysInput === String(d)
+                      ? 'bg-slate-200 text-slate-800 font-medium'
+                      : 'text-muted-foreground hover:bg-slate-100'
+                  }`}
+                >
+                  {d}d
+                </button>
+              ))}
+              <Input
+                type="number"
+                min={1}
+                max={90}
+                value={snoozeDaysInput}
+                onChange={e => setSnoozeDaysInput(e.target.value)}
+                className="h-7 w-16 text-xs px-2"
+                placeholder="days"
+              />
+              <span className="text-xs text-muted-foreground">days</span>
+              <Button
+                size="sm"
+                className="h-7 text-xs px-2"
+                onClick={() => {
+                  const n = Number(snoozeDaysInput);
+                  if (n >= 1) { onSnooze(n); setSnoozeOpen(false); }
+                }}
+              >
+                Snooze
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs px-2"
+                onClick={() => setSnoozeOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -917,15 +994,18 @@ function SchedulesSection({
   companyId,
   schedules,
   isAdmin,
+  onDeleteSchedule,
 }: {
   companyId: number;
   schedules: AppTaskSchedule[];
   isAdmin: boolean;
+  onDeleteSchedule: (id: number) => void;
 }) {
   const updateMutation = useUpdateSchedule(companyId);
   const toggleMutation = useToggleSchedule(companyId);
   const toggleImportantMutation = useToggleScheduleImportant(companyId);
   const updateUserNoteMutation = useUpdateScheduleUserNote(companyId);
+  const [confirmDeleteScheduleId, setConfirmDeleteScheduleId] = useState<number | null>(null);
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editCycleType, setEditCycleType] = useState<CycleTypeLocal>('DAYS');
@@ -947,8 +1027,8 @@ function SchedulesSection({
       )
     : schedules;
 
-  const active = filtered.filter(s => !s.deletedAt);
-  const disabled = filtered.filter(s => !!s.deletedAt);
+  const active = filtered.filter(s => !s.deletedAt).sort((a, b) => a.task.title.localeCompare(b.task.title));
+  const disabled = filtered.filter(s => !!s.deletedAt).sort((a, b) => a.task.title.localeCompare(b.task.title));
 
   if (schedules.length === 0) {
     return <p className="text-sm text-muted-foreground">No recurring schedules set up for this company yet.</p>;
@@ -956,24 +1036,32 @@ function SchedulesSection({
 
   function renderSchedule(s: AppTaskSchedule) {
     const isDisabled = !!s.deletedAt;
+    const isCustom = s.isManuallyAdded;
     return (
       <div
         key={s.id}
         className={`rounded-lg border px-4 py-3 flex items-start gap-3 transition-opacity ${
           isDisabled
             ? 'bg-muted/40 border-muted-foreground/20 opacity-60'
+            : isCustom
+            ? 'bg-teal-50/60 border-teal-200'
             : 'bg-blue-50/60 border-blue-200'
         }`}
       >
         <RefreshCw
           size={14}
-          className={`shrink-0 mt-1 ${isDisabled ? 'text-muted-foreground' : 'text-blue-500'}`}
+          className={`shrink-0 mt-1 ${isDisabled ? 'text-muted-foreground' : isCustom ? 'text-teal-500' : 'text-blue-500'}`}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className={`text-sm font-medium leading-snug ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
               {s.task.title}
             </p>
+            {isCustom && !isDisabled && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-teal-50 text-teal-700 border-teal-300">
+                Custom
+              </span>
+            )}
             {s.isImportant && !isDisabled && (
               <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300">
                 Important
@@ -1336,6 +1424,16 @@ function SchedulesSection({
                 {isDisabled ? <Power size={13} /> : <Ban size={13} />}
               </button>
             )}
+            {isCustom && (
+              <button
+                type="button"
+                title="Delete custom schedule"
+                onClick={() => setConfirmDeleteScheduleId(s.id)}
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1382,6 +1480,31 @@ function SchedulesSection({
           {disabled.map(s => renderSchedule(s))}
         </div>
       )}
+
+      {/* Delete custom schedule confirmation */}
+      <Dialog open={confirmDeleteScheduleId !== null} onOpenChange={open => { if (!open) setConfirmDeleteScheduleId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Custom Schedule</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Remove this custom schedule and its open todos? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmDeleteScheduleId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (confirmDeleteScheduleId !== null) {
+                  onDeleteSchedule(confirmDeleteScheduleId);
+                  setConfirmDeleteScheduleId(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1398,6 +1521,7 @@ export function CompanyDetailPage() {
   const [tab, setTab] = useState<Tab>('tasks');
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
+  const [snoozedExpanded, setSnoozedExpanded] = useState(false);
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -1414,6 +1538,9 @@ export function CompanyDetailPage() {
   const deleteMutation = useDeleteTodo(companyId);
   const setCycleMutation = useSetTodoCycle(companyId);
   const removeCycleMutation = useRemoveTodoCycle(companyId);
+  const snoozeMutation = useSnoozeTodo(companyId);
+  const unsnoozeMutation = useUnsnoozeTodo(companyId);
+  const deleteScheduleMutation = useDeleteSchedule(companyId);
 
   type EditSection = 'info' | 'contact' | 'legal' | 'accountant' | 'billing' | null;
   const [editSection, setEditSection] = useState<EditSection>(null);
@@ -1496,6 +1623,11 @@ export function CompanyDetailPage() {
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
 
   const regularUsers = users.filter(u => u.role === 'USER');
+  const now = new Date();
+  function isSnoozedNow(todo: TodoItem): boolean {
+    return !!todo.snoozedUntil && new Date(todo.snoozedUntil) > now;
+  }
+
   const resolvedTodos = company.todos.filter(t => t.resolved);
   // openTodos sorted after scheduleMap is built — see below
 
@@ -1510,12 +1642,36 @@ export function CompanyDetailPage() {
     return scheduleMap.get(todo.scheduleId) ?? null;
   }
 
-  const openTodos = company.todos
-    .filter(t => !t.resolved)
-    .sort((a, b) => Number(getSchedule(b)?.isImportant ?? false) - Number(getSchedule(a)?.isImportant ?? false));
+  function getOverdueDays(todo: TodoItem): number {
+    if (!todo.dueDate) return 0;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const due = new Date(todo.dueDate.slice(0, 10) + 'T00:00:00');
+    return (today.getTime() - due.getTime()) / 86_400_000;
+  }
 
-  const importantTodos = openTodos.filter(t => getSchedule(t)?.isImportant ?? false);
-  const otherTodos = openTodos.filter(t => !(getSchedule(t)?.isImportant ?? false));
+  function getTodoPriority(todo: TodoItem): number {
+    const isImportant = getSchedule(todo)?.isImportant ?? false;
+    const isUrgent = getTodoUrgency(todo.dueDate) === 'urgent';
+    if (isImportant && isUrgent) return 0;
+    if (isUrgent) return 1;
+    if (isImportant) return 2;
+    return 3;
+  }
+
+  const openTodos = company.todos
+    .filter(t => !t.resolved && !isSnoozedNow(t))
+    .sort((a, b) => {
+      const pa = getTodoPriority(a), pb = getTodoPriority(b);
+      if (pa !== pb) return pa - pb;
+      return getOverdueDays(b) - getOverdueDays(a);
+    });
+
+  const snoozedTodos = company.todos.filter(t => !t.resolved && isSnoozedNow(t));
+
+  const urgentTodos        = openTodos.filter(t => getTodoPriority(t) <= 1);
+  const importantOnlyTodos = openTodos.filter(t => getTodoPriority(t) === 2);
+  const restTodos          = openTodos.filter(t => getTodoPriority(t) === 3);
+  const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
@@ -1536,6 +1692,8 @@ export function CompanyDetailPage() {
       onDelete: () => deleteMutation.mutate(todo.id),
       onSetCycle: (cycle: number) => setCycleMutation.mutate({ id: todo.id, cycle }),
       onRemoveCycle: () => removeCycleMutation.mutate(todo.id),
+      onSnooze: (days: number) => snoozeMutation.mutate({ id: todo.id, days }),
+      onUnsnooze: () => unsnoozeMutation.mutate(todo.id),
       expandSignal,
     };
   }
@@ -1624,7 +1782,7 @@ export function CompanyDetailPage() {
             <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-amber-600">{importantTodos.length}</p>
+            <p className="text-2xl font-bold text-amber-600">{importantCount}</p>
             <p className="text-xs text-muted-foreground mt-0.5">Important</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
@@ -1993,38 +2151,79 @@ export function CompanyDetailPage() {
                   : <><ChevronDown size={13} /> Expand All</>
                 }
               </button>
-              {isAdmin && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5"
-                  onClick={() => setAddTaskOpen(true)}
-                >
-                  <Plus size={14} /> Add Task
-                </Button>
-              )}
             </div>
 
-            {openTodos.length === 0 ? (
+            {openTodos.length === 0 && snoozedTodos.length === 0 ? (
               <p className="text-sm text-muted-foreground">All tasks resolved.</p>
-            ) : (
+            ) : openTodos.length === 0 ? null : (
               <div className="flex flex-col gap-2">
-                {importantTodos.length > 0 && (
+                {urgentTodos.length > 0 && (
                   <>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 px-1">
-                      Important · {importantTodos.length}
+                    <p className="text-xs font-semibold uppercase tracking-wide text-red-600 px-1">
+                      Urgent · {urgentTodos.length}
                     </p>
-                    {importantTodos.map(todo => (
+                    {urgentTodos.map(todo => (
                       <TodoRow key={todo.id} {...todoRowProps(todo)} />
                     ))}
-                    {otherTodos.length > 0 && (
+                    {(importantOnlyTodos.length > 0 || restTodos.length > 0) && (
                       <div className="border-t border-border my-1" />
                     )}
                   </>
                 )}
-                {otherTodos.map(todo => (
+                {importantOnlyTodos.length > 0 && (
+                  <>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 px-1">
+                      Important · {importantOnlyTodos.length}
+                    </p>
+                    {importantOnlyTodos.map(todo => (
+                      <TodoRow key={todo.id} {...todoRowProps(todo)} />
+                    ))}
+                    {restTodos.length > 0 && (
+                      <div className="border-t border-border my-1" />
+                    )}
+                  </>
+                )}
+                {restTodos.map(todo => (
                   <TodoRow key={todo.id} {...todoRowProps(todo)} />
                 ))}
+              </div>
+            )}
+
+            {/* Snoozed todos */}
+            {snoozedTodos.length > 0 && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => setSnoozedExpanded(v => !v)}
+                  className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 font-medium px-1 py-0.5"
+                >
+                  {snoozedExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  {snoozedTodos.length} snoozed
+                </button>
+                {snoozedExpanded && (
+                  <div className="flex flex-col gap-2 mt-2">
+                    {snoozedTodos.map(todo => {
+                      const until = todo.snoozedUntil ? formatDate(todo.snoozedUntil) : null;
+                      return (
+                        <div key={todo.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-600">{todo.task.title}</p>
+                            {until && (
+                              <p className="text-xs text-slate-400 mt-0.5">Snoozed until {until}</p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => unsnoozeMutation.mutate(todo.id)}
+                            className="shrink-0 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-200 px-2 py-1 rounded transition-colors"
+                          >
+                            Unsnooze
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2059,11 +2258,22 @@ export function CompanyDetailPage() {
                   {isAdmin ? 'Manage repeating tasks assigned to this company.' : 'Repeating tasks for this company.'}
                 </p>
               </div>
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => setAddTaskOpen(true)}
+                >
+                  <Plus size={14} /> Add Task
+                </Button>
+              )}
             </div>
             <SchedulesSection
               companyId={companyId}
               schedules={schedules}
               isAdmin={isAdmin}
+              onDeleteSchedule={id => deleteScheduleMutation.mutate(id)}
             />
           </div>
         )}

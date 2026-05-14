@@ -111,6 +111,9 @@ export function TasksPage() {
               onToggleCanBeDisabled={() =>
                 updateMutation.mutate({ id: task.id, data: { canBeDisabled: !task.canBeDisabled } })
               }
+              onToggleSnoozable={() =>
+                updateMutation.mutate({ id: task.id, data: { isSnoozable: !task.isSnoozable } })
+              }
             />
           ))}
         </div>
@@ -170,12 +173,14 @@ function TaskRow({
   onDelete,
   onToggleImportant,
   onToggleCanBeDisabled,
+  onToggleSnoozable,
 }: {
   task: AppTask;
   onEdit: () => void;
   onDelete: () => void;
   onToggleImportant: () => void;
   onToggleCanBeDisabled: () => void;
+  onToggleSnoozable: () => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-background px-4 py-3">
@@ -214,6 +219,17 @@ function TaskRow({
           }`}
         >
           Can disable
+        </button>
+        <button
+          type="button"
+          onClick={onToggleSnoozable}
+          className={`h-7 px-2 rounded text-[11px] font-semibold transition-colors ${
+            task.isSnoozable
+              ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300'
+              : 'text-muted-foreground hover:text-slate-700 hover:bg-slate-50 border border-transparent'
+          }`}
+        >
+          Snoozable
         </button>
         <Button
           variant="ghost"
