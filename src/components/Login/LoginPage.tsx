@@ -12,13 +12,14 @@ const TEXT_PRIMARY = '#EDF2F7';
 const TEXT_MUTED = '#5E7A96';
 const TEXT_LABEL = '#7A98B4';
 
-type Stage = 'email' | 'face' | 'admin';
+type Stage = 'email' | 'face' | 'admin' | 'verified';
 
 export function LoginPage() {
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [verifiedName, setVerifiedName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { setUser, setToken } = useAuth();
@@ -45,7 +46,9 @@ export function LoginPage() {
       const data = await faceLogin(email, blob);
       setToken(data.access_token);
       setUser(data.user);
-      navigate('/dashboard');
+      setVerifiedName(data.user.name);
+      setStage('verified');
+      setTimeout(() => navigate('/dashboard'), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Face not recognized. Please try again.');
     } finally {
@@ -85,6 +88,16 @@ export function LoginPage() {
         }
         @keyframes spin {
           to { transform: rotate(360deg); }
+        }
+        @keyframes ping {
+          0%   { transform: scale(1);   opacity: 0.7; }
+          100% { transform: scale(2.4); opacity: 0; }
+        }
+        @keyframes drawCircle {
+          to { stroke-dashoffset: 0; }
+        }
+        @keyframes drawCheck {
+          to { stroke-dashoffset: 0; }
         }
         @keyframes barRise {
           from { transform: scaleY(0); }
@@ -475,6 +488,51 @@ export function LoginPage() {
                   </button>
                 </form>
               </>
+            )}
+
+            {/* ── STAGE: VERIFIED ── */}
+            {stage === 'verified' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, padding: '48px 0' }}>
+                <div style={{ position: 'relative', width: 96, height: 96 }}>
+                  {/* Pulsing ring */}
+                  <div style={{
+                    position: 'absolute', top: -16, left: -16, right: -16, bottom: -16,
+                    borderRadius: '50%', border: `2px solid ${TEAL}`,
+                    animation: 'ping 1s cubic-bezier(0,0,0.2,1) forwards',
+                  }} />
+                  {/* SVG circle + checkmark */}
+                  <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+                    <circle
+                      cx="48" cy="48" r="44"
+                      stroke={TEAL} strokeWidth="2.5"
+                      strokeDasharray="276" strokeDashoffset="276"
+                      style={{ animation: 'drawCircle 0.6s ease forwards 0.15s' }}
+                    />
+                    <polyline
+                      points="27,50 41,64 69,34"
+                      stroke={TEAL} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="70" strokeDashoffset="70"
+                      style={{ animation: 'drawCheck 0.4s ease forwards 0.75s' }}
+                    />
+                  </svg>
+                </div>
+
+                <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <p style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: TEXT_PRIMARY, fontSize: 26, fontWeight: 600, margin: 0,
+                    opacity: 0, animation: 'fadeUp 0.45s ease forwards 0.85s',
+                  }}>
+                    Identity Verified
+                  </p>
+                  <p style={{
+                    color: TEXT_MUTED, fontSize: 14, fontWeight: 300, margin: 0,
+                    opacity: 0, animation: 'fadeUp 0.45s ease forwards 1.1s',
+                  }}>
+                    Welcome back, {verifiedName}
+                  </p>
+                </div>
+              </div>
             )}
 
             <p className="fu d6" style={{ textAlign: 'center', color: 'rgba(94,122,150,0.55)', fontSize: 11.5, marginTop: 44, letterSpacing: '0.04em' }}>
