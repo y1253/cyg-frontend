@@ -260,7 +260,6 @@ function TodoRow({
   onSetCycle,
   onRemoveCycle,
   onSnooze,
-  onUnsnooze,
   expandSignal,
 }: {
   todo: TodoItem;
@@ -275,7 +274,6 @@ function TodoRow({
   onSetCycle: (cycle: number) => void;
   onRemoveCycle: () => void;
   onSnooze: (days: number) => void;
-  onUnsnooze: () => void;
   expandSignal?: { expanded: boolean; seq: number };
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -1693,7 +1691,6 @@ export function CompanyDetailPage() {
       onSetCycle: (cycle: number) => setCycleMutation.mutate({ id: todo.id, cycle }),
       onRemoveCycle: () => removeCycleMutation.mutate(todo.id),
       onSnooze: (days: number) => snoozeMutation.mutate({ id: todo.id, days }),
-      onUnsnooze: () => unsnoozeMutation.mutate(todo.id),
       expandSignal,
     };
   }
