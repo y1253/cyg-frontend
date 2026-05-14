@@ -1784,7 +1784,7 @@ export function CompanyDetailPage() {
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
             <p className="text-2xl font-bold text-red-600">
-              {openTodos.filter(t => ['overdue','urgent'].includes(getTodoUrgency(t.dueDate))).length}
+              {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">Urgent</p>
           </div>
