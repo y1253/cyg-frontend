@@ -1034,7 +1034,7 @@ function SchedulesSection({
 
   function renderSchedule(s: AppTaskSchedule) {
     const isDisabled = !!s.deletedAt;
-    const isCustom = s.isManuallyAdded;
+    const isCustom = !!s.isManuallyAdded;
     return (
       <div
         key={s.id}

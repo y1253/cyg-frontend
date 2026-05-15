@@ -1,8 +1,8 @@
+import { fetchWithAuth } from './client';
+
 const API = '/api';
 
-function authHeaders(token: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export interface ResolveResponse {
   id: number;
@@ -11,9 +11,9 @@ export interface ResolveResponse {
 }
 
 export async function resolveTodo(token: string, id: number): Promise<ResolveResponse> {
-  const res = await fetch(`${API}/todos/${id}/resolve`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}/resolve`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -23,9 +23,9 @@ export async function resolveTodo(token: string, id: number): Promise<ResolveRes
 }
 
 export async function deleteTodo(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/todos/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -34,9 +34,9 @@ export async function deleteTodo(token: string, id: number): Promise<void> {
 }
 
 export async function setTodoCycle(token: string, id: number, cycle: number): Promise<void> {
-  const res = await fetch(`${API}/todos/${id}/set-cycle`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}/set-cycle`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ cycle }),
   });
   if (!res.ok) {
@@ -46,9 +46,9 @@ export async function setTodoCycle(token: string, id: number, cycle: number): Pr
 }
 
 export async function removeTodoCycle(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/todos/${id}/remove-cycle`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}/remove-cycle`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -57,9 +57,9 @@ export async function removeTodoCycle(token: string, id: number): Promise<void> 
 }
 
 export async function snoozeTodo(token: string, id: number, days: number): Promise<void> {
-  const res = await fetch(`${API}/todos/${id}/snooze`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}/snooze`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ days }),
   });
   if (!res.ok) {
@@ -69,13 +69,12 @@ export async function snoozeTodo(token: string, id: number, days: number): Promi
 }
 
 export async function unsnoozeTodo(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/todos/${id}/unsnooze`, {
+  const res = await fetchWithAuth(token, `${API}/todos/${id}/unsnooze`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? 'Failed to unsnooze');
   }
 }
-

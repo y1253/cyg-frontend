@@ -18,6 +18,13 @@ import { Step4ContactInfo } from './steps/Step4ContactInfo';
 import { Step5LegalInfo } from './steps/Step5LegalInfo';
 import { Step6Billing } from './steps/Step6Billing';
 import { Step7Accountant } from './steps/Step7Accountant';
+import { Step8Reconciliation } from './steps/Step8Reconciliation';
+
+export interface ReconciliationAccount {
+  name: string;
+  type: string;
+  startDate: string;
+}
 
 export interface FormData {
   // Step 1
@@ -47,6 +54,8 @@ export interface FormData {
   accountantName: string;
   accountantEmail: string;
   accountantPhone: string;
+  // Step 8
+  reconciliationAccounts: ReconciliationAccount[];
 }
 
 const EMPTY_FORM: FormData = {
@@ -70,6 +79,7 @@ const EMPTY_FORM: FormData = {
   accountantName: '',
   accountantEmail: '',
   accountantPhone: '',
+  reconciliationAccounts: [{ name: '', type: '', startDate: '' }],
 };
 
 interface StepConfig {
@@ -109,6 +119,11 @@ const BASE_STEPS: StepConfig[] = [
     title: 'Accountant Details',
     description: 'Information about your current accountant, if applicable.',
   },
+  {
+    label: 'Reconciliation',
+    title: 'Bank Accounts to Reconcile',
+    description: 'Add the accounts you would like us to reconcile. Each will be on a 30-day cycle.',
+  },
 ];
 
 const LEGAL_STEP: StepConfig = {
@@ -146,6 +161,7 @@ export function RegisterPage() {
     if (legalInserted && idx === 4) return 'legal';
     if (idx === (legalInserted ? 5 : 4)) return 'billing';
     if (idx === (legalInserted ? 6 : 5)) return 'accountant';
+    if (idx === (legalInserted ? 7 : 6)) return 'reconciliation';
     return '';
   }
 
@@ -191,6 +207,10 @@ export function RegisterPage() {
         form.accountantPhone.trim() !== ''
       );
     }
+    if (name === 'reconciliation') {
+      if (form.reconciliationAccounts.length === 0) return false;
+      return form.reconciliationAccounts.every(a => a.name.trim() !== '' && a.type !== '' && a.startDate !== '');
+    }
     return true;
   }
 
@@ -229,6 +249,9 @@ export function RegisterPage() {
         accountantName: form.accountantName || undefined,
         accountantEmail: form.accountantEmail || undefined,
         accountantPhone: form.accountantPhone || undefined,
+        reconciliationAccounts: form.reconciliationAccounts.length > 0
+          ? form.reconciliationAccounts
+          : undefined,
       });
     }
   }
@@ -307,6 +330,9 @@ export function RegisterPage() {
             )}
             {currentStepName === 'accountant' && (
               <Step7Accountant data={form} onChange={patch} />
+            )}
+            {currentStepName === 'reconciliation' && (
+              <Step8Reconciliation data={form} onChange={patch} />
             )}
           </CardContent>
 

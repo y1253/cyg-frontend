@@ -1,8 +1,8 @@
+import { fetchWithAuth } from './client';
+
 const API = '/api';
 
-function authHeaders(token: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export interface CompanyLink {
   id: number;
@@ -12,8 +12,8 @@ export interface CompanyLink {
 }
 
 export async function fetchLinks(token: string, companyId: number): Promise<CompanyLink[]> {
-  const res = await fetch(`${API}/links/company/${companyId}`, {
-    headers: authHeaders(token),
+  const res = await fetchWithAuth(token, `${API}/links/company/${companyId}`, {
+    headers: JSON_HEADERS,
   });
   if (!res.ok) throw new Error('Failed to fetch links');
   return res.json() as Promise<CompanyLink[]>;
@@ -23,9 +23,9 @@ export async function createLink(
   token: string,
   data: { companyId: number; label: string; url: string },
 ): Promise<CompanyLink> {
-  const res = await fetch(`${API}/links`, {
+  const res = await fetchWithAuth(token, `${API}/links`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -40,9 +40,9 @@ export async function updateLink(
   id: number,
   data: { label?: string; url?: string },
 ): Promise<CompanyLink> {
-  const res = await fetch(`${API}/links/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/links/${id}`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -53,9 +53,9 @@ export async function updateLink(
 }
 
 export async function deleteLink(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/links/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/links/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };

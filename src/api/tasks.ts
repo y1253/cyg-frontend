@@ -1,8 +1,8 @@
+import { fetchWithAuth } from './client';
+
 const API = '/api';
 
-function authHeaders(token: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export type TaskCycleType = 'DAYS' | 'MONTHLY_DATE' | 'WEEKLY_DAY' | 'MONTHLY_WEEKDAY' | 'QUARTERLY' | 'YEARLY';
 
@@ -64,15 +64,15 @@ async function throwOnError(res: Response) {
 }
 
 export async function fetchTasks(token: string): Promise<AppTask[]> {
-  const res = await fetch(`${API}/tasks`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/tasks`, { headers: JSON_HEADERS });
   await throwOnError(res);
   return res.json() as Promise<AppTask[]>;
 }
 
 export async function createTask(token: string, data: CreateTaskData): Promise<AppTask> {
-  const res = await fetch(`${API}/tasks`, {
+  const res = await fetchWithAuth(token, `${API}/tasks`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   await throwOnError(res);
@@ -80,9 +80,9 @@ export async function createTask(token: string, data: CreateTaskData): Promise<A
 }
 
 export async function updateTask(token: string, id: number, data: UpdateTaskData): Promise<AppTask> {
-  const res = await fetch(`${API}/tasks/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/tasks/${id}`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   await throwOnError(res);
@@ -90,18 +90,18 @@ export async function updateTask(token: string, id: number, data: UpdateTaskData
 }
 
 export async function deleteTask(token: string, id: number): Promise<{ id: number }> {
-  const res = await fetch(`${API}/tasks/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/tasks/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   await throwOnError(res);
   return res.json() as Promise<{ id: number }>;
 }
 
 export async function assignTask(token: string, taskId: number, data: AssignTaskData): Promise<void> {
-  const res = await fetch(`${API}/tasks/${taskId}/assign`, {
+  const res = await fetchWithAuth(token, `${API}/tasks/${taskId}/assign`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   await throwOnError(res);

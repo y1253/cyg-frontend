@@ -1,4 +1,8 @@
+import { fetchWithAuth } from './client';
+
 const API = '/api';
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 // ─── Register ────────────────────────────────────────────────────────────────
 
@@ -23,6 +27,7 @@ export interface RegisterCompanyData {
   accountantName?: string;
   accountantEmail?: string;
   accountantPhone?: string;
+  reconciliationAccounts?: { name: string; type: string; startDate: string }[];
 }
 
 export interface RegisterCompanyResponse {
@@ -35,7 +40,7 @@ export async function registerCompany(
 ): Promise<RegisterCompanyResponse> {
   const res = await fetch(`${API}/companies/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -46,10 +51,6 @@ export async function registerCompany(
 }
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
-
-function authHeaders(token: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 export interface AssignedUser {
   id: number;
@@ -73,7 +74,7 @@ export interface CompanySummary {
 }
 
 export async function fetchCompanies(token: string): Promise<CompanySummary[]> {
-  const res = await fetch(`${API}/companies`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/companies`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch companies');
   return res.json() as Promise<CompanySummary[]>;
 }
@@ -128,7 +129,7 @@ export interface CompanyDetail {
 }
 
 export async function fetchCompany(token: string, id: number): Promise<CompanyDetail> {
-  const res = await fetch(`${API}/companies/${id}`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/companies/${id}`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch company');
   return res.json() as Promise<CompanyDetail>;
 }
@@ -163,9 +164,9 @@ export async function updateCompany(
   id: number,
   data: UpdateCompanyData,
 ): Promise<{ id: number }> {
-  const res = await fetch(`${API}/companies/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/companies/${id}`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -178,9 +179,9 @@ export async function updateCompany(
 // ─── Delete company ──────────────────────────────────────────────────────────
 
 export async function deleteCompany(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/companies/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/companies/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -199,15 +200,15 @@ export interface DeletedCompanySummary {
 }
 
 export async function fetchDeletedCompanies(token: string): Promise<DeletedCompanySummary[]> {
-  const res = await fetch(`${API}/companies/deleted`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/companies/deleted`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch deleted companies');
   return res.json() as Promise<DeletedCompanySummary[]>;
 }
 
 export async function restoreCompany(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/companies/${id}/restore`, {
+  const res = await fetchWithAuth(token, `${API}/companies/${id}/restore`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -216,9 +217,9 @@ export async function restoreCompany(token: string, id: number): Promise<void> {
 }
 
 export async function permanentDeleteCompany(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/companies/${id}/permanent`, {
+  const res = await fetchWithAuth(token, `${API}/companies/${id}/permanent`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -233,9 +234,9 @@ export async function assignCompanyUser(
   companyId: number,
   userId: number | null,
 ): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API}/companies/${companyId}/assign`, {
+  const res = await fetchWithAuth(token, `${API}/companies/${companyId}/assign`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ userId }),
   });
   if (!res.ok) {

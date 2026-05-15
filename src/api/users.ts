@@ -1,4 +1,8 @@
+import { fetchWithAuth } from './client';
+
 const API = '/api';
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export interface AppUser {
   id: number;
@@ -15,18 +19,14 @@ export interface CreateUserData {
   role: string;
 }
 
-function authHeaders(token: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
-
 export async function fetchRoles(token: string): Promise<string[]> {
-  const res = await fetch(`${API}/users/roles`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/users/roles`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch roles');
   return res.json() as Promise<string[]>;
 }
 
 export async function fetchUsers(token: string): Promise<AppUser[]> {
-  const res = await fetch(`${API}/users`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/users`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch users');
   return res.json() as Promise<AppUser[]>;
 }
@@ -47,15 +47,15 @@ export interface AppUserDetail extends AppUser {
 }
 
 export async function fetchUser(token: string, id: number): Promise<AppUserDetail> {
-  const res = await fetch(`${API}/users/${id}`, { headers: authHeaders(token) });
+  const res = await fetchWithAuth(token, `${API}/users/${id}`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch user');
   return res.json() as Promise<AppUserDetail>;
 }
 
 export async function createUser(token: string, data: CreateUserData): Promise<AppUser> {
-  const res = await fetch(`${API}/users`, {
+  const res = await fetchWithAuth(token, `${API}/users`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -72,9 +72,9 @@ export interface UpdateUserData {
 }
 
 export async function updateUser(token: string, id: number, data: UpdateUserData): Promise<AppUser> {
-  const res = await fetch(`${API}/users/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/users/${id}`, {
     method: 'PATCH',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -85,9 +85,9 @@ export async function updateUser(token: string, id: number, data: UpdateUserData
 }
 
 export async function deleteUser(token: string, id: number): Promise<void> {
-  const res = await fetch(`${API}/users/${id}`, {
+  const res = await fetchWithAuth(token, `${API}/users/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: JSON_HEADERS,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { message?: string };
@@ -98,9 +98,8 @@ export async function deleteUser(token: string, id: number): Promise<void> {
 export async function enrollFace(token: string, userId: number, imageBlob: Blob): Promise<AppUser> {
   const form = new FormData();
   form.append('photo', imageBlob, 'capture.jpg');
-  const res = await fetch(`${API}/users/${userId}/enroll-face`, {
+  const res = await fetchWithAuth(token, `${API}/users/${userId}/enroll-face`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
   if (!res.ok) {
