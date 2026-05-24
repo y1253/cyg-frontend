@@ -28,6 +28,36 @@ export interface RegisterCompanyData {
   accountantEmail?: string;
   accountantPhone?: string;
   reconciliationAccounts?: { name: string; type: string; startDate: string }[];
+  apManageBills?: boolean;
+  apStartDate?: string;
+  apCycleType?: string;
+  apCycle?: number;
+  apCycleDay?: number;
+  apCycleNth?: number;
+  arInvoicingEnabled?: boolean;
+  arInvoicingCycleType?: string;
+  arInvoicingCycle?: number;
+  arInvoicingCycleDay?: number;
+  arInvoicingCycleNth?: number;
+  arInvoicingNote?: string;
+  arStatementsEnabled?: boolean;
+  arStatementsCycleType?: string;
+  arStatementsCycle?: number;
+  arStatementsCycleDay?: number;
+  arStatementsCycleNth?: number;
+  arStatementsNote?: string;
+  arCollectionEnabled?: boolean;
+  arCollectionCycleType?: string;
+  arCollectionCycle?: number;
+  arCollectionCycleDay?: number;
+  arCollectionCycleNth?: number;
+  arCollectionNote?: string;
+  arReportEnabled?: boolean;
+  arReportCycleType?: string;
+  arReportCycle?: number;
+  arReportCycleDay?: number;
+  arReportCycleNth?: number;
+  arReportNote?: string;
 }
 
 export interface RegisterCompanyResponse {

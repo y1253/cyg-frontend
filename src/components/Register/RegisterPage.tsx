@@ -19,6 +19,8 @@ import { Step5LegalInfo } from './steps/Step5LegalInfo';
 import { Step6Billing } from './steps/Step6Billing';
 import { Step7Accountant } from './steps/Step7Accountant';
 import { Step8Reconciliation } from './steps/Step8Reconciliation';
+import { Step9AccountsPayable } from './steps/Step9AccountsPayable';
+import { Step10AccountsReceivable } from './steps/Step10AccountsReceivable';
 
 export interface ReconciliationAccount {
   name: string;
@@ -56,6 +58,38 @@ export interface FormData {
   accountantPhone: string;
   // Step 8
   reconciliationAccounts: ReconciliationAccount[];
+  // Step 9
+  apManageBills: boolean | null;
+  apStartDate: string;
+  apCycleType: string;
+  apCycle: number;
+  apCycleDay: number | null;
+  apCycleNth: number | null;
+  // Step 10 — Accounts Receivable
+  arInvoicingEnabled: boolean | null;
+  arInvoicingCycleType: string;
+  arInvoicingCycle: number;
+  arInvoicingCycleDay: number | null;
+  arInvoicingCycleNth: number | null;
+  arInvoicingNote: string;
+  arStatementsEnabled: boolean | null;
+  arStatementsCycleType: string;
+  arStatementsCycle: number;
+  arStatementsCycleDay: number | null;
+  arStatementsCycleNth: number | null;
+  arStatementsNote: string;
+  arCollectionEnabled: boolean | null;
+  arCollectionCycleType: string;
+  arCollectionCycle: number;
+  arCollectionCycleDay: number | null;
+  arCollectionCycleNth: number | null;
+  arCollectionNote: string;
+  arReportEnabled: boolean | null;
+  arReportCycleType: string;
+  arReportCycle: number;
+  arReportCycleDay: number | null;
+  arReportCycleNth: number | null;
+  arReportNote: string;
 }
 
 const EMPTY_FORM: FormData = {
@@ -80,6 +114,36 @@ const EMPTY_FORM: FormData = {
   accountantEmail: '',
   accountantPhone: '',
   reconciliationAccounts: [{ name: '', type: '', startDate: '' }],
+  apManageBills: null,
+  apStartDate: '',
+  apCycleType: 'DAYS',
+  apCycle: 30,
+  apCycleDay: null,
+  apCycleNth: null,
+  arInvoicingEnabled: null,
+  arInvoicingCycleType: 'DAYS',
+  arInvoicingCycle: 30,
+  arInvoicingCycleDay: null,
+  arInvoicingCycleNth: null,
+  arInvoicingNote: '',
+  arStatementsEnabled: null,
+  arStatementsCycleType: 'DAYS',
+  arStatementsCycle: 30,
+  arStatementsCycleDay: null,
+  arStatementsCycleNth: null,
+  arStatementsNote: '',
+  arCollectionEnabled: null,
+  arCollectionCycleType: 'DAYS',
+  arCollectionCycle: 30,
+  arCollectionCycleDay: null,
+  arCollectionCycleNth: null,
+  arCollectionNote: '',
+  arReportEnabled: null,
+  arReportCycleType: 'DAYS',
+  arReportCycle: 30,
+  arReportCycleDay: null,
+  arReportCycleNth: null,
+  arReportNote: '',
 };
 
 interface StepConfig {
@@ -124,6 +188,16 @@ const BASE_STEPS: StepConfig[] = [
     title: 'Bank Accounts to Reconcile',
     description: 'Add the accounts you would like us to reconcile. Each will be on a 30-day cycle.',
   },
+  {
+    label: 'Payables',
+    title: 'Accounts Payable Management',
+    description: 'Do you want us to track and enter your bills?',
+  },
+  {
+    label: 'Receivables',
+    title: 'Accounts Receivable',
+    description: 'How should we handle your accounts receivable?',
+  },
 ];
 
 const LEGAL_STEP: StepConfig = {
@@ -162,6 +236,8 @@ export function RegisterPage() {
     if (idx === (legalInserted ? 5 : 4)) return 'billing';
     if (idx === (legalInserted ? 6 : 5)) return 'accountant';
     if (idx === (legalInserted ? 7 : 6)) return 'reconciliation';
+    if (idx === (legalInserted ? 8 : 7)) return 'accountspayable';
+    if (idx === (legalInserted ? 9 : 8)) return 'accountsreceivable';
     return '';
   }
 
@@ -211,6 +287,19 @@ export function RegisterPage() {
       if (form.reconciliationAccounts.length === 0) return false;
       return form.reconciliationAccounts.every(a => a.name.trim() !== '' && a.type !== '' && a.startDate !== '');
     }
+    if (name === 'accountspayable') {
+      if (form.apManageBills === null) return false;
+      if (form.apManageBills === true && form.apStartDate === '') return false;
+      return true;
+    }
+    if (name === 'accountsreceivable') {
+      return (
+        form.arInvoicingEnabled !== null &&
+        form.arStatementsEnabled !== null &&
+        form.arCollectionEnabled !== null &&
+        form.arReportEnabled !== null
+      );
+    }
     return true;
   }
 
@@ -252,6 +341,46 @@ export function RegisterPage() {
         reconciliationAccounts: form.reconciliationAccounts.length > 0
           ? form.reconciliationAccounts
           : undefined,
+        apManageBills: form.apManageBills ?? undefined,
+        ...(form.apManageBills === true && {
+          apStartDate: form.apStartDate || undefined,
+          apCycleType: form.apCycleType || undefined,
+          apCycle: form.apCycle || undefined,
+          apCycleDay: form.apCycleDay ?? undefined,
+          apCycleNth: form.apCycleNth ?? undefined,
+        }),
+        arInvoicingEnabled: form.arInvoicingEnabled ?? undefined,
+        ...(form.arInvoicingEnabled === true && {
+          arInvoicingCycleType: form.arInvoicingCycleType || undefined,
+          arInvoicingCycle: form.arInvoicingCycle || undefined,
+          arInvoicingCycleDay: form.arInvoicingCycleDay ?? undefined,
+          arInvoicingCycleNth: form.arInvoicingCycleNth ?? undefined,
+          arInvoicingNote: form.arInvoicingNote || undefined,
+        }),
+        arStatementsEnabled: form.arStatementsEnabled ?? undefined,
+        ...(form.arStatementsEnabled === true && {
+          arStatementsCycleType: form.arStatementsCycleType || undefined,
+          arStatementsCycle: form.arStatementsCycle || undefined,
+          arStatementsCycleDay: form.arStatementsCycleDay ?? undefined,
+          arStatementsCycleNth: form.arStatementsCycleNth ?? undefined,
+          arStatementsNote: form.arStatementsNote || undefined,
+        }),
+        arCollectionEnabled: form.arCollectionEnabled ?? undefined,
+        ...(form.arCollectionEnabled === true && {
+          arCollectionCycleType: form.arCollectionCycleType || undefined,
+          arCollectionCycle: form.arCollectionCycle || undefined,
+          arCollectionCycleDay: form.arCollectionCycleDay ?? undefined,
+          arCollectionCycleNth: form.arCollectionCycleNth ?? undefined,
+          arCollectionNote: form.arCollectionNote || undefined,
+        }),
+        arReportEnabled: form.arReportEnabled ?? undefined,
+        ...(form.arReportEnabled === true && {
+          arReportCycleType: form.arReportCycleType || undefined,
+          arReportCycle: form.arReportCycle || undefined,
+          arReportCycleDay: form.arReportCycleDay ?? undefined,
+          arReportCycleNth: form.arReportCycleNth ?? undefined,
+          arReportNote: form.arReportNote || undefined,
+        }),
       });
     }
   }
@@ -333,6 +462,12 @@ export function RegisterPage() {
             )}
             {currentStepName === 'reconciliation' && (
               <Step8Reconciliation data={form} onChange={patch} />
+            )}
+            {currentStepName === 'accountspayable' && (
+              <Step9AccountsPayable data={form} onChange={patch} />
+            )}
+            {currentStepName === 'accountsreceivable' && (
+              <Step10AccountsReceivable data={form} onChange={patch} />
             )}
           </CardContent>
 

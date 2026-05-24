@@ -41,6 +41,7 @@ export async function createSchedule(
     cycleDay?: number;
     cycleNth?: number;
     note?: string;
+    startDate?: string;
   },
 ): Promise<AppTaskSchedule> {
   const res = await fetchWithAuth(token, BASE, {
