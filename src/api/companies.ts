@@ -58,6 +58,23 @@ export interface RegisterCompanyData {
   arReportCycleDay?: number;
   arReportCycleNth?: number;
   arReportNote?: string;
+  payrollEnabled?: boolean;
+  payrollCycleType?: string;
+  payrollCycle?: number;
+  payrollCycleDay?: number;
+  payrollCycleNth?: number;
+  payrollNote?: string;
+  payrollTaxEnabled?: boolean;
+  payrollTaxRegion?: string;
+  payrollTaxCycleType?: string;
+  payrollTaxCycle?: number;
+  payrollTaxCycleDay?: number;
+  payrollTaxCycleNth?: number;
+  payrollTaxNote?: string;
+  payrollYearEndEnabled?: boolean;
+  payrollYearEndRl1?: boolean;
+  payrollYearEndT4?: boolean;
+  payrollYearEndCnesst?: boolean;
 }
 
 export interface RegisterCompanyResponse {

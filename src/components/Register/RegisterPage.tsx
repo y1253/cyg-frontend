@@ -21,6 +21,7 @@ import { Step7Accountant } from './steps/Step7Accountant';
 import { Step8Reconciliation } from './steps/Step8Reconciliation';
 import { Step9AccountsPayable } from './steps/Step9AccountsPayable';
 import { Step10AccountsReceivable } from './steps/Step10AccountsReceivable';
+import { Step11Payroll } from './steps/Step11Payroll';
 
 export interface ReconciliationAccount {
   name: string;
@@ -90,6 +91,24 @@ export interface FormData {
   arReportCycleDay: number | null;
   arReportCycleNth: number | null;
   arReportNote: string;
+  // Step 11 — Payroll
+  payrollEnabled: boolean | null;
+  payrollCycleType: string;
+  payrollCycle: number;
+  payrollCycleDay: number | null;
+  payrollCycleNth: number | null;
+  payrollNote: string;
+  payrollTaxEnabled: boolean | null;
+  payrollTaxRegion: string | null;
+  payrollTaxCycleType: string;
+  payrollTaxCycle: number;
+  payrollTaxCycleDay: number | null;
+  payrollTaxCycleNth: number | null;
+  payrollTaxNote: string;
+  payrollYearEndEnabled: boolean | null;
+  payrollYearEndRl1: boolean;
+  payrollYearEndT4: boolean;
+  payrollYearEndCnesst: boolean;
 }
 
 const EMPTY_FORM: FormData = {
@@ -144,6 +163,23 @@ const EMPTY_FORM: FormData = {
   arReportCycleDay: null,
   arReportCycleNth: null,
   arReportNote: '',
+  payrollEnabled: null,
+  payrollCycleType: 'DAYS',
+  payrollCycle: 30,
+  payrollCycleDay: null,
+  payrollCycleNth: null,
+  payrollNote: '',
+  payrollTaxEnabled: null,
+  payrollTaxRegion: null,
+  payrollTaxCycleType: 'DAYS',
+  payrollTaxCycle: 30,
+  payrollTaxCycleDay: null,
+  payrollTaxCycleNth: null,
+  payrollTaxNote: '',
+  payrollYearEndEnabled: null,
+  payrollYearEndRl1: false,
+  payrollYearEndT4: false,
+  payrollYearEndCnesst: false,
 };
 
 interface StepConfig {
@@ -198,6 +234,11 @@ const BASE_STEPS: StepConfig[] = [
     title: 'Accounts Receivable',
     description: 'How should we handle your accounts receivable?',
   },
+  {
+    label: 'Payroll',
+    title: 'Payroll Management',
+    description: 'Configure payroll-related services.',
+  },
 ];
 
 const LEGAL_STEP: StepConfig = {
@@ -238,6 +279,7 @@ export function RegisterPage() {
     if (idx === (legalInserted ? 7 : 6)) return 'reconciliation';
     if (idx === (legalInserted ? 8 : 7)) return 'accountspayable';
     if (idx === (legalInserted ? 9 : 8)) return 'accountsreceivable';
+    if (idx === (legalInserted ? 10 : 9)) return 'payroll';
     return '';
   }
 
@@ -299,6 +341,15 @@ export function RegisterPage() {
         form.arCollectionEnabled !== null &&
         form.arReportEnabled !== null
       );
+    }
+    if (name === 'payroll') {
+      if (form.payrollEnabled === null) return false;
+      if (form.country === 'CANADA') {
+        if (form.payrollTaxEnabled === null) return false;
+        if (form.payrollTaxEnabled === true && form.payrollTaxRegion === null) return false;
+        if (form.payrollYearEndEnabled === null) return false;
+      }
+      return true;
     }
     return true;
   }
@@ -380,6 +431,29 @@ export function RegisterPage() {
           arReportCycleDay: form.arReportCycleDay ?? undefined,
           arReportCycleNth: form.arReportCycleNth ?? undefined,
           arReportNote: form.arReportNote || undefined,
+        }),
+        payrollEnabled: form.payrollEnabled ?? undefined,
+        ...(form.payrollEnabled === true && {
+          payrollCycleType: form.payrollCycleType || undefined,
+          payrollCycle: form.payrollCycle || undefined,
+          payrollCycleDay: form.payrollCycleDay ?? undefined,
+          payrollCycleNth: form.payrollCycleNth ?? undefined,
+          payrollNote: form.payrollNote || undefined,
+        }),
+        payrollTaxEnabled: form.payrollTaxEnabled ?? undefined,
+        ...(form.payrollTaxEnabled === true && {
+          payrollTaxRegion: form.payrollTaxRegion ?? undefined,
+          payrollTaxCycleType: form.payrollTaxCycleType || undefined,
+          payrollTaxCycle: form.payrollTaxCycle || undefined,
+          payrollTaxCycleDay: form.payrollTaxCycleDay ?? undefined,
+          payrollTaxCycleNth: form.payrollTaxCycleNth ?? undefined,
+          payrollTaxNote: form.payrollTaxNote || undefined,
+        }),
+        payrollYearEndEnabled: form.payrollYearEndEnabled ?? undefined,
+        ...(form.payrollYearEndEnabled === true && {
+          payrollYearEndRl1: form.payrollYearEndRl1,
+          payrollYearEndT4: form.payrollYearEndT4,
+          payrollYearEndCnesst: form.payrollYearEndCnesst,
         }),
       });
     }
@@ -468,6 +542,9 @@ export function RegisterPage() {
             )}
             {currentStepName === 'accountsreceivable' && (
               <Step10AccountsReceivable data={form} onChange={patch} />
+            )}
+            {currentStepName === 'payroll' && (
+              <Step11Payroll data={form} onChange={patch} />
             )}
           </CardContent>
 
