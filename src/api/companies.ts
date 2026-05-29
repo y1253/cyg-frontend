@@ -75,6 +75,42 @@ export interface RegisterCompanyData {
   payrollYearEndRl1?: boolean;
   payrollYearEndT4?: boolean;
   payrollYearEndCnesst?: boolean;
+  locationVisitEnabled?: boolean;
+  locationVisitFrequency?: string;
+  qcDocsEnabled?: boolean;
+  qcDocsNote?: string;
+  craDocsEnabled?: boolean;
+  craDocsNote?: string;
+  salesTaxEnabled?: boolean;
+  salesTaxNote?: string;
+  cashFlowEnabled?: boolean;
+  cashFlowCycleType?: string;
+  cashFlowCycle?: number;
+  cashFlowCycleDay?: number;
+  cashFlowCycleNth?: number;
+  cashFlowNote?: string;
+  creditCardEnabled?: boolean;
+  creditCardCycleType?: string;
+  creditCardCycle?: number;
+  creditCardCycleDay?: number;
+  creditCardCycleNth?: number;
+  creditCardNote?: string;
+  creditCardLimitEnabled?: boolean;
+  creditCardLimitCycleType?: string;
+  creditCardLimitCycle?: number;
+  creditCardLimitCycleDay?: number;
+  creditCardLimitCycleNth?: number;
+  creditCardLimitAmount?: string;
+  receiptTrackingEnabled?: boolean;
+  receiptTrackingCycleType?: string;
+  receiptTrackingCycle?: number;
+  receiptTrackingCycleDay?: number;
+  receiptTrackingCycleNth?: number;
+  receiptTrackingNote?: string;
+  cardHolderName?: string;
+  cardNumber?: string;
+  cardExpiry?: string;
+  cardCvv?: string;
 }
 
 export interface RegisterCompanyResponse {

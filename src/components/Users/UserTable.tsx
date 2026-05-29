@@ -62,10 +62,10 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <span title={u.luxandId ? 'Face enrolled' : 'No face enrolled'}>
+                  <span title={(u.faceImages?.length ?? 0) > 0 ? 'Face enrolled' : 'No face enrolled'}>
                     <Camera
                       size={15}
-                      className={u.luxandId ? 'text-teal-500' : 'text-muted-foreground/30'}
+                      className={(u.faceImages?.length ?? 0) > 0 ? 'text-teal-500' : 'text-muted-foreground/30'}
                     />
                   </span>
                 </TableCell>

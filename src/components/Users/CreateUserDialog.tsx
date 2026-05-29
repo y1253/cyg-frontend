@@ -39,9 +39,17 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
   const [newUserId, setNewUserId] = useState<number | null>(null);
   const [newUserName, setNewUserName] = useState('');
   const [enrollError, setEnrollError] = useState('');
+  const [enrollStep, setEnrollStep] = useState(0);
+  const [capturedBlobs, setCapturedBlobs] = useState<Blob[]>([]);
   const { data: roles = [] } = useRoles();
   const createMutation = useCreateUser();
   const enrollMutation = useEnrollFace();
+
+  const STEP_INSTRUCTIONS = [
+    'Look straight at the camera',
+    'Turn slightly to the right',
+    'Turn slightly to the left',
+  ];
 
   function handleOpenChange(val: boolean) {
     onOpenChange(val);
@@ -51,6 +59,8 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
       setNewUserId(null);
       setNewUserName('');
       setEnrollError('');
+      setEnrollStep(0);
+      setCapturedBlobs([]);
       createMutation.reset();
       enrollMutation.reset();
     }
@@ -71,13 +81,19 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
     );
   }
 
-  function handleEnroll(blob: Blob) {
+  function handleCapture(blob: Blob) {
     if (!newUserId) return;
-    setEnrollError('');
-    enrollMutation.mutate(
-      { userId: newUserId, blob },
-      { onSuccess: () => handleOpenChange(false) },
-    );
+    const newBlobs = [...capturedBlobs, blob];
+    setCapturedBlobs(newBlobs);
+    if (enrollStep < 2) {
+      setEnrollStep(enrollStep + 1);
+    } else {
+      setEnrollError('');
+      enrollMutation.mutate(
+        { userId: newUserId, blobs: newBlobs as [Blob, Blob, Blob] },
+        { onSuccess: () => handleOpenChange(false) },
+      );
+    }
   }
 
   return (
@@ -154,7 +170,30 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
         {step === 2 && (
           <div className="flex flex-col gap-4 mt-2">
             <p className="text-sm text-muted-foreground">
-              User created. Now capture their face to enable face recognition login. You can skip and enroll later from the user detail page.
+              User created. Capture 3 photos to enable face recognition login. You can skip and enroll later from the user detail page.
+            </p>
+
+            {/* Step indicator */}
+            <div className="flex items-center gap-2">
+              {[0, 1, 2].map(i => (
+                <div
+                  key={i}
+                  className={`flex-1 h-1.5 rounded-full transition-colors ${
+                    i < capturedBlobs.length
+                      ? 'bg-teal-500'
+                      : i === enrollStep && !enrollMutation.isPending
+                      ? 'bg-teal-300'
+                      : 'bg-muted'
+                  }`}
+                />
+              ))}
+            </div>
+
+            <p className="text-sm font-medium text-center">
+              Photo {Math.min(enrollStep + 1, 3)} of 3
+            </p>
+            <p className="text-sm text-muted-foreground text-center">
+              {STEP_INSTRUCTIONS[enrollStep]}
             </p>
 
             {enrollMutation.isPending ? (
@@ -167,15 +206,15 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
               </div>
             ) : (
               <WebcamCapture
-                onCapture={handleEnroll}
-                label="Capture & Enroll Face"
+                onCapture={handleCapture}
+                label={enrollStep < 2 ? 'Capture' : 'Capture & Enroll'}
                 onError={msg => setEnrollError(msg)}
               />
             )}
 
-            {(enrollError || enrollMutation.isError) && (
+            {enrollError && (
               <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                {enrollError || (enrollMutation.error instanceof Error ? enrollMutation.error.message : 'Enrollment failed. Try again.')}
+                {enrollError}
               </p>
             )}
 
