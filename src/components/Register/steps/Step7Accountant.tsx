@@ -49,7 +49,7 @@ export function Step7Accountant({ data, onChange }: Props) {
             type="tel"
             value={data.accountantPhone}
             onChange={e => onChange({ accountantPhone: formatPhone(e.target.value) })}
-            placeholder="929-545-1253"
+            placeholder="111-111-1111"
           />
         </div>
       </div>

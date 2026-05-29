@@ -19,7 +19,7 @@ type StatusFilter = 'all' | 'overdue' | 'urgent' | 'unassigned';
 
 function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: () => void }) {
   const hasOverdue = company.overdueTodos > 0;
-  const hasUrgent  = company.urgentTodos > company.overdueTodos;
+  const hasUrgent  = company.urgentTodos > 0;
 
   return (
     <button
@@ -52,7 +52,7 @@ function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: ()
         )}
         {hasUrgent && (
           <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-none">
-            {company.urgentTodos - company.overdueTodos} urgent
+            {company.urgentTodos} urgent
           </span>
         )}
         <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
@@ -138,7 +138,7 @@ export function DashboardPage() {
   const totalTodos   = companies.reduce((s, c) => s + c.totalTodos,   0);
   const urgentTodos  = companies.reduce((s, c) => s + c.urgentTodos,  0);
   const overdueTodos = companies.reduce((s, c) => s + c.overdueTodos, 0);
-  const urgentOnly   = urgentTodos - overdueTodos;
+  const urgentOnly   = urgentTodos;
 
   const filteredCompanies = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -150,7 +150,7 @@ export function DashboardPage() {
       }
       if (isAdmin && statusFilter !== 'all') {
         if (statusFilter === 'overdue'    && c.overdueTodos === 0)            return false;
-        if (statusFilter === 'urgent'     && c.urgentTodos <= c.overdueTodos) return false;
+        if (statusFilter === 'urgent'     && c.urgentTodos === 0) return false;
         if (statusFilter === 'unassigned' && c.assignedUser !== null)         return false;
       }
       return true;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -30,6 +30,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
+import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
 import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote, useDeleteSchedule } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
@@ -38,6 +39,7 @@ import { AddTaskDialog } from './AddTaskDialog';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
+import type { CompanyNote } from '@/api/notes';
 
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
@@ -352,7 +354,7 @@ function TodoRow({
               </p>
               {!todo.resolved && badge.label && (
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${badge.className}`}>
-                  {tier === 'overdue' && todo.dueDate ? overdueLabel(todo.dueDate) : badge.label}
+                  {(tier === 'overdue' || tier === 'urgent') && todo.dueDate ? overdueLabel(todo.dueDate) : badge.label}
                 </span>
               )}
             </div>
@@ -733,6 +735,197 @@ function FiscalYearPicker({
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
 type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules';
+
+// ─── Company Notes section ────────────────────────────────────────────────────
+
+function CompanyNotesSection({
+  companyId,
+  isAdmin,
+}: {
+  companyId: number;
+  isAdmin: boolean;
+}) {
+  const { data: notes = [] } = useNotes(companyId);
+  const createNote = useCreateNote(companyId);
+  const updateNote = useUpdateNote(companyId);
+  const deleteNote = useDeleteNote(companyId);
+
+  const [notesMaxH, setNotesMaxH] = useState(160);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newContent, setNewContent] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  function onDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: notesMaxH };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = ev.clientY - dragRef.current.startY;
+      setNotesMaxH(Math.min(320, Math.max(72, dragRef.current.startH + delta)));
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function startAdd() { setAdding(true); setNewContent(''); }
+  function cancelAdd() { setAdding(false); setNewContent(''); }
+
+  function submitAdd() {
+    const content = newContent.trim();
+    if (!content) return;
+    createNote.mutate({ companyId, content }, {
+      onSuccess: () => { setAdding(false); setNewContent(''); },
+    });
+  }
+
+  function startEdit(note: CompanyNote) {
+    setEditingId(note.id);
+    setEditContent(note.content);
+  }
+
+  function cancelEditNote() { setEditingId(null); setEditContent(''); }
+
+  function submitEdit() {
+    if (!editingId) return;
+    const content = editContent.trim();
+    if (!content) return;
+    updateNote.mutate({ id: editingId, content }, {
+      onSuccess: () => { setEditingId(null); setEditContent(''); },
+    });
+  }
+
+  function confirmDelete(id: number) { setDeleteConfirmId(id); }
+
+  function submitDelete() {
+    if (!deleteConfirmId) return;
+    deleteNote.mutate(deleteConfirmId, {
+      onSuccess: () => setDeleteConfirmId(null),
+    });
+  }
+
+  if (!isAdmin && notes.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border bg-amber-50/50 border-amber-200">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-amber-200">
+        <span className="text-sm font-semibold text-amber-900">Notes</span>
+        {isAdmin && !adding && (
+          <button
+            type="button"
+            onClick={startAdd}
+            className="flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium"
+          >
+            <Plus size={13} /> Add Note
+          </button>
+        )}
+      </div>
+
+      <div className="divide-y divide-amber-100 overflow-y-auto notes-scroll" style={{ maxHeight: notesMaxH }}>
+        {/* Add note form */}
+        {adding && (
+          <div className="px-4 py-3 flex flex-col gap-2">
+            <textarea
+              autoFocus
+              value={newContent}
+              onChange={e => setNewContent(e.target.value)}
+              placeholder="Write a note…"
+              rows={3}
+              className="w-full text-sm rounded border border-amber-300 bg-white px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7 text-xs" onClick={submitAdd} disabled={createNote.isPending || !newContent.trim()}>
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelAdd}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {notes.length === 0 && !adding && (
+          <p className="px-4 py-3 text-xs text-amber-700/70 italic">No notes yet.</p>
+        )}
+
+        {notes.map(note => (
+          <div key={note.id} className="px-4 py-3">
+            {editingId === note.id ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  autoFocus
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  rows={3}
+                  className="w-full text-sm rounded border border-amber-300 bg-white px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-400"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-7 text-xs" onClick={submitEdit} disabled={updateNote.isPending || !editContent.trim()}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelEditNote}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : deleteConfirmId === note.id ? (
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-destructive flex-1">Delete this note?</span>
+                <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={submitDelete} disabled={deleteNote.isPending}>
+                  Delete
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setDeleteConfirmId(null)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-amber-950 whitespace-pre-wrap break-words">{note.content}</p>
+                  <p className="text-[11px] text-amber-600/70 mt-1">
+                    {new Date(note.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {note.updatedAt !== note.createdAt && ' · edited'}
+                  </p>
+                </div>
+                {isAdmin && (
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(note)}
+                      className="p-1 rounded text-amber-600 hover:text-amber-900 hover:bg-amber-100"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => confirmDelete(note.id)}
+                      className="p-1 rounded text-amber-600 hover:text-destructive hover:bg-red-50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div
+        onMouseDown={onDragStart}
+        className="flex items-center justify-center h-4 cursor-row-resize select-none border-t border-amber-100 hover:bg-amber-100/60 transition-colors rounded-b-lg"
+      >
+        <GripHorizontal size={14} className="text-amber-300" />
+      </div>
+    </div>
+  );
+}
 
 function TabBar({
   active,
@@ -1793,6 +1986,8 @@ export function CompanyDetailPage() {
             <p className="text-xs text-muted-foreground mt-0.5">Resolved</p>
           </div>
         </div>
+
+        <CompanyNotesSection companyId={companyId} isAdmin={isAdmin} />
 
         <TabBar
           active={tab}

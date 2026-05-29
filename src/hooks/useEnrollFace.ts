@@ -6,8 +6,8 @@ export function useEnrollFace() {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, blob }: { userId: number; blob: Blob }) =>
-      enrollFace(token!, userId, blob),
+    mutationFn: ({ userId, blobs }: { userId: number; blobs: [Blob, Blob, Blob] }) =>
+      enrollFace(token!, userId, blobs),
     onSuccess: (_data, { userId }) => {
       qc.invalidateQueries({ queryKey: ['users'] });
       qc.invalidateQueries({ queryKey: ['user', userId] });

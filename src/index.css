@@ -195,6 +195,16 @@ body {
   100% { box-shadow: 0 0 0 10px oklch(0.7 0.17 185 / 0); }
 }
 
+/* Notes section — styled thin scrollbar */
+.notes-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #fcd34d transparent;
+}
+.notes-scroll::-webkit-scrollbar        { width: 4px; }
+.notes-scroll::-webkit-scrollbar-track  { background: transparent; }
+.notes-scroll::-webkit-scrollbar-thumb  { background: #fcd34d; border-radius: 4px; }
+.notes-scroll::-webkit-scrollbar-thumb:hover { background: #f59e0b; }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

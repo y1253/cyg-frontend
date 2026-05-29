@@ -8,7 +8,7 @@ export interface AppUser {
   id: number;
   name: string;
   email: string;
-  luxandId?: string | null;
+  faceImages?: { id: number }[];
   role: string;
   createdAt: string;
 }
@@ -95,9 +95,9 @@ export async function deleteUser(token: string, id: number): Promise<void> {
   }
 }
 
-export async function enrollFace(token: string, userId: number, imageBlob: Blob): Promise<AppUser> {
+export async function enrollFace(token: string, userId: number, blobs: [Blob, Blob, Blob]): Promise<AppUser> {
   const form = new FormData();
-  form.append('photo', imageBlob, 'capture.jpg');
+  blobs.forEach(b => form.append('photos', b, 'capture.jpg'));
   const res = await fetchWithAuth(token, `${API}/users/${userId}/enroll-face`, {
     method: 'POST',
     body: form,

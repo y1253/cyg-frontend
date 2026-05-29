@@ -49,7 +49,7 @@ export function Step4ContactInfo({ data, onChange }: Props) {
             type="tel"
             value={data.privatePhone}
             onChange={e => onChange({ privatePhone: formatPhone(e.target.value) })}
-            placeholder="929-545-1253"
+            placeholder="111-111-1111"
           />
         </div>
       </div>
@@ -63,7 +63,7 @@ export function Step4ContactInfo({ data, onChange }: Props) {
           type="tel"
           value={data.storeNumber}
           onChange={e => onChange({ storeNumber: formatPhone(e.target.value) })}
-          placeholder="929-545-1253"
+          placeholder="111-111-1111"
         />
       </div>
     </div>

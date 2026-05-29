@@ -22,6 +22,9 @@ import { Step8Reconciliation } from './steps/Step8Reconciliation';
 import { Step9AccountsPayable } from './steps/Step9AccountsPayable';
 import { Step10AccountsReceivable } from './steps/Step10AccountsReceivable';
 import { Step11Payroll } from './steps/Step11Payroll';
+import { Step12General } from './steps/Step12General';
+import { Step13SecretarialManagement } from './steps/Step13SecretarialManagement';
+import { Step14TermsAndConditions } from './steps/Step14TermsAndConditions';
 
 export interface ReconciliationAccount {
   name: string;
@@ -109,6 +112,46 @@ export interface FormData {
   payrollYearEndRl1: boolean;
   payrollYearEndT4: boolean;
   payrollYearEndCnesst: boolean;
+  // Step 12 — General
+  locationVisitEnabled: boolean | null;
+  locationVisitFrequency: string | null;
+  qcDocsEnabled: boolean | null;
+  qcDocsNote: string;
+  craDocsEnabled: boolean | null;
+  craDocsNote: string;
+  salesTaxEnabled: boolean | null;
+  salesTaxNote: string;
+  // Step 13 — Secretarial Management
+  cashFlowEnabled: boolean | null;
+  cashFlowCycleType: string;
+  cashFlowCycle: number;
+  cashFlowCycleDay: number | null;
+  cashFlowCycleNth: number | null;
+  cashFlowNote: string;
+  creditCardEnabled: boolean | null;
+  creditCardCycleType: string;
+  creditCardCycle: number;
+  creditCardCycleDay: number | null;
+  creditCardCycleNth: number | null;
+  creditCardNote: string;
+  creditCardLimitEnabled: boolean | null;
+  creditCardLimitCycleType: string;
+  creditCardLimitCycle: number;
+  creditCardLimitCycleDay: number | null;
+  creditCardLimitCycleNth: number | null;
+  creditCardLimitAmount: string;
+  receiptTrackingEnabled: boolean | null;
+  receiptTrackingCycleType: string;
+  receiptTrackingCycle: number;
+  receiptTrackingCycleDay: number | null;
+  receiptTrackingCycleNth: number | null;
+  receiptTrackingNote: string;
+  // Step 14 — Terms & Conditions
+  cardHolderName: string;
+  cardNumber: string;
+  cardExpiry: string;
+  cardCvv: string;
+  termsAccepted: boolean | null;
 }
 
 const EMPTY_FORM: FormData = {
@@ -180,6 +223,43 @@ const EMPTY_FORM: FormData = {
   payrollYearEndRl1: false,
   payrollYearEndT4: false,
   payrollYearEndCnesst: false,
+  locationVisitEnabled: null,
+  locationVisitFrequency: null,
+  qcDocsEnabled: null,
+  qcDocsNote: '',
+  craDocsEnabled: null,
+  craDocsNote: '',
+  salesTaxEnabled: null,
+  salesTaxNote: '',
+  cashFlowEnabled: null,
+  cashFlowCycleType: 'DAYS',
+  cashFlowCycle: 30,
+  cashFlowCycleDay: null,
+  cashFlowCycleNth: null,
+  cashFlowNote: '',
+  creditCardEnabled: null,
+  creditCardCycleType: 'DAYS',
+  creditCardCycle: 30,
+  creditCardCycleDay: null,
+  creditCardCycleNth: null,
+  creditCardNote: '',
+  creditCardLimitEnabled: null,
+  creditCardLimitCycleType: 'DAYS',
+  creditCardLimitCycle: 30,
+  creditCardLimitCycleDay: null,
+  creditCardLimitCycleNth: null,
+  creditCardLimitAmount: '',
+  receiptTrackingEnabled: null,
+  receiptTrackingCycleType: 'DAYS',
+  receiptTrackingCycle: 30,
+  receiptTrackingCycleDay: null,
+  receiptTrackingCycleNth: null,
+  receiptTrackingNote: '',
+  cardHolderName: '',
+  cardNumber: '',
+  cardExpiry: '',
+  cardCvv: '',
+  termsAccepted: null,
 };
 
 interface StepConfig {
@@ -239,6 +319,21 @@ const BASE_STEPS: StepConfig[] = [
     title: 'Payroll Management',
     description: 'Configure payroll-related services.',
   },
+  {
+    label: 'General',
+    title: 'General Services',
+    description: 'Additional services and document management.',
+  },
+  {
+    label: 'Secretarial',
+    title: 'Secretarial Management',
+    description: 'Configure cash flow, credit card, and receipt tracking services.',
+  },
+  {
+    label: 'Terms',
+    title: 'Terms & Conditions',
+    description: 'Review and accept the terms of service.',
+  },
 ];
 
 const LEGAL_STEP: StepConfig = {
@@ -280,6 +375,9 @@ export function RegisterPage() {
     if (idx === (legalInserted ? 8 : 7)) return 'accountspayable';
     if (idx === (legalInserted ? 9 : 8)) return 'accountsreceivable';
     if (idx === (legalInserted ? 10 : 9)) return 'payroll';
+    if (idx === (legalInserted ? 11 : 10)) return 'general';
+    if (idx === (legalInserted ? 12 : 11)) return 'secretarial';
+    if (idx === (legalInserted ? 13 : 12)) return 'terms';
     return '';
   }
 
@@ -350,6 +448,30 @@ export function RegisterPage() {
         if (form.payrollYearEndEnabled === null) return false;
       }
       return true;
+    }
+    if (name === 'general') {
+      if (form.locationVisitEnabled === null) return false;
+      if (form.locationVisitEnabled === true && form.locationVisitFrequency === null) return false;
+      if (form.country === 'CANADA') {
+        if (form.qcDocsEnabled === null) return false;
+        if (form.craDocsEnabled === null) return false;
+        if (form.salesTaxEnabled === null) return false;
+      }
+      return true;
+    }
+    if (name === 'secretarial') {
+      if (form.cashFlowEnabled === null) return false;
+      if (form.creditCardEnabled === null) return false;
+      if (form.creditCardEnabled === true && form.creditCardLimitEnabled === null) return false;
+      if (form.receiptTrackingEnabled === null) return false;
+      return true;
+    }
+    if (name === 'terms') {
+      if (!form.cardHolderName.trim()) return false;
+      if (!form.cardNumber.trim()) return false;
+      if (!form.cardExpiry.trim()) return false;
+      if (!form.cardCvv.trim()) return false;
+      return form.termsAccepted === true;
     }
     return true;
   }
@@ -455,6 +577,52 @@ export function RegisterPage() {
           payrollYearEndT4: form.payrollYearEndT4,
           payrollYearEndCnesst: form.payrollYearEndCnesst,
         }),
+        locationVisitEnabled: form.locationVisitEnabled ?? undefined,
+        ...(form.locationVisitEnabled === true && {
+          locationVisitFrequency: form.locationVisitFrequency ?? undefined,
+        }),
+        qcDocsEnabled: form.qcDocsEnabled ?? undefined,
+        ...(form.qcDocsEnabled === true && { qcDocsNote: form.qcDocsNote || undefined }),
+        craDocsEnabled: form.craDocsEnabled ?? undefined,
+        ...(form.craDocsEnabled === true && { craDocsNote: form.craDocsNote || undefined }),
+        salesTaxEnabled: form.salesTaxEnabled ?? undefined,
+        ...(form.salesTaxEnabled === true && { salesTaxNote: form.salesTaxNote || undefined }),
+        cashFlowEnabled: form.cashFlowEnabled ?? undefined,
+        ...(form.cashFlowEnabled === true && {
+          cashFlowCycleType: form.cashFlowCycleType || undefined,
+          cashFlowCycle: form.cashFlowCycle || undefined,
+          cashFlowCycleDay: form.cashFlowCycleDay ?? undefined,
+          cashFlowCycleNth: form.cashFlowCycleNth ?? undefined,
+          cashFlowNote: form.cashFlowNote || undefined,
+        }),
+        creditCardEnabled: form.creditCardEnabled ?? undefined,
+        ...(form.creditCardEnabled === true && {
+          creditCardCycleType: form.creditCardCycleType || undefined,
+          creditCardCycle: form.creditCardCycle || undefined,
+          creditCardCycleDay: form.creditCardCycleDay ?? undefined,
+          creditCardCycleNth: form.creditCardCycleNth ?? undefined,
+          creditCardNote: form.creditCardNote || undefined,
+          creditCardLimitEnabled: form.creditCardLimitEnabled ?? undefined,
+        }),
+        ...(form.creditCardEnabled === true && form.creditCardLimitEnabled === true && {
+          creditCardLimitCycleType: form.creditCardLimitCycleType || undefined,
+          creditCardLimitCycle: form.creditCardLimitCycle || undefined,
+          creditCardLimitCycleDay: form.creditCardLimitCycleDay ?? undefined,
+          creditCardLimitCycleNth: form.creditCardLimitCycleNth ?? undefined,
+          creditCardLimitAmount: form.creditCardLimitAmount || undefined,
+        }),
+        receiptTrackingEnabled: form.receiptTrackingEnabled ?? undefined,
+        ...(form.receiptTrackingEnabled === true && {
+          receiptTrackingCycleType: form.receiptTrackingCycleType || undefined,
+          receiptTrackingCycle: form.receiptTrackingCycle || undefined,
+          receiptTrackingCycleDay: form.receiptTrackingCycleDay ?? undefined,
+          receiptTrackingCycleNth: form.receiptTrackingCycleNth ?? undefined,
+          receiptTrackingNote: form.receiptTrackingNote || undefined,
+        }),
+        cardHolderName: form.cardHolderName || undefined,
+        cardNumber: form.cardNumber || undefined,
+        cardExpiry: form.cardExpiry || undefined,
+        cardCvv: form.cardCvv || undefined,
       });
     }
   }
@@ -545,6 +713,15 @@ export function RegisterPage() {
             )}
             {currentStepName === 'payroll' && (
               <Step11Payroll data={form} onChange={patch} />
+            )}
+            {currentStepName === 'general' && (
+              <Step12General data={form} onChange={patch} />
+            )}
+            {currentStepName === 'secretarial' && (
+              <Step13SecretarialManagement data={form} onChange={patch} />
+            )}
+            {currentStepName === 'terms' && (
+              <Step14TermsAndConditions data={form} onChange={patch} />
             )}
           </CardContent>
 
