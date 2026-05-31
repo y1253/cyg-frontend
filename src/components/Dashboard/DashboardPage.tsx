@@ -13,13 +13,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
 import type { CompanySummary } from '@/api/companies';
 
-type StatusFilter = 'all' | 'overdue' | 'urgent' | 'unassigned';
+type StatusFilter = 'all' | 'important' | 'overdue25' | 'unassigned';
 
 // ─── Company row ──────────────────────────────────────────────────────────────
 
 function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: () => void }) {
-  const hasOverdue = company.overdueTodos > 0;
-  const hasUrgent  = company.urgentTodos > 0;
+  const hasUrgent = company.urgentTodos > 0;
 
   return (
     <button
@@ -45,14 +44,14 @@ function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: ()
 
       {/* Status badges */}
       <div className="flex items-center gap-2 shrink-0">
-        {hasOverdue && (
-          <span className="text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 leading-none">
-            {company.overdueTodos} overdue
+        {hasUrgent && (
+          <span className="text-[10px] font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 leading-none">
+            {company.urgentTodos} 25d overdue
           </span>
         )}
-        {hasUrgent && (
+        {company.importantTodos > 0 && (
           <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-none">
-            {company.urgentTodos} urgent
+            {company.importantTodos} important
           </span>
         )}
         <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
@@ -86,12 +85,12 @@ function StatsStrip({
   count,
   total,
   urgent,
-  overdue,
+  important,
 }: {
   count: number;
   total: number;
   urgent: number;
-  overdue: number;
+  important: number;
 }) {
   const sep = <span className="text-muted-foreground/25 select-none">·</span>;
   return (
@@ -108,15 +107,15 @@ function StatsStrip({
       {urgent > 0 && (
         <>
           {sep}
-          <span className="font-medium text-amber-600">{urgent}</span>
-          <span className="text-muted-foreground">urgent</span>
+          <span className="font-medium text-purple-600">{urgent}</span>
+          <span className="text-muted-foreground ml-1">25d overdue</span>
         </>
       )}
-      {overdue > 0 && (
+      {important > 0 && (
         <>
           {sep}
-          <span className="font-medium text-red-600">{overdue}</span>
-          <span className="text-muted-foreground">overdue</span>
+          <span className="font-medium text-amber-600">{important}</span>
+          <span className="text-muted-foreground ml-1">important</span>
         </>
       )}
     </div>
@@ -135,10 +134,9 @@ export function DashboardPage() {
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  const totalTodos   = companies.reduce((s, c) => s + c.totalTodos,   0);
-  const urgentTodos  = companies.reduce((s, c) => s + c.urgentTodos,  0);
-  const overdueTodos = companies.reduce((s, c) => s + c.overdueTodos, 0);
-  const urgentOnly   = urgentTodos;
+  const totalTodos     = companies.reduce((s, c) => s + c.totalTodos,     0);
+  const urgentTodos    = companies.reduce((s, c) => s + c.urgentTodos,    0);
+  const importantTodos = companies.reduce((s, c) => s + c.importantTodos, 0);
 
   const filteredCompanies = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -149,9 +147,9 @@ export function DashboardPage() {
         if (!name && !user) return false;
       }
       if (isAdmin && statusFilter !== 'all') {
-        if (statusFilter === 'overdue'    && c.overdueTodos === 0)            return false;
-        if (statusFilter === 'urgent'     && c.urgentTodos === 0) return false;
-        if (statusFilter === 'unassigned' && c.assignedUser !== null)         return false;
+        if (statusFilter === 'overdue25'  && c.urgentTodos === 0)    return false;
+        if (statusFilter === 'important'  && c.importantTodos === 0) return false;
+        if (statusFilter === 'unassigned' && c.assignedUser !== null) return false;
       }
       return true;
     });
@@ -180,8 +178,8 @@ export function DashboardPage() {
           <StatsStrip
             count={companies.length}
             total={totalTodos}
-            urgent={urgentOnly}
-            overdue={overdueTodos}
+            urgent={urgentTodos}
+            important={importantTodos}
           />
         )}
       </div>
@@ -210,8 +208,8 @@ export function DashboardPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
-              <SelectItem value="overdue">Overdue</SelectItem>
-              <SelectItem value="urgent">Urgent</SelectItem>
+              <SelectItem value="overdue25">Overdue 25d</SelectItem>
+              <SelectItem value="important">Important</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
             </SelectContent>
           </Select>

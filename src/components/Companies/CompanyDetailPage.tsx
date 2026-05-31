@@ -58,7 +58,7 @@ function getTodoUrgency(dueDate: string | null): UrgencyTier {
 }
 
 const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = {
-  urgent:  { label: 'Urgent', className: 'bg-red-200 text-red-900 border-red-400' },
+  urgent:  { label: 'Overdue 25 days', className: 'bg-purple-100 text-purple-800 border-purple-300' },
   overdue: { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' },
   soon: { label: 'Due today', className: 'bg-orange-100 text-orange-700 border-orange-200' },
   warning: { label: '< 5 days', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
@@ -68,14 +68,14 @@ const urgencyBadge: Record<UrgencyTier, { label: string; className: string }> = 
 // Border+bg for open todos
 function rowBg(tier: UrgencyTier, isRecurring: boolean, isImportant: boolean): string {
   if (isRecurring) {
-    if (tier === 'urgent')  return 'border-red-400 bg-red-100/80';
+    if (tier === 'urgent')  return 'border-purple-400 bg-purple-100/80';
     if (tier === 'overdue') return 'border-red-300 bg-blue-50/80';
     if (tier === 'soon')    return 'border-orange-300 bg-blue-50/80';
     if (tier === 'warning') return 'border-yellow-300 bg-blue-50/80';
     if (isImportant)        return 'border-amber-300 bg-blue-50/60';
     return 'border-blue-200 bg-blue-50/60';
   }
-  if (tier === 'urgent')  return 'border-red-300 bg-red-100';
+  if (tier === 'urgent')  return 'border-purple-300 bg-purple-100';
   if (tier === 'overdue') return 'border-red-200 bg-red-50';
   if (tier === 'soon')    return 'border-orange-200 bg-orange-50';
   if (tier === 'warning') return 'border-yellow-200 bg-yellow-50';
@@ -1863,6 +1863,7 @@ export function CompanyDetailPage() {
   const importantOnlyTodos = openTodos.filter(t => getTodoPriority(t) === 2);
   const restTodos          = openTodos.filter(t => getTodoPriority(t) === 3);
   const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
+  const openTasksCount     = openTodos.filter(t => !t.dueDate || getTodoUrgency(t.dueDate) !== 'normal').length;
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
@@ -1968,7 +1969,7 @@ export function CompanyDetailPage() {
         {/* Stats */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold">{openTodos.length}</p>
+            <p className="text-2xl font-bold">{openTasksCount}</p>
             <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
@@ -1976,10 +1977,10 @@ export function CompanyDetailPage() {
             <p className="text-xs text-muted-foreground mt-0.5">Important</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-red-600">
+            <p className="text-2xl font-bold text-purple-600">
               {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">Urgent</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Overdue 25 days</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
             <p className="text-2xl font-bold text-green-600">{resolvedTodos.length}</p>
@@ -2351,8 +2352,8 @@ export function CompanyDetailPage() {
               <div className="flex flex-col gap-2">
                 {urgentTodos.length > 0 && (
                   <>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-red-600 px-1">
-                      Urgent · {urgentTodos.length}
+                    <p className="text-xs font-semibold uppercase tracking-wide text-purple-700 px-1">
+                      Overdue 25 days · {urgentTodos.length}
                     </p>
                     {urgentTodos.map(todo => (
                       <TodoRow key={todo.id} {...todoRowProps(todo)} />

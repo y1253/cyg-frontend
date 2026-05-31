@@ -154,6 +154,7 @@ export interface CompanySummary {
   totalTodos: number;
   urgentTodos: number;
   overdueTodos: number;
+  importantTodos: number;
 }
 
 export async function fetchCompanies(token: string): Promise<CompanySummary[]> {
