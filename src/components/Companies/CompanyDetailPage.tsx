@@ -1713,6 +1713,8 @@ export function CompanyDetailPage() {
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
+  type TaskSort = 'priority' | 'az' | 'za' | 'overdue';
+  const [taskSort, setTaskSort] = useState<TaskSort>('priority');
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -1864,9 +1866,14 @@ export function CompanyDetailPage() {
 
   const snoozedTodos = company.todos.filter(t => !t.resolved && isSnoozedNow(t));
 
-  const urgentTodos        = openTodos.filter(t => getTodoPriority(t) <= 1);
-  const importantOnlyTodos = openTodos.filter(t => getTodoPriority(t) === 2);
-  const restTodos          = openTodos.filter(t => getTodoPriority(t) === 3);
+  const sortedTodos = taskSort === 'az'      ? [...openTodos].sort((a, b) => a.task.title.localeCompare(b.task.title))
+                   : taskSort === 'za'      ? [...openTodos].sort((a, b) => b.task.title.localeCompare(a.task.title))
+                   : taskSort === 'overdue' ? [...openTodos].sort((a, b) => getOverdueDays(b) - getOverdueDays(a))
+                   : openTodos;
+
+  const urgentTodos        = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) <= 1) : [];
+  const importantOnlyTodos = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) === 2) : [];
+  const restTodos          = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) === 3) : [];
   const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -2348,41 +2355,60 @@ export function CompanyDetailPage() {
                   : <><ChevronDown size={13} /> Expand All</>
                 }
               </button>
+              <Select value={taskSort} onValueChange={v => setTaskSort(v as TaskSort)}>
+                <SelectTrigger className="h-7 w-36 text-[11px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="priority">Priority</SelectItem>
+                  <SelectItem value="az">Name A → Z</SelectItem>
+                  <SelectItem value="za">Name Z → A</SelectItem>
+                  <SelectItem value="overdue">Most Overdue</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {openTodos.length === 0 && snoozedTodos.length === 0 ? (
               <p className="text-sm text-muted-foreground">All tasks resolved.</p>
             ) : openTodos.length === 0 ? null : (
               <div className="flex flex-col gap-2">
-                {urgentTodos.length > 0 && (
+                {taskSort !== 'priority' ? (
+                  sortedTodos.map(todo => (
+                    <TodoRow key={todo.id} {...todoRowProps(todo)} />
+                  ))
+                ) : (
                   <>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-purple-700 px-1">
-                      Overdue 25 days · {urgentTodos.length}
-                    </p>
-                    {urgentTodos.map(todo => (
+                    {urgentTodos.length > 0 && (
+                      <>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-purple-700 px-1">
+                          Overdue 25 days · {urgentTodos.length}
+                        </p>
+                        {urgentTodos.map(todo => (
+                          <TodoRow key={todo.id} {...todoRowProps(todo)} />
+                        ))}
+                        {(importantOnlyTodos.length > 0 || restTodos.length > 0) && (
+                          <div className="border-t border-border my-1" />
+                        )}
+                      </>
+                    )}
+                    {importantOnlyTodos.length > 0 && (
+                      <>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 px-1">
+                          Important · {importantOnlyTodos.length}
+                        </p>
+                        {importantOnlyTodos.map(todo => (
+                          <TodoRow key={todo.id} {...todoRowProps(todo)} />
+                        ))}
+                        {restTodos.length > 0 && (
+                          <div className="border-t border-border my-1" />
+                        )}
+                      </>
+                    )}
+                    {restTodos.map(todo => (
                       <TodoRow key={todo.id} {...todoRowProps(todo)} />
                     ))}
-                    {(importantOnlyTodos.length > 0 || restTodos.length > 0) && (
-                      <div className="border-t border-border my-1" />
-                    )}
                   </>
                 )}
-                {importantOnlyTodos.length > 0 && (
-                  <>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 px-1">
-                      Important · {importantOnlyTodos.length}
-                    </p>
-                    {importantOnlyTodos.map(todo => (
-                      <TodoRow key={todo.id} {...todoRowProps(todo)} />
-                    ))}
-                    {restTodos.length > 0 && (
-                      <div className="border-t border-border my-1" />
-                    )}
-                  </>
-                )}
-                {restTodos.map(todo => (
-                  <TodoRow key={todo.id} {...todoRowProps(todo)} />
-                ))}
               </div>
             )}
 
