@@ -1849,8 +1849,13 @@ export function CompanyDetailPage() {
     return 3;
   }
 
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
   const openTodos = company.todos
-    .filter(t => !t.resolved && !isSnoozedNow(t))
+    .filter(t => {
+      if (t.resolved || isSnoozedNow(t)) return false;
+      if (!t.dueDate) return true;
+      return new Date(t.dueDate.slice(0, 10) + 'T00:00:00') <= startOfToday;
+    })
     .sort((a, b) => {
       const pa = getTodoPriority(a), pb = getTodoPriority(b);
       if (pa !== pb) return pa - pb;
@@ -1863,7 +1868,6 @@ export function CompanyDetailPage() {
   const importantOnlyTodos = openTodos.filter(t => getTodoPriority(t) === 2);
   const restTodos          = openTodos.filter(t => getTodoPriority(t) === 3);
   const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
-  const openTasksCount     = openTodos.filter(t => !t.dueDate || getTodoUrgency(t.dueDate) !== 'normal').length;
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
@@ -1969,7 +1973,7 @@ export function CompanyDetailPage() {
         {/* Stats */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold">{openTasksCount}</p>
+            <p className="text-2xl font-bold">{openTodos.length}</p>
             <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
           </div>
           <div className="rounded-lg border bg-background px-4 py-3 text-center">
