@@ -71,24 +71,28 @@ export interface FormData {
   apCycleNth: number | null;
   // Step 10 — Accounts Receivable
   arInvoicingEnabled: boolean | null;
+  arInvoicingStartDate: string;
   arInvoicingCycleType: string;
   arInvoicingCycle: number;
   arInvoicingCycleDay: number | null;
   arInvoicingCycleNth: number | null;
   arInvoicingNote: string;
   arStatementsEnabled: boolean | null;
+  arStatementsStartDate: string;
   arStatementsCycleType: string;
   arStatementsCycle: number;
   arStatementsCycleDay: number | null;
   arStatementsCycleNth: number | null;
   arStatementsNote: string;
   arCollectionEnabled: boolean | null;
+  arCollectionStartDate: string;
   arCollectionCycleType: string;
   arCollectionCycle: number;
   arCollectionCycleDay: number | null;
   arCollectionCycleNth: number | null;
   arCollectionNote: string;
   arReportEnabled: boolean | null;
+  arReportStartDate: string;
   arReportCycleType: string;
   arReportCycle: number;
   arReportCycleDay: number | null;
@@ -96,12 +100,14 @@ export interface FormData {
   arReportNote: string;
   // Step 11 — Payroll
   payrollEnabled: boolean | null;
+  payrollStartDate: string;
   payrollCycleType: string;
   payrollCycle: number;
   payrollCycleDay: number | null;
   payrollCycleNth: number | null;
   payrollNote: string;
   payrollTaxEnabled: boolean | null;
+  payrollTaxStartDate: string;
   payrollTaxRegion: string | null;
   payrollTaxCycleType: string;
   payrollTaxCycle: number;
@@ -123,12 +129,14 @@ export interface FormData {
   salesTaxNote: string;
   // Step 13 — Secretarial Management
   cashFlowEnabled: boolean | null;
+  cashFlowStartDate: string;
   cashFlowCycleType: string;
   cashFlowCycle: number;
   cashFlowCycleDay: number | null;
   cashFlowCycleNth: number | null;
   cashFlowNote: string;
   creditCardEnabled: boolean | null;
+  creditCardStartDate: string;
   creditCardCycleType: string;
   creditCardCycle: number;
   creditCardCycleDay: number | null;
@@ -141,6 +149,7 @@ export interface FormData {
   creditCardLimitCycleNth: number | null;
   creditCardLimitAmount: string;
   receiptTrackingEnabled: boolean | null;
+  receiptTrackingStartDate: string;
   receiptTrackingCycleType: string;
   receiptTrackingCycle: number;
   receiptTrackingCycleDay: number | null;
@@ -183,36 +192,42 @@ const EMPTY_FORM: FormData = {
   apCycleDay: null,
   apCycleNth: null,
   arInvoicingEnabled: null,
+  arInvoicingStartDate: '',
   arInvoicingCycleType: 'DAYS',
   arInvoicingCycle: 30,
   arInvoicingCycleDay: null,
   arInvoicingCycleNth: null,
   arInvoicingNote: '',
   arStatementsEnabled: null,
+  arStatementsStartDate: '',
   arStatementsCycleType: 'DAYS',
   arStatementsCycle: 30,
   arStatementsCycleDay: null,
   arStatementsCycleNth: null,
   arStatementsNote: '',
   arCollectionEnabled: null,
+  arCollectionStartDate: '',
   arCollectionCycleType: 'DAYS',
   arCollectionCycle: 30,
   arCollectionCycleDay: null,
   arCollectionCycleNth: null,
   arCollectionNote: '',
   arReportEnabled: null,
+  arReportStartDate: '',
   arReportCycleType: 'DAYS',
   arReportCycle: 30,
   arReportCycleDay: null,
   arReportCycleNth: null,
   arReportNote: '',
   payrollEnabled: null,
+  payrollStartDate: '',
   payrollCycleType: 'DAYS',
   payrollCycle: 30,
   payrollCycleDay: null,
   payrollCycleNth: null,
   payrollNote: '',
   payrollTaxEnabled: null,
+  payrollTaxStartDate: '',
   payrollTaxRegion: null,
   payrollTaxCycleType: 'DAYS',
   payrollTaxCycle: 30,
@@ -232,12 +247,14 @@ const EMPTY_FORM: FormData = {
   salesTaxEnabled: null,
   salesTaxNote: '',
   cashFlowEnabled: null,
+  cashFlowStartDate: '',
   cashFlowCycleType: 'DAYS',
   cashFlowCycle: 30,
   cashFlowCycleDay: null,
   cashFlowCycleNth: null,
   cashFlowNote: '',
   creditCardEnabled: null,
+  creditCardStartDate: '',
   creditCardCycleType: 'DAYS',
   creditCardCycle: 30,
   creditCardCycleDay: null,
@@ -250,6 +267,7 @@ const EMPTY_FORM: FormData = {
   creditCardLimitCycleNth: null,
   creditCardLimitAmount: '',
   receiptTrackingEnabled: null,
+  receiptTrackingStartDate: '',
   receiptTrackingCycleType: 'DAYS',
   receiptTrackingCycle: 30,
   receiptTrackingCycleDay: null,
@@ -524,6 +542,7 @@ export function RegisterPage() {
         }),
         arInvoicingEnabled: form.arInvoicingEnabled ?? undefined,
         ...(form.arInvoicingEnabled === true && {
+          arInvoicingStartDate: form.arInvoicingStartDate || undefined,
           arInvoicingCycleType: form.arInvoicingCycleType || undefined,
           arInvoicingCycle: form.arInvoicingCycle || undefined,
           arInvoicingCycleDay: form.arInvoicingCycleDay ?? undefined,
@@ -532,6 +551,7 @@ export function RegisterPage() {
         }),
         arStatementsEnabled: form.arStatementsEnabled ?? undefined,
         ...(form.arStatementsEnabled === true && {
+          arStatementsStartDate: form.arStatementsStartDate || undefined,
           arStatementsCycleType: form.arStatementsCycleType || undefined,
           arStatementsCycle: form.arStatementsCycle || undefined,
           arStatementsCycleDay: form.arStatementsCycleDay ?? undefined,
@@ -540,6 +560,7 @@ export function RegisterPage() {
         }),
         arCollectionEnabled: form.arCollectionEnabled ?? undefined,
         ...(form.arCollectionEnabled === true && {
+          arCollectionStartDate: form.arCollectionStartDate || undefined,
           arCollectionCycleType: form.arCollectionCycleType || undefined,
           arCollectionCycle: form.arCollectionCycle || undefined,
           arCollectionCycleDay: form.arCollectionCycleDay ?? undefined,
@@ -548,6 +569,7 @@ export function RegisterPage() {
         }),
         arReportEnabled: form.arReportEnabled ?? undefined,
         ...(form.arReportEnabled === true && {
+          arReportStartDate: form.arReportStartDate || undefined,
           arReportCycleType: form.arReportCycleType || undefined,
           arReportCycle: form.arReportCycle || undefined,
           arReportCycleDay: form.arReportCycleDay ?? undefined,
@@ -556,6 +578,7 @@ export function RegisterPage() {
         }),
         payrollEnabled: form.payrollEnabled ?? undefined,
         ...(form.payrollEnabled === true && {
+          payrollStartDate: form.payrollStartDate || undefined,
           payrollCycleType: form.payrollCycleType || undefined,
           payrollCycle: form.payrollCycle || undefined,
           payrollCycleDay: form.payrollCycleDay ?? undefined,
@@ -564,6 +587,7 @@ export function RegisterPage() {
         }),
         payrollTaxEnabled: form.payrollTaxEnabled ?? undefined,
         ...(form.payrollTaxEnabled === true && {
+          payrollTaxStartDate: form.payrollTaxStartDate || undefined,
           payrollTaxRegion: form.payrollTaxRegion ?? undefined,
           payrollTaxCycleType: form.payrollTaxCycleType || undefined,
           payrollTaxCycle: form.payrollTaxCycle || undefined,
@@ -589,6 +613,7 @@ export function RegisterPage() {
         ...(form.salesTaxEnabled === true && { salesTaxNote: form.salesTaxNote || undefined }),
         cashFlowEnabled: form.cashFlowEnabled ?? undefined,
         ...(form.cashFlowEnabled === true && {
+          cashFlowStartDate: form.cashFlowStartDate || undefined,
           cashFlowCycleType: form.cashFlowCycleType || undefined,
           cashFlowCycle: form.cashFlowCycle || undefined,
           cashFlowCycleDay: form.cashFlowCycleDay ?? undefined,
@@ -597,6 +622,7 @@ export function RegisterPage() {
         }),
         creditCardEnabled: form.creditCardEnabled ?? undefined,
         ...(form.creditCardEnabled === true && {
+          creditCardStartDate: form.creditCardStartDate || undefined,
           creditCardCycleType: form.creditCardCycleType || undefined,
           creditCardCycle: form.creditCardCycle || undefined,
           creditCardCycleDay: form.creditCardCycleDay ?? undefined,
@@ -613,6 +639,7 @@ export function RegisterPage() {
         }),
         receiptTrackingEnabled: form.receiptTrackingEnabled ?? undefined,
         ...(form.receiptTrackingEnabled === true && {
+          receiptTrackingStartDate: form.receiptTrackingStartDate || undefined,
           receiptTrackingCycleType: form.receiptTrackingCycleType || undefined,
           receiptTrackingCycle: form.receiptTrackingCycle || undefined,
           receiptTrackingCycleDay: form.receiptTrackingCycleDay ?? undefined,

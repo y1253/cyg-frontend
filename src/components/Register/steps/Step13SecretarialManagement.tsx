@@ -24,6 +24,7 @@ interface Props {
 
 interface RuleConfig {
   enabledKey: keyof FormData;
+  startDateKey: keyof FormData;
   cycleTypeKey: keyof FormData;
   cycleKey: keyof FormData;
   cycleDayKey: keyof FormData;
@@ -47,6 +48,16 @@ function CyclePicker({
 
   return (
     <div className="flex flex-col gap-3 pl-1">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`${rule.idPrefix}-start-date`}>Starting Date</Label>
+        <Input
+          id={`${rule.idPrefix}-start-date`}
+          type="date"
+          value={data[rule.startDateKey] as string}
+          onChange={(e) => onChange({ [rule.startDateKey]: e.target.value } as Partial<FormData>)}
+        />
+        <p className="text-xs text-muted-foreground">Past dates will backfill all todos up to today.</p>
+      </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={`${rule.idPrefix}-cycle-type`}>Repeat</Label>
         <select
@@ -265,6 +276,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
               onChange={onChange}
               rule={{
                 enabledKey: "cashFlowEnabled",
+                startDateKey: "cashFlowStartDate",
                 cycleTypeKey: "cashFlowCycleType",
                 cycleKey: "cashFlowCycle",
                 cycleDayKey: "cashFlowCycleDay",
@@ -330,6 +342,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
               onChange={onChange}
               rule={{
                 enabledKey: "creditCardEnabled",
+                startDateKey: "creditCardStartDate",
                 cycleTypeKey: "creditCardCycleType",
                 cycleKey: "creditCardCycle",
                 cycleDayKey: "creditCardCycleDay",
@@ -391,6 +404,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
                   onChange={onChange}
                   rule={{
                     enabledKey: "creditCardLimitEnabled",
+                    startDateKey: "creditCardStartDate",
                     cycleTypeKey: "creditCardLimitCycleType",
                     cycleKey: "creditCardLimitCycle",
                     cycleDayKey: "creditCardLimitCycleDay",
@@ -457,6 +471,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
               onChange={onChange}
               rule={{
                 enabledKey: "receiptTrackingEnabled",
+                startDateKey: "receiptTrackingStartDate",
                 cycleTypeKey: "receiptTrackingCycleType",
                 cycleKey: "receiptTrackingCycle",
                 cycleDayKey: "receiptTrackingCycleDay",

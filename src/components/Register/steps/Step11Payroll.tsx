@@ -23,6 +23,7 @@ interface Props {
 }
 
 interface CyclePickerConfig {
+  startDateKey: keyof FormData;
   cycleTypeKey: keyof FormData;
   cycleKey: keyof FormData;
   cycleDayKey: keyof FormData;
@@ -47,6 +48,16 @@ function CyclePicker({
 
   return (
     <div className="flex flex-col gap-3 pl-1">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`${config.idPrefix}-start-date`}>Starting Date</Label>
+        <Input
+          id={`${config.idPrefix}-start-date`}
+          type="date"
+          value={data[config.startDateKey] as string}
+          onChange={(e) => onChange({ [config.startDateKey]: e.target.value } as Partial<FormData>)}
+        />
+        <p className="text-xs text-muted-foreground">Past dates will backfill all todos up to today.</p>
+      </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={`${config.idPrefix}-cycle-type`}>Repeat</Label>
         <select
@@ -230,6 +241,7 @@ function CyclePicker({
 }
 
 const PAYROLL_CYCLE_CONFIG: CyclePickerConfig = {
+  startDateKey: "payrollStartDate",
   cycleTypeKey: "payrollCycleType",
   cycleKey: "payrollCycle",
   cycleDayKey: "payrollCycleDay",
@@ -239,6 +251,7 @@ const PAYROLL_CYCLE_CONFIG: CyclePickerConfig = {
 };
 
 const PAYROLL_TAX_CYCLE_CONFIG: CyclePickerConfig = {
+  startDateKey: "payrollTaxStartDate",
   cycleTypeKey: "payrollTaxCycleType",
   cycleKey: "payrollTaxCycle",
   cycleDayKey: "payrollTaxCycleDay",

@@ -25,6 +25,7 @@ interface Props {
 interface RuleConfig {
   question: string;
   enabledKey: keyof FormData;
+  startDateKey: keyof FormData;
   cycleTypeKey: keyof FormData;
   cycleKey: keyof FormData;
   cycleDayKey: keyof FormData;
@@ -37,6 +38,7 @@ const RULES: RuleConfig[] = [
   {
     question: "Should we handle invoicing?",
     enabledKey: "arInvoicingEnabled",
+    startDateKey: "arInvoicingStartDate",
     cycleTypeKey: "arInvoicingCycleType",
     cycleKey: "arInvoicingCycle",
     cycleDayKey: "arInvoicingCycleDay",
@@ -47,6 +49,7 @@ const RULES: RuleConfig[] = [
   {
     question: "Should we send statements and notices?",
     enabledKey: "arStatementsEnabled",
+    startDateKey: "arStatementsStartDate",
     cycleTypeKey: "arStatementsCycleType",
     cycleKey: "arStatementsCycle",
     cycleDayKey: "arStatementsCycleDay",
@@ -57,6 +60,7 @@ const RULES: RuleConfig[] = [
   {
     question: "Should we handle collections?",
     enabledKey: "arCollectionEnabled",
+    startDateKey: "arCollectionStartDate",
     cycleTypeKey: "arCollectionCycleType",
     cycleKey: "arCollectionCycle",
     cycleDayKey: "arCollectionCycleDay",
@@ -67,6 +71,7 @@ const RULES: RuleConfig[] = [
   {
     question: "Should we produce an open invoices report?",
     enabledKey: "arReportEnabled",
+    startDateKey: "arReportStartDate",
     cycleTypeKey: "arReportCycleType",
     cycleKey: "arReportCycle",
     cycleDayKey: "arReportCycleDay",
@@ -92,6 +97,18 @@ function CyclePicker({
 
   return (
     <div className="flex flex-col gap-3 pl-1">
+      {/* Starting date */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`${rule.idPrefix}-start-date`}>Starting Date</Label>
+        <Input
+          id={`${rule.idPrefix}-start-date`}
+          type="date"
+          value={data[rule.startDateKey] as string}
+          onChange={(e) => onChange({ [rule.startDateKey]: e.target.value } as Partial<FormData>)}
+        />
+        <p className="text-xs text-muted-foreground">Past dates will backfill all todos up to today.</p>
+      </div>
+
       {/* Cycle type */}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={`${rule.idPrefix}-cycle-type`}>Repeat</Label>
