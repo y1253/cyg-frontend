@@ -114,8 +114,11 @@ export function TasksPage() {
               onToggleSnoozable={() =>
                 updateMutation.mutate({ id: task.id, data: { isSnoozable: !task.isSnoozable } })
               }
-              onSetOrderNumber={n =>
-                updateMutation.mutate({ id: task.id, data: { orderNumber: n } })
+              onSetOrderNumber={(n, onError) =>
+                updateMutation.mutate(
+                  { id: task.id, data: { orderNumber: n } },
+                  { onError: (e: unknown) => onError(e instanceof Error ? e.message : 'That order number is already taken') },
+                )
               }
             />
           ))}
@@ -185,9 +188,10 @@ function TaskRow({
   onToggleImportant: () => void;
   onToggleCanBeDisabled: () => void;
   onToggleSnoozable: () => void;
-  onSetOrderNumber: (n: number | null) => void;
+  onSetOrderNumber: (n: number | null, onError: (msg: string) => void) => void;
 }) {
   const [numInput, setNumInput] = useState(task.orderNumber != null ? String(task.orderNumber) : '');
+  const [orderNumError, setOrderNumError] = useState<string | null>(null);
 
   useEffect(() => {
     setNumInput(task.orderNumber != null ? String(task.orderNumber) : '');
@@ -196,11 +200,14 @@ function TaskRow({
   function handleNumBlur() {
     const trimmed = numInput.trim();
     if (trimmed === '') {
-      onSetOrderNumber(null);
+      onSetOrderNumber(null, (msg) => setOrderNumError(msg));
     } else {
       const n = parseInt(trimmed, 10);
       if (!isNaN(n) && n >= 1) {
-        onSetOrderNumber(n);
+        onSetOrderNumber(n, (msg) => {
+          setOrderNumError(msg);
+          setNumInput(task.orderNumber != null ? String(task.orderNumber) : '');
+        });
       } else {
         setNumInput(task.orderNumber != null ? String(task.orderNumber) : '');
       }
@@ -209,17 +216,22 @@ function TaskRow({
 
   return (
     <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3">
-      <input
-        type="number"
-        min={1}
-        value={numInput}
-        onChange={e => setNumInput(e.target.value)}
-        onBlur={handleNumBlur}
-        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-        placeholder="—"
-        title="Order number"
-        className="w-12 h-7 shrink-0 text-center text-xs rounded border border-input bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
+      <div className="flex flex-col items-center gap-0.5 shrink-0">
+        <input
+          type="number"
+          min={1}
+          value={numInput}
+          onChange={e => { setNumInput(e.target.value); setOrderNumError(null); }}
+          onBlur={handleNumBlur}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          placeholder="—"
+          title="Order number"
+          className={`w-12 h-7 text-center text-xs rounded border bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${orderNumError ? 'border-red-400 focus:ring-red-300' : 'border-input'}`}
+        />
+        {orderNumError && (
+          <span className="text-[10px] text-red-500 text-center leading-tight max-w-[60px]">{orderNumError}</span>
+        )}
+      </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-medium text-sm">{task.title}</p>

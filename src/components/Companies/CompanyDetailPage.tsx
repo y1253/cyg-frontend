@@ -349,7 +349,12 @@ function TodoRow({
                   Important
                 </span>
               )}
-              <p className={`text-sm font-medium leading-snug ${todo.resolved ? 'line-through text-muted-foreground' : ''}`}>
+              <p className={`text-sm font-medium leading-snug flex items-center gap-2 ${todo.resolved ? 'line-through text-muted-foreground' : ''}`}>
+                {todo.task.orderNumber != null && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-100 text-teal-700 text-[10px] font-semibold shrink-0">
+                    {todo.task.orderNumber}
+                  </span>
+                )}
                 {todo.task.title}
               </p>
               {!todo.resolved && badge.label && (
@@ -1251,7 +1256,12 @@ function SchedulesSection({
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className={`text-sm font-medium leading-snug ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
+            <p className={`text-sm font-medium leading-snug flex items-center gap-2 ${isDisabled ? 'line-through text-muted-foreground' : ''}`}>
+              {s.task.orderNumber != null && (
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-100 text-teal-700 text-[10px] font-semibold shrink-0">
+                  {s.task.orderNumber}
+                </span>
+              )}
               {s.task.title}
             </p>
             {isCustom && !isDisabled && (
