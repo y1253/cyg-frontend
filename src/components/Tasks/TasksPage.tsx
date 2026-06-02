@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pencil, Plus, Trash2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -114,6 +114,9 @@ export function TasksPage() {
               onToggleSnoozable={() =>
                 updateMutation.mutate({ id: task.id, data: { isSnoozable: !task.isSnoozable } })
               }
+              onSetOrderNumber={n =>
+                updateMutation.mutate({ id: task.id, data: { orderNumber: n } })
+              }
             />
           ))}
         </div>
@@ -174,6 +177,7 @@ function TaskRow({
   onToggleImportant,
   onToggleCanBeDisabled,
   onToggleSnoozable,
+  onSetOrderNumber,
 }: {
   task: AppTask;
   onEdit: () => void;
@@ -181,9 +185,41 @@ function TaskRow({
   onToggleImportant: () => void;
   onToggleCanBeDisabled: () => void;
   onToggleSnoozable: () => void;
+  onSetOrderNumber: (n: number | null) => void;
 }) {
+  const [numInput, setNumInput] = useState(task.orderNumber != null ? String(task.orderNumber) : '');
+
+  useEffect(() => {
+    setNumInput(task.orderNumber != null ? String(task.orderNumber) : '');
+  }, [task.orderNumber]);
+
+  function handleNumBlur() {
+    const trimmed = numInput.trim();
+    if (trimmed === '') {
+      onSetOrderNumber(null);
+    } else {
+      const n = parseInt(trimmed, 10);
+      if (!isNaN(n) && n >= 1) {
+        onSetOrderNumber(n);
+      } else {
+        setNumInput(task.orderNumber != null ? String(task.orderNumber) : '');
+      }
+    }
+  }
+
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border bg-background px-4 py-3">
+    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3">
+      <input
+        type="number"
+        min={1}
+        value={numInput}
+        onChange={e => setNumInput(e.target.value)}
+        onBlur={handleNumBlur}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        placeholder="—"
+        title="Order number"
+        className="w-12 h-7 shrink-0 text-center text-xs rounded border border-input bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-medium text-sm">{task.title}</p>

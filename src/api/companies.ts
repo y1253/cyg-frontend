@@ -181,7 +181,7 @@ export interface TodoItem {
   resolved: boolean;
   resolvedAt: string | null;
   snoozedUntil: string | null;
-  task: { id: number; title: string; description: string | null; isSnoozable: boolean };
+  task: { id: number; title: string; description: string | null; isSnoozable: boolean; orderNumber: number | null };
 }
 
 export interface CompanyDetail {

@@ -19,6 +19,7 @@ export interface AppTask {
   isImportant: boolean;
   canBeDisabled: boolean;
   isSnoozable: boolean;
+  orderNumber: number | null;
   createdAt: string;
   openTodos: number;
 }
@@ -47,6 +48,7 @@ export interface UpdateTaskData {
   isImportant?: boolean;
   canBeDisabled?: boolean;
   isSnoozable?: boolean;
+  orderNumber?: number | null;
 }
 
 export interface AssignTaskData {

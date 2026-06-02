@@ -1218,8 +1218,14 @@ function SchedulesSection({
       )
     : schedules;
 
-  const active = filtered.filter(s => !s.deletedAt).sort((a, b) => a.task.title.localeCompare(b.task.title));
-  const disabled = filtered.filter(s => !!s.deletedAt).sort((a, b) => a.task.title.localeCompare(b.task.title));
+  const byOrderNumber = (a: AppTaskSchedule, b: AppTaskSchedule) => {
+    const an = a.task.orderNumber ?? Infinity;
+    const bn = b.task.orderNumber ?? Infinity;
+    if (an !== bn) return an - bn;
+    return a.task.title.localeCompare(b.task.title);
+  };
+  const active = filtered.filter(s => !s.deletedAt).sort(byOrderNumber);
+  const disabled = filtered.filter(s => !!s.deletedAt).sort(byOrderNumber);
 
   if (schedules.length === 0) {
     return <p className="text-sm text-muted-foreground">No recurring schedules set up for this company yet.</p>;
@@ -1713,7 +1719,7 @@ export function CompanyDetailPage() {
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
-  type TaskSort = 'priority' | 'az' | 'za' | 'overdue';
+  type TaskSort = 'priority' | 'az' | 'za' | 'overdue' | 'number_asc' | 'number_desc';
   const [taskSort, setTaskSort] = useState<TaskSort>('priority');
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1866,9 +1872,19 @@ export function CompanyDetailPage() {
 
   const snoozedTodos = company.todos.filter(t => !t.resolved && isSnoozedNow(t));
 
-  const sortedTodos = taskSort === 'az'      ? [...openTodos].sort((a, b) => a.task.title.localeCompare(b.task.title))
-                   : taskSort === 'za'      ? [...openTodos].sort((a, b) => b.task.title.localeCompare(a.task.title))
-                   : taskSort === 'overdue' ? [...openTodos].sort((a, b) => getOverdueDays(b) - getOverdueDays(a))
+  const sortedTodos = taskSort === 'az'          ? [...openTodos].sort((a, b) => a.task.title.localeCompare(b.task.title))
+                   : taskSort === 'za'          ? [...openTodos].sort((a, b) => b.task.title.localeCompare(a.task.title))
+                   : taskSort === 'overdue'     ? [...openTodos].sort((a, b) => getOverdueDays(b) - getOverdueDays(a))
+                   : taskSort === 'number_asc'  ? [...openTodos].sort((a, b) => {
+                       const an = a.task.orderNumber ?? Infinity;
+                       const bn = b.task.orderNumber ?? Infinity;
+                       return an !== bn ? an - bn : a.task.title.localeCompare(b.task.title);
+                     })
+                   : taskSort === 'number_desc' ? [...openTodos].sort((a, b) => {
+                       const an = a.task.orderNumber ?? -Infinity;
+                       const bn = b.task.orderNumber ?? -Infinity;
+                       return an !== bn ? bn - an : a.task.title.localeCompare(b.task.title);
+                     })
                    : openTodos;
 
   const urgentTodos        = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) <= 1) : [];
@@ -2356,7 +2372,7 @@ export function CompanyDetailPage() {
                 }
               </button>
               <Select value={taskSort} onValueChange={v => setTaskSort(v as TaskSort)}>
-                <SelectTrigger className="h-7 w-36 text-[11px]">
+                <SelectTrigger className="h-7 w-40 text-[11px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2364,6 +2380,8 @@ export function CompanyDetailPage() {
                   <SelectItem value="az">Name A → Z</SelectItem>
                   <SelectItem value="za">Name Z → A</SelectItem>
                   <SelectItem value="overdue">Most Overdue</SelectItem>
+                  <SelectItem value="number_asc">Number 1 → 9</SelectItem>
+                  <SelectItem value="number_desc">Number 9 → 1</SelectItem>
                 </SelectContent>
               </Select>
             </div>

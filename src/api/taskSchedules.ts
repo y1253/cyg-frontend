@@ -22,7 +22,7 @@ export interface AppTaskSchedule {
   createdAt: string;
   deletedAt: string | null;
   isManuallyAdded: boolean;
-  task: { id: number; title: string; description: string | null; canBeDisabled: boolean };
+  task: { id: number; title: string; description: string | null; canBeDisabled: boolean; orderNumber: number | null };
 }
 
 export async function fetchSchedulesByCompany(token: string, companyId: number): Promise<AppTaskSchedule[]> {
