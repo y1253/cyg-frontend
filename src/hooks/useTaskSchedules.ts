@@ -9,6 +9,7 @@ import {
   updateScheduleUserNote,
   deleteSchedule,
   type CycleType,
+  type AppTaskSchedule,
 } from '@/api/taskSchedules';
 
 export function useTaskSchedules(companyId: number) {
@@ -61,7 +62,12 @@ export function useUpdateSchedule(companyId: number) {
       note?: string | null;
       startDate?: string | null;
     }) => updateSchedule(token!, id, { cycle, cycleType, cycleDay, cycleNth, note, startDate }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData(
+        ['task-schedules', companyId],
+        (old: AppTaskSchedule[] | undefined) =>
+          old ? old.map(s => (s.id === data.id ? { ...s, ...data } : s)) : old,
+      );
       qc.invalidateQueries({ queryKey: ['task-schedules', companyId] });
       qc.invalidateQueries({ queryKey: ['company', companyId] });
     },

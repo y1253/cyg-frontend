@@ -260,6 +260,16 @@ const PAYROLL_TAX_CYCLE_CONFIG: CyclePickerConfig = {
   idPrefix: "pr-tax",
 };
 
+const PAYROLL_TAX_QC_CYCLE_CONFIG: CyclePickerConfig = {
+  startDateKey: "payrollTaxQcStartDate",
+  cycleTypeKey: "payrollTaxQcCycleType",
+  cycleKey: "payrollTaxQcCycle",
+  cycleDayKey: "payrollTaxQcCycleDay",
+  cycleNthKey: "payrollTaxQcCycleNth",
+  noteKey: "payrollTaxQcNote",
+  idPrefix: "pr-tax-qc",
+};
+
 export function Step11Payroll({ data, onChange }: Props) {
   const isCanada = data.country === 'CANADA';
 
@@ -322,7 +332,7 @@ export function Step11Payroll({ data, onChange }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => onChange({ payrollTaxEnabled: false, payrollTaxRegion: null })}
+              onClick={() => onChange({ payrollTaxEnabled: false, payrollTaxCadEnabled: false, payrollTaxQcEnabled: false })}
               className={cn(
                 "flex flex-col items-center gap-2 rounded-xl border-2 p-5 text-sm font-medium transition-all",
                 data.payrollTaxEnabled === false
@@ -338,14 +348,14 @@ export function Step11Payroll({ data, onChange }: Props) {
           {data.payrollTaxEnabled === true && (
             <div className="flex flex-col gap-4 pl-1">
               <div className="flex flex-col gap-1.5">
-                <p className="text-sm font-medium text-foreground">Which type?</p>
+                <p className="text-sm font-medium text-foreground">Which type? <span className="text-xs font-normal text-muted-foreground">(select one or both)</span></p>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => onChange({ payrollTaxRegion: 'CAD' })}
+                    onClick={() => onChange({ payrollTaxCadEnabled: !data.payrollTaxCadEnabled })}
                     className={cn(
                       "flex flex-col items-center gap-1 rounded-xl border-2 p-4 text-sm font-medium transition-all",
-                      data.payrollTaxRegion === 'CAD'
+                      data.payrollTaxCadEnabled
                         ? "border-primary bg-primary/5 text-primary"
                         : "border-border bg-background text-foreground hover:border-primary/40 hover:bg-muted/30",
                     )}
@@ -354,10 +364,10 @@ export function Step11Payroll({ data, onChange }: Props) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => onChange({ payrollTaxRegion: 'QC' })}
+                    onClick={() => onChange({ payrollTaxQcEnabled: !data.payrollTaxQcEnabled })}
                     className={cn(
                       "flex flex-col items-center gap-1 rounded-xl border-2 p-4 text-sm font-medium transition-all",
-                      data.payrollTaxRegion === 'QC'
+                      data.payrollTaxQcEnabled
                         ? "border-primary bg-primary/5 text-primary"
                         : "border-border bg-background text-foreground hover:border-primary/40 hover:bg-muted/30",
                     )}
@@ -367,8 +377,17 @@ export function Step11Payroll({ data, onChange }: Props) {
                 </div>
               </div>
 
-              {data.payrollTaxRegion && (
-                <CyclePicker data={data} onChange={onChange} config={PAYROLL_TAX_CYCLE_CONFIG} />
+              {data.payrollTaxCadEnabled && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🍁 Canadian schedule</p>
+                  <CyclePicker data={data} onChange={onChange} config={PAYROLL_TAX_CYCLE_CONFIG} />
+                </div>
+              )}
+              {data.payrollTaxQcEnabled && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🏙️ Quebec schedule</p>
+                  <CyclePicker data={data} onChange={onChange} config={PAYROLL_TAX_QC_CYCLE_CONFIG} />
+                </div>
               )}
             </div>
           )}

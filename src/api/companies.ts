@@ -6,6 +6,28 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 // ─── Register ────────────────────────────────────────────────────────────────
 
+export interface CashFlowAccountData {
+  accountName: string;
+  enabled: boolean;
+  note?: string;
+  startDate: string;
+  cycleType: string;
+  cycle: number;
+  cycleDay?: number | null;
+  cycleNth?: number | null;
+}
+
+export interface CreditCardAccountData {
+  accountName: string;
+  enabled: boolean;
+  note?: string;
+  statementDay: number | null;
+  limitEnabled: boolean;
+  limitNote?: string;
+  limitAmount?: string;
+  limitCycleDays: number;
+}
+
 export interface RegisterCompanyData {
   hasQbAccount: boolean;
   qbPlan?: string;
@@ -70,13 +92,20 @@ export interface RegisterCompanyData {
   payrollCycleNth?: number;
   payrollNote?: string;
   payrollTaxEnabled?: boolean;
+  payrollTaxCadEnabled?: boolean;
+  payrollTaxQcEnabled?: boolean;
   payrollTaxStartDate?: string;
-  payrollTaxRegion?: string;
   payrollTaxCycleType?: string;
   payrollTaxCycle?: number;
   payrollTaxCycleDay?: number;
   payrollTaxCycleNth?: number;
   payrollTaxNote?: string;
+  payrollTaxQcStartDate?: string;
+  payrollTaxQcCycleType?: string;
+  payrollTaxQcCycle?: number;
+  payrollTaxQcCycleDay?: number;
+  payrollTaxQcCycleNth?: number;
+  payrollTaxQcNote?: string;
   payrollYearEndEnabled?: boolean;
   payrollYearEndRl1?: boolean;
   payrollYearEndT4?: boolean;
@@ -90,25 +119,9 @@ export interface RegisterCompanyData {
   salesTaxEnabled?: boolean;
   salesTaxNote?: string;
   cashFlowEnabled?: boolean;
-  cashFlowStartDate?: string;
-  cashFlowCycleType?: string;
-  cashFlowCycle?: number;
-  cashFlowCycleDay?: number;
-  cashFlowCycleNth?: number;
-  cashFlowNote?: string;
+  cashFlowAccounts?: CashFlowAccountData[];
   creditCardEnabled?: boolean;
-  creditCardStartDate?: string;
-  creditCardCycleType?: string;
-  creditCardCycle?: number;
-  creditCardCycleDay?: number;
-  creditCardCycleNth?: number;
-  creditCardNote?: string;
-  creditCardLimitEnabled?: boolean;
-  creditCardLimitCycleType?: string;
-  creditCardLimitCycle?: number;
-  creditCardLimitCycleDay?: number;
-  creditCardLimitCycleNth?: number;
-  creditCardLimitAmount?: string;
+  creditCardAccounts?: CreditCardAccountData[];
   receiptTrackingEnabled?: boolean;
   receiptTrackingStartDate?: string;
   receiptTrackingCycleType?: string;
