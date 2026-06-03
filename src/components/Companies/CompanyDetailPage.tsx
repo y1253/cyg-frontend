@@ -1732,6 +1732,7 @@ export function CompanyDetailPage() {
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
   type TaskSort = 'priority' | 'az' | 'za' | 'overdue' | 'number_asc' | 'number_desc';
   const [taskSort, setTaskSort] = useState<TaskSort>('priority');
+  const [todoSearch, setTodoSearch] = useState('');
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -1883,24 +1884,29 @@ export function CompanyDetailPage() {
 
   const snoozedTodos = company.todos.filter(t => !t.resolved && isSnoozedNow(t));
 
-  const sortedTodos = taskSort === 'az'          ? [...openTodos].sort((a, b) => a.task.title.localeCompare(b.task.title))
-                   : taskSort === 'za'          ? [...openTodos].sort((a, b) => b.task.title.localeCompare(a.task.title))
-                   : taskSort === 'overdue'     ? [...openTodos].sort((a, b) => getOverdueDays(b) - getOverdueDays(a))
-                   : taskSort === 'number_asc'  ? [...openTodos].sort((a, b) => {
+  const todoSearchQuery = todoSearch.trim().toLowerCase();
+  const visibleTodos = todoSearchQuery
+    ? openTodos.filter(t => t.task.title.toLowerCase().includes(todoSearchQuery))
+    : openTodos;
+
+  const sortedTodos = taskSort === 'az'          ? [...visibleTodos].sort((a, b) => a.task.title.localeCompare(b.task.title))
+                   : taskSort === 'za'          ? [...visibleTodos].sort((a, b) => b.task.title.localeCompare(a.task.title))
+                   : taskSort === 'overdue'     ? [...visibleTodos].sort((a, b) => getOverdueDays(b) - getOverdueDays(a))
+                   : taskSort === 'number_asc'  ? [...visibleTodos].sort((a, b) => {
                        const an = a.task.orderNumber ?? Infinity;
                        const bn = b.task.orderNumber ?? Infinity;
                        return an !== bn ? an - bn : a.task.title.localeCompare(b.task.title);
                      })
-                   : taskSort === 'number_desc' ? [...openTodos].sort((a, b) => {
+                   : taskSort === 'number_desc' ? [...visibleTodos].sort((a, b) => {
                        const an = a.task.orderNumber ?? -Infinity;
                        const bn = b.task.orderNumber ?? -Infinity;
                        return an !== bn ? bn - an : a.task.title.localeCompare(b.task.title);
                      })
-                   : openTodos;
+                   : visibleTodos;
 
-  const urgentTodos        = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) <= 1) : [];
-  const importantOnlyTodos = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) === 2) : [];
-  const restTodos          = taskSort === 'priority' ? openTodos.filter(t => getTodoPriority(t) === 3) : [];
+  const urgentTodos        = taskSort === 'priority' ? visibleTodos.filter(t => getTodoPriority(t) <= 1) : [];
+  const importantOnlyTodos = taskSort === 'priority' ? visibleTodos.filter(t => getTodoPriority(t) === 2) : [];
+  const restTodos          = taskSort === 'priority' ? visibleTodos.filter(t => getTodoPriority(t) === 3) : [];
   const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
 
   function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -2391,6 +2397,25 @@ export function CompanyDetailPage() {
         {/* ── Tasks tab ── */}
         {tab === 'tasks' && (
           <div className="flex flex-col gap-4 max-w-3xl">
+            {/* Search bar */}
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                value={todoSearch}
+                onChange={e => setTodoSearch(e.target.value)}
+                placeholder="Search tasks…"
+                className="h-8 pl-8 text-xs"
+              />
+              {todoSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTodoSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
             <div className="flex items-center justify-between">
               <button
                 type="button"
@@ -2420,9 +2445,11 @@ export function CompanyDetailPage() {
               </Select>
             </div>
 
-            {openTodos.length === 0 && snoozedTodos.length === 0 ? (
+            {visibleTodos.length === 0 && snoozedTodos.length === 0 && !todoSearchQuery ? (
               <p className="text-sm text-muted-foreground">All tasks resolved.</p>
-            ) : openTodos.length === 0 ? null : (
+            ) : visibleTodos.length === 0 && todoSearchQuery ? (
+              <p className="text-sm text-muted-foreground">No tasks match your search.</p>
+            ) : visibleTodos.length === 0 ? null : (
               <div className="flex flex-col gap-2">
                 {taskSort !== 'priority' ? (
                   sortedTodos.map(todo => (
