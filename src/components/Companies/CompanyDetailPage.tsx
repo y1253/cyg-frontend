@@ -1726,6 +1726,7 @@ export function CompanyDetailPage() {
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>('tasks');
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
@@ -1968,8 +1969,16 @@ export function CompanyDetailPage() {
       )}
 
       {/* Page header */}
-      <div className="px-6 pt-6 pb-0">
+      <div className={headerCollapsed ? 'px-6 pt-3 pb-0' : 'px-6 pt-6 pb-0'}>
         <div className="flex items-center gap-3 mb-1">
+          <button
+            type="button"
+            onClick={() => setHeaderCollapsed(c => !c)}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            title={headerCollapsed ? 'Expand header' : 'Collapse header'}
+          >
+            {headerCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          </button>
           <h1 className="text-2xl font-bold">{company.businessName}</h1>
           <Badge variant={company.status ? 'default' : 'secondary'}>
             {company.status ? 'Active' : 'Inactive'}
@@ -1986,46 +1995,61 @@ export function CompanyDetailPage() {
             </Button>
           )}
         </div>
-        <p className="text-sm text-muted-foreground mb-4">
-          {company.country ?? '—'} · Registered {formatDate(company.createdAt)} ·{' '}
-          {company.assignedUser
-            ? <>Assigned to <span className="font-medium text-foreground">{company.assignedUser.name}</span></>
-            : <span className="text-orange-600 font-medium">Unassigned</span>
-          }
-          {isAdmin && (
-            <>
-              {' · '}
-              {company.supportNumber
-                ? <span className="font-medium text-foreground">{company.supportNumber}</span>
-                : <span className="text-orange-600 font-medium">No support number</span>
+        {!headerCollapsed && (
+          <>
+            <p className="text-sm text-muted-foreground mb-4">
+              {company.country ?? '—'} · Registered {formatDate(company.createdAt)} ·{' '}
+              {company.assignedUser
+                ? <>Assigned to <span className="font-medium text-foreground">{company.assignedUser.name}</span></>
+                : <span className="text-orange-600 font-medium">Unassigned</span>
               }
-            </>
-          )}
-        </p>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold">{openTodos.length}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
-          </div>
-          <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-amber-600">{importantCount}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Important</p>
-          </div>
-          <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-purple-600">
-              {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length}
+              {isAdmin && (
+                <>
+                  {' · '}
+                  {company.supportNumber
+                    ? <span className="font-medium text-foreground">{company.supportNumber}</span>
+                    : <span className="text-orange-600 font-medium">No support number</span>
+                  }
+                </>
+              )}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">Overdue 25 days</p>
-          </div>
-          <div className="rounded-lg border bg-background px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-green-600">{resolvedTodos.length}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Resolved</p>
-          </div>
-        </div>
 
-        <CompanyNotesSection companyId={companyId} isAdmin={isAdmin} />
+            {/* Stats */}
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="rounded-lg border bg-background px-4 py-3 text-center">
+                <p className="text-2xl font-bold">{openTodos.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
+              </div>
+              <div className="rounded-lg border bg-background px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-amber-600">{importantCount}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Important</p>
+              </div>
+              <div className="rounded-lg border bg-background px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-purple-600">
+                  {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Overdue 25 days</p>
+              </div>
+              <div className="rounded-lg border bg-background px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-green-600">{resolvedTodos.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Resolved</p>
+              </div>
+            </div>
+
+            <CompanyNotesSection companyId={companyId} isAdmin={isAdmin} />
+          </>
+        )}
+
+        {headerCollapsed && (
+          <div className="flex items-center gap-4 py-1 text-xs">
+            <span className="font-medium text-foreground">{openTodos.length} open</span>
+            <span className="text-amber-600 font-medium">{importantCount} important</span>
+            <span className="text-purple-600 font-medium">
+              {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length} overdue 25d
+            </span>
+            <span className="text-green-600 font-medium">{resolvedTodos.length} resolved</span>
+          </div>
+        )}
 
         <TabBar
           active={tab}
