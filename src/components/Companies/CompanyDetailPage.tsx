@@ -746,9 +746,11 @@ type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules';
 function CompanyNotesSection({
   companyId,
   isAdmin,
+  compact = false,
 }: {
   companyId: number;
   isAdmin: boolean;
+  compact?: boolean;
 }) {
   const { data: notes = [] } = useNotes(companyId);
   const createNote = useCreateNote(companyId);
@@ -822,7 +824,7 @@ function CompanyNotesSection({
     <div className="mb-4 rounded-lg border bg-amber-50/50 border-amber-200">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-amber-200">
         <span className="text-sm font-semibold text-amber-900">Notes</span>
-        {isAdmin && !adding && (
+        {isAdmin && !adding && !compact && (
           <button
             type="button"
             onClick={startAdd}
@@ -833,7 +835,7 @@ function CompanyNotesSection({
         )}
       </div>
 
-      <div className="divide-y divide-amber-100 overflow-y-auto notes-scroll" style={{ maxHeight: notesMaxH }}>
+      <div className="divide-y divide-amber-100 overflow-y-auto notes-scroll" style={{ maxHeight: compact ? 72 : notesMaxH }}>
         {/* Add note form */}
         {adding && (
           <div className="px-4 py-3 flex flex-col gap-2">
@@ -922,12 +924,14 @@ function CompanyNotesSection({
           </div>
         ))}
       </div>
-      <div
-        onMouseDown={onDragStart}
-        className="flex items-center justify-center h-4 cursor-row-resize select-none border-t border-amber-100 hover:bg-amber-100/60 transition-colors rounded-b-lg"
-      >
-        <GripHorizontal size={14} className="text-amber-300" />
-      </div>
+      {!compact && (
+        <div
+          onMouseDown={onDragStart}
+          className="flex items-center justify-center h-4 cursor-row-resize select-none border-t border-amber-100 hover:bg-amber-100/60 transition-colors rounded-b-lg"
+        >
+          <GripHorizontal size={14} className="text-amber-300" />
+        </div>
+      )}
     </div>
   );
 }
@@ -2064,7 +2068,6 @@ export function CompanyDetailPage() {
               </div>
             </div>
 
-            <CompanyNotesSection companyId={companyId} isAdmin={isAdmin} />
           </>
         )}
 
@@ -2078,6 +2081,8 @@ export function CompanyDetailPage() {
             <span className="text-green-600 font-medium">{resolvedTodos.length} resolved</span>
           </div>
         )}
+
+        <CompanyNotesSection companyId={companyId} isAdmin={isAdmin} compact={headerCollapsed} />
 
         <TabBar
           active={tab}
