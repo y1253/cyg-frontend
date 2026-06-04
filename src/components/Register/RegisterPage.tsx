@@ -91,6 +91,7 @@ export interface FormData {
   apCycle: number;
   apCycleDay: number | null;
   apCycleNth: number | null;
+  apNote: string;
   // Step 10 — Accounts Receivable
   arInvoicingEnabled: boolean | null;
   arInvoicingStartDate: string;
@@ -204,6 +205,7 @@ const EMPTY_FORM: FormData = {
   apCycle: 30,
   apCycleDay: null,
   apCycleNth: null,
+  apNote: '',
   arInvoicingEnabled: null,
   arInvoicingStartDate: '',
   arInvoicingCycleType: 'DAYS',
@@ -552,6 +554,7 @@ export function RegisterPage() {
           apCycle: form.apCycle || undefined,
           apCycleDay: form.apCycleDay ?? undefined,
           apCycleNth: form.apCycleNth ?? undefined,
+          apNote: form.apNote || undefined,
         }),
         arInvoicingEnabled: form.arInvoicingEnabled ?? undefined,
         ...(form.arInvoicingEnabled === true && {

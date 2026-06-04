@@ -1725,13 +1725,18 @@ export function CompanyDetailPage() {
   const companyId = Number(id);
   const navigate = useNavigate();
 
-  const [tab, setTab] = useState<Tab>('tasks');
-  const [headerCollapsed, setHeaderCollapsed] = useState(false);
-  const [addTaskOpen, setAddTaskOpen] = useState(false);
-  const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>({ expanded: true, seq: 0 });
-  const [snoozedExpanded, setSnoozedExpanded] = useState(false);
+  const uiKey = `cmp-ui-${companyId}`;
+  const getStoredUI = () => {
+    try { return JSON.parse(localStorage.getItem(uiKey) ?? '{}'); } catch { return {}; }
+  };
+
   type TaskSort = 'priority' | 'az' | 'za' | 'overdue' | 'number_asc' | 'number_desc';
-  const [taskSort, setTaskSort] = useState<TaskSort>('priority');
+  const [tab, setTab] = useState<Tab>(() => getStoredUI().tab ?? 'tasks');
+  const [headerCollapsed, setHeaderCollapsed] = useState<boolean>(() => getStoredUI().headerCollapsed ?? false);
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>(() => ({ expanded: getStoredUI().expandedAll ?? true, seq: 0 }));
+  const [snoozedExpanded, setSnoozedExpanded] = useState<boolean>(() => getStoredUI().snoozedExpanded ?? false);
+  const [taskSort, setTaskSort] = useState<TaskSort>(() => getStoredUI().taskSort ?? 'priority');
   const [todoSearch, setTodoSearch] = useState('');
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1771,6 +1776,23 @@ export function CompanyDetailPage() {
   });
   const [billingForm, setBillingForm] = useState({ billingEmail: '', billingPassword: '' });
   const [showBillingPw, setShowBillingPw] = useState(false);
+
+  // Persist UI prefs to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(uiKey, JSON.stringify({ tab, taskSort, headerCollapsed, snoozedExpanded, expandedAll: expandSignal.expanded }));
+    } catch {}
+  }, [tab, taskSort, headerCollapsed, snoozedExpanded, expandSignal.expanded, uiKey]);
+
+  // Reload prefs when navigating between companies (component reuses the same instance)
+  useEffect(() => {
+    const s = getStoredUI();
+    setTab(s.tab ?? 'tasks');
+    setTaskSort(s.taskSort ?? 'priority');
+    setHeaderCollapsed(s.headerCollapsed ?? false);
+    setSnoozedExpanded(s.snoozedExpanded ?? false);
+    setExpandSignal({ expanded: s.expandedAll ?? true, seq: 0 });
+  }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startEdit(section: EditSection) {
     if (!company) return;
