@@ -250,25 +250,6 @@ const PAYROLL_CYCLE_CONFIG: CyclePickerConfig = {
   idPrefix: "pr",
 };
 
-const PAYROLL_TAX_CYCLE_CONFIG: CyclePickerConfig = {
-  startDateKey: "payrollTaxStartDate",
-  cycleTypeKey: "payrollTaxCycleType",
-  cycleKey: "payrollTaxCycle",
-  cycleDayKey: "payrollTaxCycleDay",
-  cycleNthKey: "payrollTaxCycleNth",
-  noteKey: "payrollTaxNote",
-  idPrefix: "pr-tax",
-};
-
-const PAYROLL_TAX_QC_CYCLE_CONFIG: CyclePickerConfig = {
-  startDateKey: "payrollTaxQcStartDate",
-  cycleTypeKey: "payrollTaxQcCycleType",
-  cycleKey: "payrollTaxQcCycle",
-  cycleDayKey: "payrollTaxQcCycleDay",
-  cycleNthKey: "payrollTaxQcCycleNth",
-  noteKey: "payrollTaxQcNote",
-  idPrefix: "pr-tax-qc",
-};
 
 export function Step11Payroll({ data, onChange }: Props) {
   const isCanada = data.country === 'CANADA';
@@ -380,13 +361,31 @@ export function Step11Payroll({ data, onChange }: Props) {
               {data.payrollTaxCadEnabled && (
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🍁 Canadian schedule</p>
-                  <CyclePicker data={data} onChange={onChange} config={PAYROLL_TAX_CYCLE_CONFIG} />
+                  <div className="flex flex-col gap-1.5 pl-1">
+                    <Label htmlFor="pr-tax-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                    <textarea
+                      id="pr-tax-note"
+                      value={data.payrollTaxNote as string}
+                      onChange={(e) => onChange({ payrollTaxNote: e.target.value })}
+                      placeholder="Any additional instructions..."
+                      className={TEXTAREA_CLASS}
+                    />
+                  </div>
                 </div>
               )}
               {data.payrollTaxQcEnabled && (
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🏙️ Quebec schedule</p>
-                  <CyclePicker data={data} onChange={onChange} config={PAYROLL_TAX_QC_CYCLE_CONFIG} />
+                  <div className="flex flex-col gap-1.5 pl-1">
+                    <Label htmlFor="pr-tax-qc-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                    <textarea
+                      id="pr-tax-qc-note"
+                      value={data.payrollTaxQcNote as string}
+                      onChange={(e) => onChange({ payrollTaxQcNote: e.target.value })}
+                      placeholder="Any additional instructions..."
+                      className={TEXTAREA_CLASS}
+                    />
+                  </div>
                 </div>
               )}
             </div>
