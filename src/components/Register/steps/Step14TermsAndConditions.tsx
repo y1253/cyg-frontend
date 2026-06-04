@@ -104,7 +104,7 @@ export function Step14TermsAndConditions({ data, onChange }: Props) {
           <p>
             Detailed Terms and Conditions are available at the following link:{' '}
             <a
-              href="https://docs.google.com/document/d/e/2PACX1vSM7gM4V1fjBiZVC9ugTyFdYGxIOyDfUdyCZ1Dzrtjg_k8l8KX1pk86Z3BGrnXPaCuh6NORex9m5-z2/pub"
+              href="https://docs.google.com/document/d/e/2PACX-1vSM7gM4V1fjBiZVC9ugTyFdYGxIOyDfUdyCZ1Dzrtjg_k8l8KX1pk86Z3BGrnXPaCuh6NORex9m5-z2/pub"
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary underline underline-offset-2 hover:opacity-80"
