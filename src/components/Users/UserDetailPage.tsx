@@ -115,7 +115,7 @@ export function UserDetailPage() {
   const STEP_INSTRUCTIONS = [
     'Look straight at the camera',
     'Turn slightly to the right',
-    'Turn slightly to the left',
+    'Turn slightly to the left — try different lighting if possible',
   ];
 
   function handleCapture(blob: Blob) {
@@ -140,6 +140,8 @@ export function UserDetailPage() {
           },
           onError: (err) => {
             setEnrollError(err instanceof Error ? err.message : 'Enrollment failed. Try again.');
+            setEnrollStep(0);
+            setCapturedBlobs([]);
           },
         },
       );
