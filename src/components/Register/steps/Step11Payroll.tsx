@@ -66,7 +66,7 @@ function CyclePicker({
           onChange={(e) =>
             onChange({
               [config.cycleTypeKey]: e.target.value,
-              [config.cycleDayKey]: null,
+              [config.cycleDayKey]: e.target.value === 'WEEKLY_DAY' ? 1 : null,
               [config.cycleNthKey]: null,
               [config.cycleKey]: 30,
             } as Partial<FormData>)

@@ -66,7 +66,7 @@ function CyclePicker({
           onChange={(e) =>
             onChange({
               [rule.cycleTypeKey]: e.target.value,
-              [rule.cycleDayKey]: null,
+              [rule.cycleDayKey]: e.target.value === 'WEEKLY_DAY' ? 1 : null,
               [rule.cycleNthKey]: null,
               [rule.cycleKey]: 30,
             } as Partial<FormData>)
@@ -256,7 +256,7 @@ function AccountCyclePicker({
         <select
           id={`${idPrefix}-cycle-type`}
           value={account.cycleType}
-          onChange={(e) => onChange({ ...account, cycleType: e.target.value, cycleDay: null, cycleNth: null, cycle: 30 })}
+          onChange={(e) => onChange({ ...account, cycleType: e.target.value, cycleDay: e.target.value === 'WEEKLY_DAY' ? 1 : null, cycleNth: null, cycle: 30 })}
           className={SELECT_CLASS}
         >
           <option value="DAYS">Every N days</option>

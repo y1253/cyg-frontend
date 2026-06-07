@@ -373,6 +373,11 @@ function TodoRow({
                 Resolved {formatDate(todo.resolvedAt)}
               </p>
             )}
+            {!expanded && adminNote && (
+              <p className="text-xs text-amber-600 mt-0.5 truncate">
+                📝 {adminNote.length > 45 ? adminNote.slice(0, 45) + '…' : adminNote}
+              </p>
+            )}
           </div>
 
           {/* Right side */}
