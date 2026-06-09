@@ -41,6 +41,25 @@ import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
 import type { CompanyNote } from '@/api/notes';
 
+// ─── Global localStorage helpers ─────────────────────────────────────────────
+
+const GLOBAL_UI_KEY = 'cyg-ui-prefs';
+const getGlobalUI = () => {
+  try { return JSON.parse(localStorage.getItem(GLOBAL_UI_KEY) ?? '{}'); } catch { return {}; }
+};
+
+const COLLAPSED_TODOS_KEY = 'cyg-collapsed-todos';
+const getCollapsedTodoIds = (): Set<number> => {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_TODOS_KEY) ?? '[]')); } catch { return new Set(); }
+};
+const saveCollapsedTodoId = (id: number, collapsed: boolean) => {
+  try {
+    const ids = getCollapsedTodoIds();
+    collapsed ? ids.add(id) : ids.delete(id);
+    localStorage.setItem(COLLAPSED_TODOS_KEY, JSON.stringify([...ids]));
+  } catch {}
+};
+
 // ─── Urgency helpers ──────────────────────────────────────────────────────────
 
 type UrgencyTier = 'urgent' | 'overdue' | 'soon' | 'warning' | 'normal';
@@ -278,10 +297,13 @@ function TodoRow({
   onSnooze: (days: number) => void;
   expandSignal?: { expanded: boolean; seq: number };
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(() => !getCollapsedTodoIds().has(todo.id));
 
   useEffect(() => {
-    if (expandSignal && expandSignal.seq > 0) setExpanded(expandSignal.expanded);
+    if (expandSignal && expandSignal.seq > 0) {
+      setExpanded(expandSignal.expanded);
+      saveCollapsedTodoId(todo.id, !expandSignal.expanded);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandSignal?.seq]);
   const [addCycleOpen, setAddCycleOpen] = useState(false);
@@ -386,7 +408,7 @@ function TodoRow({
             {(hasDescription || hasNote) && (
               <button
                 type="button"
-                onClick={() => setExpanded(v => !v)}
+                onClick={() => setExpanded(v => { const next = !v; saveCollapsedTodoId(todo.id, !next); return next; })}
                 className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 px-1"
               >
                 {expanded ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Details</>}
@@ -1741,11 +1763,11 @@ export function CompanyDetailPage() {
 
   type TaskSort = 'priority' | 'az' | 'za' | 'overdue' | 'number_asc' | 'number_desc';
   const [tab, setTab] = useState<Tab>(() => getStoredUI().tab ?? 'tasks');
-  const [headerCollapsed, setHeaderCollapsed] = useState<boolean>(() => getStoredUI().headerCollapsed ?? false);
+  const [headerCollapsed, setHeaderCollapsed] = useState<boolean>(() => getGlobalUI().headerCollapsed ?? false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
-  const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>(() => ({ expanded: getStoredUI().expandedAll ?? true, seq: 0 }));
-  const [snoozedExpanded, setSnoozedExpanded] = useState<boolean>(() => getStoredUI().snoozedExpanded ?? false);
-  const [taskSort, setTaskSort] = useState<TaskSort>(() => getStoredUI().taskSort ?? 'priority');
+  const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>(() => ({ expanded: getGlobalUI().expandedAll ?? true, seq: 0 }));
+  const [snoozedExpanded, setSnoozedExpanded] = useState<boolean>(() => getGlobalUI().snoozedExpanded ?? false);
+  const [taskSort, setTaskSort] = useState<TaskSort>(() => getGlobalUI().taskSort ?? 'priority');
   const [todoSearch, setTodoSearch] = useState('');
   const tasksAllExpanded = expandSignal.seq === 0 || expandSignal.expanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1786,21 +1808,27 @@ export function CompanyDetailPage() {
   const [billingForm, setBillingForm] = useState({ billingEmail: '', billingPassword: '' });
   const [showBillingPw, setShowBillingPw] = useState(false);
 
-  // Persist UI prefs to localStorage whenever they change
+  // Persist per-company tab to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(uiKey, JSON.stringify({ tab })); } catch {}
+  }, [tab, uiKey]);
+
+  // Persist global UI prefs (shared across all companies) to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(uiKey, JSON.stringify({ tab, taskSort, headerCollapsed, snoozedExpanded, expandedAll: expandSignal.expanded }));
+      localStorage.setItem(GLOBAL_UI_KEY, JSON.stringify({ taskSort, headerCollapsed, snoozedExpanded, expandedAll: expandSignal.expanded }));
     } catch {}
-  }, [tab, taskSort, headerCollapsed, snoozedExpanded, expandSignal.expanded, uiKey]);
+  }, [taskSort, headerCollapsed, snoozedExpanded, expandSignal.expanded]);
 
   // Reload prefs when navigating between companies (component reuses the same instance)
   useEffect(() => {
     const s = getStoredUI();
+    const g = getGlobalUI();
     setTab(s.tab ?? 'tasks');
-    setTaskSort(s.taskSort ?? 'priority');
-    setHeaderCollapsed(s.headerCollapsed ?? false);
-    setSnoozedExpanded(s.snoozedExpanded ?? false);
-    setExpandSignal({ expanded: s.expandedAll ?? true, seq: 0 });
+    setTaskSort(g.taskSort ?? 'priority');
+    setHeaderCollapsed(g.headerCollapsed ?? false);
+    setSnoozedExpanded(g.snoozedExpanded ?? false);
+    setExpandSignal({ expanded: g.expandedAll ?? true, seq: 0 });
   }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startEdit(section: EditSection) {
