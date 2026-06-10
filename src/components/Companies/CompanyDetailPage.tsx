@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
@@ -35,7 +36,11 @@ import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUp
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeletedCompanies';
+import { useGmailAccount } from '@/hooks/useGmailAccount';
+import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
+import { fetchAuthUrl } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
+import { CommunicationsTab } from './CommunicationsTab';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
@@ -766,7 +771,7 @@ function FiscalYearPicker({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules';
+type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules' | 'communications';
 
 // ─── Company Notes section ────────────────────────────────────────────────────
 
@@ -980,6 +985,7 @@ function TabBar({
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
     { key: 'links', label: 'Links' },
     { key: 'schedules' as Tab, label: 'Schedules' },
+    { key: 'communications' as Tab, label: 'Communications' },
   ];
 
   return (
@@ -1751,10 +1757,11 @@ function SchedulesSection({
 
 export function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const companyId = Number(id);
   const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const uiKey = `cmp-ui-${companyId}`;
   const getStoredUI = () => {
@@ -1807,6 +1814,38 @@ export function CompanyDetailPage() {
   });
   const [billingForm, setBillingForm] = useState({ billingEmail: '', billingPassword: '' });
   const [showBillingPw, setShowBillingPw] = useState(false);
+  const [connectingGmail, setConnectingGmail] = useState(false);
+  const [disconnectGmailConfirmOpen, setDisconnectGmailConfirmOpen] = useState(false);
+
+  const { data: gmailAccount } = useGmailAccount(companyId);
+  const disconnectGmailMutation = useDisconnectGmail(companyId);
+
+  const handleConnectGmail = useCallback(async () => {
+    if (!token) return;
+    setConnectingGmail(true);
+    try {
+      const { authUrl } = await fetchAuthUrl(token, companyId);
+      const popup = window.open(authUrl, 'gmail-oauth', 'width=500,height=600,noopener');
+      const onMessage = (e: MessageEvent<{ type: string }>) => {
+        if (e.origin !== window.location.origin) return;
+        if (e.data?.type === 'gmail-connected' || e.data?.type === 'gmail-error') {
+          void qc.invalidateQueries({ queryKey: ['gmail-account', companyId] });
+          setConnectingGmail(false);
+          window.removeEventListener('message', onMessage);
+        }
+      };
+      window.addEventListener('message', onMessage);
+      const poll = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(poll);
+          setConnectingGmail(false);
+          window.removeEventListener('message', onMessage);
+        }
+      }, 500);
+    } catch {
+      setConnectingGmail(false);
+    }
+  }, [token, companyId, qc]);
 
   // Persist per-company tab to localStorage
   useEffect(() => {
@@ -2398,24 +2437,57 @@ export function CompanyDetailPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      <Field label="Billing Email" value={company.billing?.billingEmail} />
-                      {company.billing?.billingPassword && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Password</p>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium font-mono">
-                              {showBillingPw ? company.billing.billingPassword : '••••••••••'}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => setShowBillingPw(v => !v)}
-                              className="text-muted-foreground hover:text-foreground transition-colors"
-                              title={showBillingPw ? 'Hide password' : 'Show password'}
-                            >
-                              {showBillingPw ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
+                    <div className="flex flex-col gap-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        <Field label="Billing Email" value={company.billing?.billingEmail} />
+                        {company.billing?.billingPassword && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-0.5">Password</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium font-mono">
+                                {showBillingPw ? company.billing.billingPassword : '••••••••••'}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setShowBillingPw(v => !v)}
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                                title={showBillingPw ? 'Hide password' : 'Show password'}
+                              >
+                                {showBillingPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                              </button>
+                            </div>
                           </div>
+                        )}
+                      </div>
+                      {/* Gmail connection */}
+                      {isAdmin && (
+                        <div className="flex items-center gap-3 pt-1 border-t">
+                          <p className="text-xs text-muted-foreground">Gmail</p>
+                          {gmailAccount ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <Badge variant="outline" className="text-teal-700 border-teal-200 bg-teal-50 text-xs">
+                                {gmailAccount.gmailAddress}
+                              </Badge>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+                                onClick={() => setDisconnectGmailConfirmOpen(true)}
+                              >
+                                Disconnect
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-xs text-teal-700 border-teal-200 hover:bg-teal-50"
+                              disabled={connectingGmail}
+                              onClick={() => void handleConnectGmail()}
+                            >
+                              {connectingGmail ? 'Opening…' : 'Connect Gmail'}
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2639,9 +2711,42 @@ export function CompanyDetailPage() {
             />
           </div>
         )}
+
+        {/* ── Communications tab ── */}
+        {tab === 'communications' && (
+          <CommunicationsTab companyId={companyId} isAdmin={isAdmin} />
+        )}
       </div>
 
       <AddTaskDialog open={addTaskOpen} onOpenChange={setAddTaskOpen} companyId={companyId} />
+
+      {/* Disconnect Gmail confirmation */}
+      <Dialog open={disconnectGmailConfirmOpen} onOpenChange={setDisconnectGmailConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Disconnect Gmail?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will remove access to <strong>{gmailAccount?.gmailAddress}</strong>. You can reconnect anytime from the Billing section.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDisconnectGmailConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={disconnectGmailMutation.isPending}
+              onClick={() =>
+                disconnectGmailMutation.mutate(undefined, {
+                  onSuccess: () => setDisconnectGmailConfirmOpen(false),
+                })
+              }
+            >
+              {disconnectGmailMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete company confirmation */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

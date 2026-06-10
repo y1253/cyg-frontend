@@ -10,6 +10,10 @@ import { ArchivedPage } from '../components/Archive/ArchivedPage';
 import { AppLayout } from '../components/Layout/AppLayout';
 import { PrivateRoute } from './PrivateRoute';
 import { AdminRoute } from './AdminRoute';
+import { PrivacyPage } from '../components/Legal/PrivacyPage';
+import { TermsPage } from '../components/Legal/TermsPage';
+import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
+import { GmailErrorPage } from '../components/Gmail/GmailErrorPage';
 
 export const router = createBrowserRouter([
   {
@@ -17,8 +21,24 @@ export const router = createBrowserRouter([
     element: <LoginPage />,
   },
   {
+    path: '/gmail/success',
+    element: <GmailSuccessPage />,
+  },
+  {
+    path: '/gmail/error',
+    element: <GmailErrorPage />,
+  },
+  {
     path: '/register',
     element: <RegisterPage />,
+  },
+  {
+    path: '/privacy',
+    element: <PrivacyPage />,
+  },
+  {
+    path: '/terms',
+    element: <TermsPage />,
   },
   {
     element: <PrivateRoute />,
