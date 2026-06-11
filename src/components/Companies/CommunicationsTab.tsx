@@ -73,7 +73,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setConnecting(true);
     try {
       const { authUrl } = await fetchAuthUrl(token, companyId);
-      const popup = window.open(authUrl, 'gmail-oauth', 'width=500,height=600,noopener');
+      const popup = window.open(authUrl, 'gmail-oauth', 'width=500,height=600');
 
       const onMessage = (e: MessageEvent<{ type: string }>) => {
         if (e.origin !== window.location.origin) return;

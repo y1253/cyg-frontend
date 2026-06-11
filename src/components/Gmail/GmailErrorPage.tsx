@@ -1,16 +1,21 @@
 import { useEffect } from 'react';
 
 export function GmailErrorPage() {
+  const reason = new URLSearchParams(window.location.search).get('reason');
+
   useEffect(() => {
     if (window.opener) {
       window.opener.postMessage({ type: 'gmail-error' }, window.location.origin);
     }
-    setTimeout(() => window.close(), 3000);
+    setTimeout(() => window.close(), 5000);
   }, []);
 
   return (
-    <div className="flex items-center justify-center h-screen text-sm text-destructive">
-      Gmail connection failed. This window will close shortly.
+    <div className="flex flex-col items-center justify-center h-screen gap-2 text-sm">
+      <p className="text-destructive font-medium">Gmail connection failed. This window will close shortly.</p>
+      {reason && (
+        <p className="text-muted-foreground text-xs max-w-sm text-center">{reason}</p>
+      )}
     </div>
   );
 }
