@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2, Inbox, SendHorizonal, AlertOctagon, Trash } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailEmail } from '@/hooks/useGmailEmail';
 import { useSendEmail } from '@/hooks/useSendEmail';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
+import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { fetchAuthUrl } from '@/api/gmail';
 import type { EmailSummary } from '@/api/gmail';
 import { Button } from '@/components/ui/button';
@@ -25,12 +26,39 @@ interface Props {
   isAdmin: boolean;
 }
 
+const FOLDERS = [
+  { id: 'INBOX', label: 'Inbox', icon: Inbox },
+  { id: 'SENT', label: 'Sent', icon: SendHorizonal },
+  { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
+  { id: 'TRASH', label: 'Trash', icon: Trash },
+] as const;
+
+function formatEmailDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } else if (diffDays < 7) {
+    return date.toLocaleDateString([], { weekday: 'short' });
+  } else if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } else {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+}
+
 export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
 
   const [connecting, setConnecting] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
   const [pageToken, setPageToken] = useState<string | undefined>(undefined);
   const [pageHistory, setPageHistory] = useState<string[]>([]);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -41,6 +69,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { data: emailList, isLoading: emailsLoading } = useGmailEmails(
     companyId,
     account ? pageToken : undefined,
+    selectedLabel,
   );
   const { data: emailDetail, isLoading: emailDetailLoading } = useGmailEmail(
     companyId,
@@ -48,6 +77,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   );
   const sendMutation = useSendEmail(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
+  const markReadMutation = useMarkEmailRead(companyId);
 
   // SSE: real-time inbox updates
   useEffect(() => {
@@ -126,6 +156,20 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setSelectedMsgId(null);
   };
 
+  const handleSelectFolder = (folderId: string) => {
+    setSelectedLabel(folderId);
+    setPageToken(undefined);
+    setPageHistory([]);
+    setSelectedMsgId(null);
+  };
+
+  const handleOpenEmail = (msg: EmailSummary) => {
+    if (!msg.isRead) {
+      markReadMutation.mutate(msg.id);
+    }
+    setSelectedMsgId(msg.id);
+  };
+
   // ── Loading ───────────────────────────────────────────────────────────────
 
   if (accountLoading) {
@@ -167,7 +211,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
           onClick={() => setSelectedMsgId(null)}
         >
-          <ArrowLeft size={14} /> Back to inbox
+          <ArrowLeft size={14} /> Back
         </button>
 
         {emailDetailLoading && (
@@ -180,7 +224,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <div className="text-xs text-muted-foreground space-y-0.5">
               <div><span className="font-medium">From:</span> {emailDetail.from}</div>
               <div><span className="font-medium">To:</span> {emailDetail.to}</div>
-              <div><span className="font-medium">Date:</span> {emailDetail.date}</div>
+              <div><span className="font-medium">Date:</span> {formatEmailDate(emailDetail.date)}</div>
             </div>
             <div className="border rounded-md overflow-hidden mt-2">
               {emailDetail.bodyHtml ? (
@@ -202,7 +246,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     );
   }
 
-  // ── Inbox ─────────────────────────────────────────────────────────────────
+  // ── Inbox / folder view ───────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-4">
@@ -237,26 +281,61 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       </div>
 
+      {/* Folder tabs */}
+      <div className="flex items-center gap-1 border-b">
+        {FOLDERS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => handleSelectFolder(id)}
+            className={[
+              'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors',
+              selectedLabel === id
+                ? 'text-teal-700 border-b-2 border-teal-600 font-medium -mb-px'
+                : 'text-muted-foreground hover:text-foreground',
+            ].join(' ')}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Email list */}
       {emailsLoading ? (
         <div className="text-sm text-muted-foreground py-8 text-center">Loading emails…</div>
       ) : (
         <div className="border rounded-md overflow-hidden divide-y">
           {(emailList?.messages ?? []).length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Inbox is empty</div>
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              {selectedLabel === 'INBOX' ? 'Inbox is empty' : 'No messages'}
+            </div>
           ) : (
             (emailList?.messages ?? []).map((msg: EmailSummary) => (
               <button
                 key={msg.id}
-                className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
-                onClick={() => setSelectedMsgId(msg.id)}
+                className={[
+                  'w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3',
+                  !msg.isRead ? 'bg-white' : 'bg-muted/20',
+                ].join(' ')}
+                onClick={() => handleOpenEmail(msg)}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium truncate">{msg.from}</span>
-                  <span className="text-xs text-muted-foreground shrink-0">{msg.date}</span>
+                {/* Unread dot */}
+                <span className="mt-1.5 shrink-0 w-2 h-2 rounded-full" style={{ background: !msg.isRead ? '#0d9488' : 'transparent' }} />
+
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : 'font-normal'].join(' ')}>
+                      {msg.from}
+                    </span>
+                    <span className={['text-xs shrink-0', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                      {formatEmailDate(msg.date)}
+                    </span>
+                  </div>
+                  <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : ''].join(' ')}>
+                    {msg.subject || '(no subject)'}
+                  </span>
+                  <span className="text-xs text-muted-foreground truncate">{msg.snippet}</span>
                 </div>
-                <span className="text-sm truncate">{msg.subject || '(no subject)'}</span>
-                <span className="text-xs text-muted-foreground truncate">{msg.snippet}</span>
               </button>
             ))
           )}

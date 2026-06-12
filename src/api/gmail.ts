@@ -13,6 +13,7 @@ export interface EmailSummary {
   from: string;
   date: string;
   snippet: string;
+  isRead: boolean;
 }
 
 export interface EmailDetail extends EmailSummary {
@@ -46,15 +47,27 @@ export async function fetchEmails(
   token: string,
   companyId: number,
   pageToken?: string,
+  labelId?: string,
 ): Promise<EmailListResult> {
   const params = new URLSearchParams();
   if (pageToken) params.set('pageToken', pageToken);
+  if (labelId) params.set('labelIds', labelId);
   const res = await fetchWithAuth(
     token,
     `${API}/gmail/companies/${companyId}/emails?${params.toString()}`,
   );
   if (!res.ok) throw new Error('Failed to fetch emails');
   return res.json() as Promise<EmailListResult>;
+}
+
+export async function markEmailRead(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/read`, {
+    method: 'PATCH',
+  });
 }
 
 export async function fetchEmail(
