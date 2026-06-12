@@ -6,8 +6,14 @@ export function useSendEmail(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { to: string; subject: string; body: string }) =>
-      sendEmail(token!, companyId, data),
+    mutationFn: (data: {
+      to: string;
+      subject: string;
+      body: string;
+      cc?: string;
+      inReplyTo?: string;
+      threadId?: string;
+    }) => sendEmail(token!, companyId, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
     },

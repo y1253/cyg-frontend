@@ -18,6 +18,8 @@ export interface EmailSummary {
 
 export interface EmailDetail extends EmailSummary {
   to: string;
+  threadId: string;
+  messageId: string;
   bodyHtml: string | null;
   bodyText: string | null;
 }
@@ -25,6 +27,20 @@ export interface EmailDetail extends EmailSummary {
 export interface EmailListResult {
   messages: EmailSummary[];
   nextPageToken: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  spaceId: string;
+  spaceName: string;
+  sender: string;
+  text: string;
+  createTime: string;
+}
+
+export interface ChatListResult {
+  messages: ChatMessage[];
+  needsReconnect?: boolean;
 }
 
 export async function fetchAuthUrl(token: string, companyId: number): Promise<{ authUrl: string }> {
@@ -60,6 +76,25 @@ export async function fetchEmails(
   return res.json() as Promise<EmailListResult>;
 }
 
+export async function fetchEmail(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<EmailDetail> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/gmail/companies/${companyId}/emails/${messageId}`,
+  );
+  if (!res.ok) throw new Error('Failed to fetch email');
+  return res.json() as Promise<EmailDetail>;
+}
+
+export async function fetchChats(token: string, companyId: number): Promise<ChatListResult> {
+  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats`);
+  if (!res.ok) throw new Error('Failed to fetch chats');
+  return res.json() as Promise<ChatListResult>;
+}
+
 export async function markEmailRead(
   token: string,
   companyId: number,
@@ -79,23 +114,17 @@ export async function fetchUnreadCount(
   return res.json() as Promise<{ count: number }>;
 }
 
-export async function fetchEmail(
-  token: string,
-  companyId: number,
-  messageId: string,
-): Promise<EmailDetail> {
-  const res = await fetchWithAuth(
-    token,
-    `${API}/gmail/companies/${companyId}/emails/${messageId}`,
-  );
-  if (!res.ok) throw new Error('Failed to fetch email');
-  return res.json() as Promise<EmailDetail>;
-}
-
 export async function sendEmail(
   token: string,
   companyId: number,
-  data: { to: string; subject: string; body: string },
+  data: {
+    to: string;
+    subject: string;
+    body: string;
+    cc?: string;
+    inReplyTo?: string;
+    threadId?: string;
+  },
 ): Promise<void> {
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/send`, {
     method: 'POST',
