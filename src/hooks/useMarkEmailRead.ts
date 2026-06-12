@@ -10,7 +10,6 @@ export function useMarkEmailRead(companyId: number) {
   return useMutation({
     mutationFn: (messageId: string) => markEmailRead(token!, companyId, messageId),
     onMutate: (messageId: string) => {
-      // Optimistically mark as read in all cached email list queries for this company
       qc.setQueriesData<EmailListResult>(
         { queryKey: ['gmail-emails', companyId] },
         (old) => {
@@ -23,6 +22,7 @@ export function useMarkEmailRead(companyId: number) {
           };
         },
       );
+      void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
     },
   });
 }

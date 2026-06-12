@@ -70,6 +70,15 @@ export async function markEmailRead(
   });
 }
 
+export async function fetchUnreadCount(
+  token: string,
+  companyId: number,
+): Promise<{ count: number }> {
+  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/unread-count`);
+  if (!res.ok) throw new Error('Failed to fetch unread count');
+  return res.json() as Promise<{ count: number }>;
+}
+
 export async function fetchEmail(
   token: string,
   companyId: number,

@@ -8,6 +8,6 @@ export function useGmailEmails(companyId: number, pageToken?: string, labelId: s
     queryKey: ['gmail-emails', companyId, pageToken, labelId],
     queryFn: () => fetchEmails(token!, companyId, pageToken, labelId),
     enabled: !!token && !!companyId,
-    refetchInterval: 60000,
+    refetchInterval: 15000,
   });
 }

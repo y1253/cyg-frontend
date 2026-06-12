@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2, Inbox, SendHorizonal, AlertOctagon, Trash } from 'lucide-react';
+import { Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2, Inbox, SendHorizonal, AlertOctagon, Trash, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
@@ -8,6 +8,7 @@ import { useGmailEmail } from '@/hooks/useGmailEmail';
 import { useSendEmail } from '@/hooks/useSendEmail';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
+import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { fetchAuthUrl } from '@/api/gmail';
 import type { EmailSummary } from '@/api/gmail';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,13 @@ const FOLDERS = [
   { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
   { id: 'TRASH', label: 'Trash', icon: Trash },
 ] as const;
+
+function injectBaseTarget(html: string): string {
+  if (html.includes('<base')) return html;
+  const withHead = html.replace(/<head>/i, '<head><base target="_blank" rel="noreferrer">');
+  if (withHead !== html) return withHead;
+  return '<base target="_blank" rel="noreferrer">' + html;
+}
 
 function formatEmailDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -64,6 +72,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [composeOpen, setComposeOpen] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '' });
+  const [newEmailBanner, setNewEmailBanner] = useState(false);
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   const { data: emailList, isLoading: emailsLoading } = useGmailEmails(
@@ -78,6 +87,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const sendMutation = useSendEmail(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
   const markReadMutation = useMarkEmailRead(companyId);
+  const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
   // SSE: real-time inbox updates
   useEffect(() => {
@@ -90,6 +100,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         const data = JSON.parse(e.data) as { type: string };
         if (data.type === 'new-email') {
           void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
+          void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
+          setNewEmailBanner(true);
+          setTimeout(() => setNewEmailBanner(false), 5000);
         }
       } catch {
         // ignore parse errors
@@ -229,8 +242,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <div className="border rounded-md overflow-hidden mt-2">
               {emailDetail.bodyHtml ? (
                 <iframe
-                  srcDoc={emailDetail.bodyHtml}
-                  sandbox="allow-same-origin"
+                  srcDoc={injectBaseTarget(emailDetail.bodyHtml)}
+                  sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                   className="w-full min-h-96 border-0"
                   title="Email body"
                 />
@@ -281,6 +294,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       </div>
 
+      {/* New email banner */}
+      {newEmailBanner && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-teal-50 border border-teal-200 text-teal-800 text-sm">
+          <span className="flex items-center gap-2">
+            <Mail size={14} className="text-teal-600" />
+            New email received
+          </span>
+          <button onClick={() => setNewEmailBanner(false)} className="text-teal-600 hover:text-teal-800">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Folder tabs */}
       <div className="flex items-center gap-1 border-b">
         {FOLDERS.map(({ id, label, icon: Icon }) => (
@@ -296,6 +322,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           >
             <Icon size={13} />
             {label}
+            {id === 'INBOX' && (unreadData?.count ?? 0) > 0 && (
+              <span className="ml-0.5 text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 font-semibold leading-none">
+                {unreadData!.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
