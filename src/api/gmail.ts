@@ -105,6 +105,16 @@ export async function markEmailRead(
   });
 }
 
+export async function markEmailUnread(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/unread`, {
+    method: 'PATCH',
+  });
+}
+
 export async function fetchUnreadCount(
   token: string,
   companyId: number,
@@ -134,6 +144,23 @@ export async function sendEmail(
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? 'Failed to send email');
+  }
+}
+
+export async function sendChatMessage(
+  token: string,
+  companyId: number,
+  spaceId: string,
+  text: string,
+): Promise<void> {
+  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chat-messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spaceId, text }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to send chat message');
   }
 }
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2,
-  Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply,
+  Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -10,6 +10,8 @@ import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailEmail } from '@/hooks/useGmailEmail';
 import { useGmailChats } from '@/hooks/useGmailChats';
 import { useSendEmail } from '@/hooks/useSendEmail';
+import { useSendChatMessage } from '@/hooks/useSendChatMessage';
+import { useMarkEmailUnread } from '@/hooks/useMarkEmailUnread';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
@@ -17,6 +19,7 @@ import { fetchAuthUrl } from '@/api/gmail';
 import type { EmailSummary, ChatMessage, EmailDetail } from '@/api/gmail';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -74,6 +77,11 @@ function prefixReSubject(subject: string): string {
   return /^re:/i.test(subject.trim()) ? subject : `Re: ${subject}`;
 }
 
+function senderInitial(from: string): string {
+  const name = from.replace(/<[^>]+>/, '').trim().replace(/"/g, '');
+  return (name[0] ?? '?').toUpperCase();
+}
+
 export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
@@ -90,6 +98,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyForm, setReplyForm] = useState({ to: '', subject: '', body: '', cc: '' });
+  const [chatReplyOpen, setChatReplyOpen] = useState(false);
+  const [chatReplyText, setChatReplyText] = useState('');
+  const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(false);
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   const isInbox = selectedLabel === 'INBOX';
@@ -106,8 +117,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     account ? selectedMsgId : null,
   );
   const sendMutation = useSendEmail(companyId);
+  const sendChatMutation = useSendChatMessage(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
   const markReadMutation = useMarkEmailRead(companyId);
+  const markUnreadMutation = useMarkEmailUnread(companyId);
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
   // Build unified sorted list for INBOX
@@ -235,6 +248,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const handleOpenEmail = (msg: EmailSummary) => {
     if (!msg.isRead) markReadMutation.mutate(msg.id);
     setSelectedMsgId(msg.id);
+    setSelectedMsgIsRead(true); // always read after opening (auto-marked or was already read)
     setSelectedChatId(null);
     setReplyOpen(false);
   };
@@ -243,6 +257,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setSelectedChatId(msg.id);
     setSelectedMsgId(null);
     setReplyOpen(false);
+    setChatReplyOpen(false);
+    setChatReplyText('');
+  };
+
+  const handleSendChatReply = () => {
+    if (!selectedChat || !chatReplyText.trim()) return;
+    sendChatMutation.mutate(
+      { spaceId: selectedChat.spaceId, text: chatReplyText },
+      {
+        onSuccess: () => {
+          setChatReplyOpen(false);
+          setChatReplyText('');
+        },
+      },
+    );
   };
 
   const handleOpenReply = (detail: EmailDetail) => {
@@ -294,7 +323,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       <div className="flex flex-col gap-4">
         <button
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-          onClick={() => setSelectedChatId(null)}
+          onClick={() => { setSelectedChatId(null); setChatReplyOpen(false); setChatReplyText(''); }}
         >
           <ArrowLeft size={14} /> Back
         </button>
@@ -312,6 +341,56 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           <div className="border rounded-md p-4 text-sm whitespace-pre-wrap bg-muted/20">
             {selectedChat.text || '(empty message)'}
           </div>
+
+          {/* Reply button */}
+          {!chatReplyOpen && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-fit gap-1"
+              onClick={() => setChatReplyOpen(true)}
+            >
+              <Reply size={14} /> Reply
+            </Button>
+          )}
+
+          {/* Inline chat reply form */}
+          {chatReplyOpen && (
+            <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Reply in {selectedChat.spaceName}
+              </p>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Message</Label>
+                <textarea
+                  className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={chatReplyText}
+                  onChange={(e) => setChatReplyText(e.target.value)}
+                  placeholder="Write your reply…"
+                  rows={5}
+                />
+              </div>
+              {sendChatMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {(sendChatMutation.error as Error)?.message ?? 'Failed to send'}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={sendChatMutation.isPending || !chatReplyText.trim()}
+                  onClick={handleSendChatReply}
+                  className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+                >
+                  <Send size={13} />
+                  {sendChatMutation.isPending ? 'Sending…' : 'Send Reply'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyText(''); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -356,16 +435,33 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               )}
             </div>
 
-            {/* Reply button */}
+            {/* Action buttons */}
             {!replyOpen && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="w-fit gap-1"
-                onClick={() => handleOpenReply(emailDetail)}
-              >
-                <Reply size={14} /> Reply
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => handleOpenReply(emailDetail)}
+                >
+                  <Reply size={14} /> Reply
+                </Button>
+                {selectedMsgIsRead && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-muted-foreground"
+                    disabled={markUnreadMutation.isPending}
+                    onClick={() => {
+                      markUnreadMutation.mutate(emailDetail.id, {
+                        onSuccess: () => { setSelectedMsgId(null); setReplyOpen(false); },
+                      });
+                    }}
+                  >
+                    <MailOpen size={14} /> Mark as unread
+                  </Button>
+                )}
+              </div>
             )}
 
             {/* Inline reply form */}
@@ -520,112 +616,159 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
       ) : isInbox ? (
         /* ── Unified inbox (emails + chats) ── */
-        <div className="border rounded-md overflow-hidden divide-y">
+        <Card className="overflow-hidden gap-0 py-0 rounded-lg">
           {unifiedItems.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">Inbox is empty</div>
           ) : (
-            unifiedItems.map((item) =>
+            unifiedItems.map((item, idx) =>
               item.kind === 'email' ? (
-                <button
+                <div
                   key={item.data.id}
                   className={[
-                    'w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3',
-                    !item.data.isRead ? 'bg-white' : 'bg-muted/20',
+                    'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer group',
+                    !item.data.isRead ? 'bg-white hover:bg-blue-50/60' : 'bg-muted/10 hover:bg-muted/30',
+                    idx > 0 ? 'border-t border-border/60' : '',
                   ].join(' ')}
                   onClick={() => handleOpenEmail(item.data)}
                 >
-                  <span
-                    className="mt-1.5 shrink-0 w-2 h-2 rounded-full"
-                    style={{ background: !item.data.isRead ? '#0d9488' : 'transparent' }}
-                  />
+                  {/* Unread accent bar */}
+                  {!item.data.isRead && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-teal-500 rounded-l-lg" />
+                  )}
+                  {/* Read/unread toggle dot */}
+                  <button
+                    className="mt-1 shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
+                    title={item.data.isRead ? 'Mark as unread' : 'Mark as read'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (item.data.isRead) markUnreadMutation.mutate(item.data.id);
+                      else markReadMutation.mutate(item.data.id);
+                    }}
+                  >
+                    <span className={[
+                      'w-2.5 h-2.5 rounded-full border-2 transition-colors',
+                      !item.data.isRead ? 'bg-teal-500 border-teal-500' : 'bg-transparent border-muted-foreground/40',
+                    ].join(' ')} />
+                  </button>
+                  {/* Avatar */}
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold mt-0.5">
+                    {senderInitial(item.data.from)}
+                  </div>
+                  {/* Content */}
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold' : 'font-normal'].join(' ')}>
-                        {item.data.from}
+                      <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
+                        {item.data.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || item.data.from}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 font-medium">
                           Email
-                        </span>
+                        </Badge>
                         <span className={['text-xs', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
                           {formatEmailDate(item.data.date)}
                         </span>
                       </div>
                     </div>
-                    <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold' : ''].join(' ')}>
+                    <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
                       {item.data.subject || '(no subject)'}
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{item.data.snippet}</span>
                   </div>
-                </button>
+                </div>
               ) : (
-                <button
+                <div
                   key={item.data.id}
-                  className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3 bg-muted/20"
+                  className={[
+                    'flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer bg-muted/10 hover:bg-purple-50/40',
+                    idx > 0 ? 'border-t border-border/60' : '',
+                  ].join(' ')}
                   onClick={() => handleOpenChat(item.data)}
                 >
-                  <span className="mt-1.5 shrink-0 w-2 h-2 rounded-full" style={{ background: 'transparent' }} />
+                  {/* Placeholder dot width to align with email toggle */}
+                  <span className="shrink-0 w-5 h-5 mt-1" />
+                  {/* Avatar */}
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-semibold mt-0.5">
+                    {(item.data.sender[0] ?? '?').toUpperCase()}
+                  </div>
+                  {/* Content */}
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm truncate font-normal flex items-center gap-1.5">
-                        <MessageSquare size={12} className="text-purple-500 shrink-0" />
+                      <span className="text-sm truncate font-medium text-foreground/80 flex items-center gap-1.5">
+                        <MessageSquare size={11} className="text-purple-500 shrink-0" />
                         {item.data.sender}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
                           Chat
-                        </span>
+                        </Badge>
                         <span className="text-xs text-muted-foreground">
                           {formatEmailDate(item.data.createTime)}
                         </span>
                       </div>
                     </div>
-                    <span className="text-sm truncate text-muted-foreground">{item.data.spaceName}</span>
+                    <span className="text-xs font-medium text-muted-foreground truncate">{item.data.spaceName}</span>
                     <span className="text-xs text-muted-foreground truncate">{item.data.text}</span>
                   </div>
-                </button>
+                </div>
               ),
             )
           )}
-        </div>
+        </Card>
       ) : (
         /* ── Email-only folder view (Sent / Spam / Trash) ── */
         <>
-          <div className="border rounded-md overflow-hidden divide-y">
+          <Card className="overflow-hidden gap-0 py-0 rounded-lg">
             {(emailList?.messages ?? []).length === 0 ? (
               <div className="py-12 text-center text-sm text-muted-foreground">No messages</div>
             ) : (
-              (emailList?.messages ?? []).map((msg: EmailSummary) => (
-                <button
+              (emailList?.messages ?? []).map((msg: EmailSummary, idx: number) => (
+                <div
                   key={msg.id}
                   className={[
-                    'w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3',
-                    !msg.isRead ? 'bg-white' : 'bg-muted/20',
+                    'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer group',
+                    !msg.isRead ? 'bg-white hover:bg-blue-50/60' : 'bg-muted/10 hover:bg-muted/30',
+                    idx > 0 ? 'border-t border-border/60' : '',
                   ].join(' ')}
                   onClick={() => handleOpenEmail(msg)}
                 >
-                  <span
-                    className="mt-1.5 shrink-0 w-2 h-2 rounded-full"
-                    style={{ background: !msg.isRead ? '#0d9488' : 'transparent' }}
-                  />
+                  {!msg.isRead && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-teal-500 rounded-l-lg" />
+                  )}
+                  <button
+                    className="mt-1 shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
+                    title={msg.isRead ? 'Mark as unread' : 'Mark as read'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (msg.isRead) markUnreadMutation.mutate(msg.id);
+                      else markReadMutation.mutate(msg.id);
+                    }}
+                  >
+                    <span className={[
+                      'w-2.5 h-2.5 rounded-full border-2 transition-colors',
+                      !msg.isRead ? 'bg-teal-500 border-teal-500' : 'bg-transparent border-muted-foreground/40',
+                    ].join(' ')} />
+                  </button>
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold mt-0.5">
+                    {senderInitial(msg.from)}
+                  </div>
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : 'font-normal'].join(' ')}>
-                        {msg.from}
+                      <span className={['text-sm truncate', !msg.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
+                        {msg.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || msg.from}
                       </span>
                       <span className={['text-xs shrink-0', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
                         {formatEmailDate(msg.date)}
                       </span>
                     </div>
-                    <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : ''].join(' ')}>
+                    <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
                       {msg.subject || '(no subject)'}
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{msg.snippet}</span>
                   </div>
-                </button>
+                </div>
               ))
             )}
-          </div>
+          </Card>
 
           {/* Pagination (email-only folders) */}
           <div className="flex items-center gap-2 justify-end">
