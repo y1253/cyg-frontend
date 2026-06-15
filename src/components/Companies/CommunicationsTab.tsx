@@ -578,12 +578,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Re-connect notice for missing Chat scopes */}
-      {chatData?.needsReconnect && isAdmin && (
+      {chatData?.needsReconnect && (
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-          <span>Re-connect your Gmail account to enable Google Chat messages.</span>
-          <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs" onClick={() => void handleConnect()}>
-            Re-connect
-          </Button>
+          <span>
+            Google Chat messages are unavailable.{' '}
+            {isAdmin
+              ? 'Re-connect the Gmail account to restore them.'
+              : 'An admin needs to re-connect the Gmail account.'}
+          </span>
+          {isAdmin && (
+            <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs" onClick={() => void handleConnect()}>
+              Re-connect
+            </Button>
+          )}
         </div>
       )}
 
