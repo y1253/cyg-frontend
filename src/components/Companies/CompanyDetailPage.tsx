@@ -1563,12 +1563,11 @@ function SchedulesSection({
               {/* User note edit/add form */}
               {userNoteEditId === s.id ? (
                 <div className="flex flex-col gap-1.5 mt-1.5">
-                  <textarea
+                  <Textarea
                     value={userNoteInput}
                     onChange={e => setUserNoteInput(e.target.value)}
                     placeholder="Add a note…"
-                    rows={2}
-                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                    className="text-xs min-h-[4.5rem]"
                     autoFocus
                   />
                   <div className="flex items-center gap-2">
