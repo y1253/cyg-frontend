@@ -594,6 +594,22 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       )}
 
+      {/* No Chat spaces notice */}
+      {!chatData?.needsReconnect && chatData?.chatStatus === 'no_spaces' && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>No Google Chat spaces found for this account. Chat messages will appear here once conversations exist.</span>
+        </div>
+      )}
+
+      {/* Chat API error notice */}
+      {chatData?.chatStatus === 'error' && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>Could not load Google Chat messages. Email messages are still available.</span>
+        </div>
+      )}
+
       {/* Folder tabs */}
       <div className="flex items-center gap-1 border-b">
         {FOLDERS.map(({ id, label, icon: Icon }) => (
