@@ -41,7 +41,7 @@ export interface ChatMessage {
 export interface ChatListResult {
   messages: ChatMessage[];
   needsReconnect?: boolean;
-  chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error';
+  chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled';
 }
 
 export async function fetchAuthUrl(token: string, companyId: number): Promise<{ authUrl: string }> {

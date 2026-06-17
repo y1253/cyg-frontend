@@ -602,6 +602,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       )}
 
+      {/* Chat disabled notice */}
+      {chatData?.chatStatus === 'chat_disabled' && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>Google Chat is not enabled for this account. Email messages are still available.</span>
+        </div>
+      )}
+
       {/* Chat API error notice */}
       {chatData?.chatStatus === 'error' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
