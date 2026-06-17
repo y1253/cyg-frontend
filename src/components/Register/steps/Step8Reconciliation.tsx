@@ -27,7 +27,7 @@ export function Step8Reconciliation({ data, onChange }: Props) {
   }
 
   function addAccount() {
-    onChange({ reconciliationAccounts: [...accounts, { name: '', type: '', startDate: '' }] });
+    onChange({ reconciliationAccounts: [...accounts, { name: '', type: '', startDate: '', note: '' }] });
   }
 
   function removeAccount(index: number) {
@@ -71,6 +71,19 @@ export function Step8Reconciliation({ data, onChange }: Props) {
                   value={account.name}
                   onChange={e => updateAccount(index, { name: e.target.value })}
                   placeholder="e.g. Main Business Checking"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor={`acct-note-${index}`}>
+                  Note <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <textarea
+                  id={`acct-note-${index}`}
+                  value={account.note}
+                  onChange={e => updateAccount(index, { note: e.target.value })}
+                  placeholder="Any additional instructions..."
+                  className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground resize-none"
                 />
               </div>
 

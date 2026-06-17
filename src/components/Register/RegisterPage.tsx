@@ -30,6 +30,7 @@ export interface ReconciliationAccount {
   name: string;
   type: string;
   startDate: string;
+  note: string;
 }
 
 export interface CashFlowAccount {
@@ -198,7 +199,7 @@ const EMPTY_FORM: FormData = {
   accountantName: '',
   accountantEmail: '',
   accountantPhone: '',
-  reconciliationAccounts: [{ name: '', type: '', startDate: '' }],
+  reconciliationAccounts: [{ name: '', type: '', startDate: '', note: '' }],
   apManageBills: null,
   apStartDate: '',
   apCycleType: 'DAYS',
