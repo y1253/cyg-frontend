@@ -316,6 +316,7 @@ function TodoRow({
   const [cycleInput, setCycleInput] = useState('30');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemoveCycle, setConfirmRemoveCycle] = useState(false);
+  const [confirmResolve, setConfirmResolve] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeDaysInput, setSnoozeDaysInput] = useState('2');
 
@@ -346,10 +347,17 @@ function TodoRow({
 
   function handleToggle() {
     if (!todo.resolved) {
-      setCelebrating(true);
-      setTimeout(() => setCelebrating(false), 1200);
+      setConfirmResolve(true);
+    } else {
+      onToggle();
     }
+  }
+
+  function doResolve() {
+    setCelebrating(true);
+    setTimeout(() => setCelebrating(false), 1200);
     onToggle();
+    setConfirmResolve(false);
   }
 
   return (
@@ -578,6 +586,34 @@ function TodoRow({
           </div>
         )}
       </div>
+
+      {/* Resolve confirm */}
+      <Dialog open={confirmResolve} onOpenChange={setConfirmResolve}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Complete Task?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Confirm that you've completed{' '}
+            <span className="font-semibold text-foreground">{todo.task.title}</span>
+            {todo.dueDate && (
+              <>
+                {' '}due on{' '}
+                <span className="font-semibold text-foreground">
+                  {new Date(todo.dueDate).toLocaleDateString('en-CA', {
+                    year: 'numeric', month: 'long', day: 'numeric',
+                  })}
+                </span>
+              </>
+            )}
+            .
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmResolve(false)}>Cancel</Button>
+            <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white" onClick={doResolve}>
+              Mark Complete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Remove cycle confirm */}
       <Dialog open={confirmRemoveCycle} onOpenChange={setConfirmRemoveCycle}>
