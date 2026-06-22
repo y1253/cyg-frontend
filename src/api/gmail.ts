@@ -33,6 +33,7 @@ export interface ChatMessage {
   id: string;
   spaceId: string;
   spaceName: string;
+  spaceType: string;
   sender: string;
   text: string;
   createTime: string;
