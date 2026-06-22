@@ -764,7 +764,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
-                          {item.data.spaceType === 'DIRECT_MESSAGE' ? 'DM' : 'Chat'}
+                          Chat
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {formatEmailDate(item.data.createTime)}
