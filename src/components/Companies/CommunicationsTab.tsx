@@ -111,7 +111,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     account ? (isInbox ? undefined : pageToken) : undefined,
     selectedLabel,
   );
-  const { data: chatData, isLoading: chatsLoading } = useGmailChats(companyId, account);
+  const { data: chatData, isLoading: chatsLoading, error: chatsError } = useGmailChats(companyId, account);
   const { data: emailDetail, isLoading: emailDetailLoading } = useGmailEmail(
     companyId,
     account ? selectedMsgId : null,
@@ -615,6 +615,32 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>Could not load Google Chat messages. Email messages are still available.</span>
+        </div>
+      )}
+
+      {/* Chat query failed entirely (network error / 5xx — chatData stays undefined) */}
+      {!!chatsError && !chatData && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <span className="flex items-center gap-2">
+            <MessageSquare size={13} className="shrink-0" />
+            Could not load Google Chat messages. Email messages are still available.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs"
+            onClick={() => void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] })}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Chat fetched ok but no messages found (history may be off) */}
+      {chatData?.chatStatus === 'ok' && chatData.messages.length === 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>No recent Google Chat messages found. History may be disabled for your chat spaces.</span>
         </div>
       )}
 
