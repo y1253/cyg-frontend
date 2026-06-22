@@ -371,9 +371,22 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 />
               </div>
               {sendChatMutation.isError && (
-                <p className="text-xs text-destructive">
-                  {(sendChatMutation.error as Error)?.message ?? 'Failed to send'}
-                </p>
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs text-destructive">
+                    {(sendChatMutation.error as Error)?.message ?? 'Failed to send'}
+                  </p>
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="self-start border-amber-300 text-amber-700 hover:bg-amber-50 text-xs"
+                      onClick={() => void handleConnect()}
+                      disabled={connecting}
+                    >
+                      {connecting ? 'Opening…' : 'Re-connect Gmail to fix permissions'}
+                    </Button>
+                  )}
+                </div>
               )}
               <div className="flex gap-2">
                 <Button
