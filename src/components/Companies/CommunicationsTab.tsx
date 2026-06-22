@@ -612,9 +612,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
       {/* Chat API error notice */}
       {chatData?.chatStatus === 'error' && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-          <MessageSquare size={13} className="shrink-0" />
-          <span>Could not load Google Chat messages. Email messages are still available.</span>
+        <div className="flex flex-col gap-1 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <span className="flex items-center gap-2">
+            <MessageSquare size={13} className="shrink-0" />
+            Could not load Google Chat messages. Email messages are still available.
+          </span>
+          {chatData.errorDetail && (
+            <span className="text-xs text-amber-700 font-mono pl-5">{chatData.errorDetail}</span>
+          )}
         </div>
       )}
 
