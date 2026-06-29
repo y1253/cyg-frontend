@@ -9,14 +9,17 @@ import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailEmail } from '@/hooks/useGmailEmail';
 import { useGmailChats } from '@/hooks/useGmailChats';
+import { useGmailChatThread } from '@/hooks/useGmailChatThread';
 import { useSendEmail } from '@/hooks/useSendEmail';
 import { useSendChatMessage } from '@/hooks/useSendChatMessage';
 import { useMarkEmailUnread } from '@/hooks/useMarkEmailUnread';
+import { useMarkChatRead } from '@/hooks/useMarkChatRead';
+import { useMarkChatUnread } from '@/hooks/useMarkChatUnread';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { fetchAuthUrl } from '@/api/gmail';
-import type { EmailSummary, ChatMessage, EmailDetail } from '@/api/gmail';
+import type { EmailSummary, ChatConversation, EmailDetail } from '@/api/gmail';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -43,10 +46,13 @@ const FOLDERS = [
 
 type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
-  | { kind: 'chat'; data: ChatMessage };
+  | { kind: 'chat'; data: ChatConversation };
 
 function getItemTimestamp(item: UnifiedItem): number {
-  const raw = item.kind === 'email' ? item.data.date : item.data.createTime;
+  const raw =
+    item.kind === 'email'
+      ? item.data.date
+      : (item.data.lastMessage?.createTime ?? '');
   return new Date(raw).getTime() || 0;
 }
 
@@ -88,7 +94,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   const [connecting, setConnecting] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
   const [pageToken, setPageToken] = useState<string | undefined>(undefined);
   const [pageHistory, setPageHistory] = useState<string[]>([]);
@@ -116,25 +122,34 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     companyId,
     account ? selectedMsgId : null,
   );
+  const { data: chatThread, isLoading: chatThreadLoading } = useGmailChatThread(
+    companyId,
+    account ? selectedSpaceId : null,
+  );
   const sendMutation = useSendEmail(companyId);
   const sendChatMutation = useSendChatMessage(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
   const markReadMutation = useMarkEmailRead(companyId);
   const markUnreadMutation = useMarkEmailUnread(companyId);
+  const markChatReadMutation = useMarkChatRead(companyId);
+  const markChatUnreadMutation = useMarkChatUnread(companyId);
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
-  // Build unified sorted list for INBOX
+  // Build unified sorted list for INBOX (emails + one row per chat conversation)
   const unifiedItems: UnifiedItem[] = isInbox
     ? [
         ...(emailList?.messages ?? []).map((e): UnifiedItem => ({ kind: 'email', data: e })),
-        ...(chatData?.messages ?? []).map((c): UnifiedItem => ({ kind: 'chat', data: c })),
+        ...(chatData?.conversations ?? []).map((c): UnifiedItem => ({ kind: 'chat', data: c })),
       ].sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a))
     : [];
 
-  // Selected chat detail
-  const selectedChat = selectedChatId
-    ? (chatData?.messages ?? []).find((m) => m.id === selectedChatId) ?? null
+  // Selected chat conversation (for the thread view header / reply target)
+  const selectedConversation = selectedSpaceId
+    ? (chatData?.conversations ?? []).find((c) => c.spaceId === selectedSpaceId) ?? null
     : null;
+  // Display name for the open thread — prefer freshly-fetched thread metadata.
+  const selectedSpaceName =
+    chatThread?.spaceName ?? selectedConversation?.spaceName ?? 'Conversation';
 
   // SSE: real-time inbox updates
   useEffect(() => {
@@ -242,19 +257,20 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setPageToken(undefined);
     setPageHistory([]);
     setSelectedMsgId(null);
-    setSelectedChatId(null);
+    setSelectedSpaceId(null);
   };
 
   const handleOpenEmail = (msg: EmailSummary) => {
     if (!msg.isRead) markReadMutation.mutate(msg.id);
     setSelectedMsgId(msg.id);
     setSelectedMsgIsRead(true); // always read after opening (auto-marked or was already read)
-    setSelectedChatId(null);
+    setSelectedSpaceId(null);
     setReplyOpen(false);
   };
 
-  const handleOpenChat = (msg: ChatMessage) => {
-    setSelectedChatId(msg.id);
+  const handleOpenChat = (conv: ChatConversation) => {
+    if (!conv.isRead) markChatReadMutation.mutate(conv.spaceId);
+    setSelectedSpaceId(conv.spaceId);
     setSelectedMsgId(null);
     setReplyOpen(false);
     setChatReplyOpen(false);
@@ -262,9 +278,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   };
 
   const handleSendChatReply = () => {
-    if (!selectedChat || !chatReplyText.trim()) return;
+    if (!selectedSpaceId || !chatReplyText.trim()) return;
     sendChatMutation.mutate(
-      { spaceId: selectedChat.spaceId, text: chatReplyText },
+      { spaceId: selectedSpaceId, text: chatReplyText },
       {
         onSuccess: () => {
           setChatReplyOpen(false);
@@ -316,30 +332,64 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     );
   }
 
-  // ── Chat detail view ──────────────────────────────────────────────────────
+  // ── Chat conversation (thread) view ───────────────────────────────────────
 
-  if (selectedChatId && selectedChat) {
+  if (selectedSpaceId) {
+    const threadMessages = chatThread?.messages ?? [];
     return (
       <div className="flex flex-col gap-4">
         <button
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-          onClick={() => { setSelectedChatId(null); setChatReplyOpen(false); setChatReplyText(''); }}
+          onClick={() => { setSelectedSpaceId(null); setChatReplyOpen(false); setChatReplyText(''); }}
         >
           <ArrowLeft size={14} /> Back
         </button>
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-              Chat
-            </span>
-            <span className="text-xs text-muted-foreground">{selectedChat.spaceName}</span>
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium shrink-0">
+                Chat
+              </span>
+              <span className="text-sm font-medium truncate">{selectedSpaceName}</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1 text-muted-foreground"
+              disabled={markChatUnreadMutation.isPending}
+              onClick={() => {
+                markChatUnreadMutation.mutate(selectedSpaceId, {
+                  onSuccess: () => { setSelectedSpaceId(null); setChatReplyOpen(false); setChatReplyText(''); },
+                });
+              }}
+            >
+              <MailOpen size={14} /> Mark as unread
+            </Button>
           </div>
-          <div className="text-xs text-muted-foreground space-y-0.5">
-            <div><span className="font-medium">From:</span> {selectedChat.sender}</div>
-            <div><span className="font-medium">Time:</span> {formatEmailDate(selectedChat.createTime)}</div>
-          </div>
-          <div className="border rounded-md p-4 text-sm whitespace-pre-wrap bg-muted/20">
-            {selectedChat.text || '(empty message)'}
+
+          {/* Conversation thread */}
+          <div className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
+            {chatThreadLoading && threadMessages.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">Loading conversation…</p>
+            ) : threadMessages.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No messages in this conversation.</p>
+            ) : (
+              threadMessages.map((m) => (
+                <div key={m.id} className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
+                      {(m.sender[0] ?? '?').toUpperCase()}
+                    </div>
+                    <span className="text-xs font-medium text-foreground/80">{m.sender}</span>
+                    <span className="text-[11px] text-muted-foreground">{formatEmailDate(m.createTime)}</span>
+                  </div>
+                  <div className="ml-8 rounded-md bg-background border px-3 py-2 text-sm whitespace-pre-wrap">
+                    {m.text || '(empty message)'}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           {/* Reply button */}
@@ -358,7 +408,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           {chatReplyOpen && (
             <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Reply in {selectedChat.spaceName}
+                Reply in {selectedSpaceName}
               </p>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Message</Label>
@@ -657,8 +707,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       )}
 
-      {/* Chat fetched ok but no messages found (history may be off) */}
-      {chatData?.chatStatus === 'ok' && chatData.messages.length === 0 && (
+      {/* Chat fetched ok but no conversations found (history may be off) */}
+      {chatData?.chatStatus === 'ok' && chatData.conversations.length === 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>No recent Google Chat messages found. History may be disabled for your chat spaces.</span>
@@ -755,37 +805,57 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </div>
               ) : (
                 <div
-                  key={item.data.id}
+                  key={item.data.spaceId}
                   className={[
-                    'flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer bg-muted/10 hover:bg-purple-50/40',
+                    'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer',
+                    !item.data.isRead ? 'bg-white hover:bg-purple-50/60' : 'bg-muted/10 hover:bg-purple-50/40',
                     idx > 0 ? 'border-t border-border/60' : '',
                   ].join(' ')}
                   onClick={() => handleOpenChat(item.data)}
                 >
-                  {/* Placeholder dot width to align with email toggle */}
-                  <span className="shrink-0 w-5 h-5 mt-1" />
+                  {/* Unread accent bar */}
+                  {!item.data.isRead && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-purple-500 rounded-l-lg" />
+                  )}
+                  {/* Read/unread toggle dot */}
+                  <button
+                    className="mt-1 shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
+                    title={item.data.isRead ? 'Mark as unread' : 'Mark as read'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (item.data.isRead) markChatUnreadMutation.mutate(item.data.spaceId);
+                      else markChatReadMutation.mutate(item.data.spaceId);
+                    }}
+                  >
+                    <span className={[
+                      'w-2.5 h-2.5 rounded-full border-2 transition-colors',
+                      !item.data.isRead ? 'bg-purple-500 border-purple-500' : 'bg-transparent border-muted-foreground/40',
+                    ].join(' ')} />
+                  </button>
                   {/* Avatar */}
                   <div className="shrink-0 w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-semibold mt-0.5">
-                    {(item.data.sender[0] ?? '?').toUpperCase()}
+                    {((item.data.lastMessage?.sender ?? '?')[0] ?? '?').toUpperCase()}
                   </div>
                   {/* Content */}
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm truncate font-medium text-foreground/80 flex items-center gap-1.5">
+                      <span className={['text-sm truncate flex items-center gap-1.5', !item.data.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
                         <MessageSquare size={11} className="text-purple-500 shrink-0" />
-                        {item.data.sender}
+                        {item.data.lastMessage?.sender ?? 'Unknown'}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
                           Chat
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {formatEmailDate(item.data.createTime)}
+                        <span className={['text-xs', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                          {item.data.lastMessage ? formatEmailDate(item.data.lastMessage.createTime) : ''}
                         </span>
                       </div>
                     </div>
                     <span className="text-xs font-medium text-muted-foreground truncate">{item.data.spaceName}</span>
-                    <span className="text-xs text-muted-foreground truncate">{item.data.text}</span>
+                    <span className={['text-xs truncate', !item.data.isRead ? 'font-medium text-foreground/80' : 'text-muted-foreground'].join(' ')}>
+                      {item.data.lastMessage?.text ?? '(no messages)'}
+                    </span>
                   </div>
                 </div>
               ),

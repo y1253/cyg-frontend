@@ -11,10 +11,8 @@ import {
 import { useTasks } from "@/hooks/useTasks";
 import { useCreateSchedule } from "@/hooks/useTaskSchedules";
 import type { CycleType } from "@/api/taskSchedules";
-
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const ORDINALS = ["1st", "2nd", "3rd", "4th"];
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+import { MonthDaySelect } from "@/components/ui/MonthDaySelect";
+import { WEEKDAYS, ORDINALS, MONTHS, monthDayLabel } from "@/lib/cycle";
 
 interface Props {
   open: boolean;
@@ -144,18 +142,13 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
             {cycleType === "MONTHLY_DATE" && (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="add-cycle-date">Day of month</Label>
-                <select
+                <MonthDaySelect
                   id="add-cycle-date"
                   value={cycleDay}
-                  onChange={(e) => setCycleDay(e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setCycleDay(String(v))}
+                />
                 <p className="text-xs text-muted-foreground">
-                  Repeats on the {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"} of each month.
+                  Repeats on {monthDayLabel(cycleDay)} of each month.
                 </p>
               </div>
             )}
@@ -218,18 +211,13 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
             {cycleType === "QUARTERLY" && (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="add-cycle-quarterly">Day of month</Label>
-                <select
+                <MonthDaySelect
                   id="add-cycle-quarterly"
                   value={cycleDay}
-                  onChange={(e) => setCycleDay(e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setCycleDay(String(v))}
+                />
                 <p className="text-xs text-muted-foreground">
-                  Repeats every 3 months on the {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
+                  Repeats every 3 months on {monthDayLabel(cycleDay)}.
                 </p>
               </div>
             )}
@@ -252,20 +240,15 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                   </div>
                   <div className="flex flex-col gap-1.5 flex-1">
                     <Label htmlFor="add-cycle-yearly-day">Day</Label>
-                    <select
+                    <MonthDaySelect
                       id="add-cycle-yearly-day"
                       value={cycleDay}
-                      onChange={(e) => setCycleDay(e.target.value)}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setCycleDay(String(v))}
+                    />
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Repeats every year on {MONTHS[Number(cycleNth) - 1]} {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
+                  Repeats every year on {MONTHS[Number(cycleNth) - 1]} ({monthDayLabel(cycleDay)}).
                 </p>
               </div>
             )}

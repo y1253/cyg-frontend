@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MonthDaySelect } from "@/components/ui/MonthDaySelect";
+import { monthDayLabel } from "@/lib/cycle";
 import type { FormData } from "../RegisterPage";
 
 const SELECT_CLASS =
@@ -120,18 +122,13 @@ export function Step9AccountsPayable({ data, onChange }: Props) {
           {cycleType === "MONTHLY_DATE" && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="ap-cycle-date">Day of month</Label>
-              <select
+              <MonthDaySelect
                 id="ap-cycle-date"
                 value={cycleDay}
-                onChange={(e) => onChange({ apCycleDay: Number(e.target.value) })}
-                className={SELECT_CLASS}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                onChange={(v) => onChange({ apCycleDay: v })}
+              />
               <p className="text-xs text-muted-foreground">
-                Repeats on the {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"} of each month.
+                Repeats on {monthDayLabel(cycleDay)} of each month.
               </p>
             </div>
           )}
@@ -197,18 +194,13 @@ export function Step9AccountsPayable({ data, onChange }: Props) {
           {cycleType === "QUARTERLY" && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="ap-cycle-quarterly">Day of month</Label>
-              <select
+              <MonthDaySelect
                 id="ap-cycle-quarterly"
                 value={cycleDay}
-                onChange={(e) => onChange({ apCycleDay: Number(e.target.value) })}
-                className={SELECT_CLASS}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                onChange={(v) => onChange({ apCycleDay: v })}
+              />
               <p className="text-xs text-muted-foreground">
-                Repeats every 3 months on the {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
+                Repeats every 3 months on {monthDayLabel(cycleDay)}.
               </p>
             </div>
           )}
@@ -232,20 +224,15 @@ export function Step9AccountsPayable({ data, onChange }: Props) {
                 </div>
                 <div className="flex flex-col gap-1.5 flex-1">
                   <Label htmlFor="ap-cycle-yearly-day">Day</Label>
-                  <select
+                  <MonthDaySelect
                     id="ap-cycle-yearly-day"
                     value={cycleDay}
-                    onChange={(e) => onChange({ apCycleDay: Number(e.target.value) })}
-                    className={SELECT_CLASS}
-                  >
-                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => onChange({ apCycleDay: v })}
+                  />
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Repeats every year on {MONTHS[Number(cycleNth) - 1]} {cycleDay}{["1","21","31"].includes(cycleDay) ? "st" : ["2","22"].includes(cycleDay) ? "nd" : ["3","23"].includes(cycleDay) ? "rd" : "th"}.
+                Repeats every year on {MONTHS[Number(cycleNth) - 1]} ({monthDayLabel(cycleDay)}).
               </p>
             </div>
           )}

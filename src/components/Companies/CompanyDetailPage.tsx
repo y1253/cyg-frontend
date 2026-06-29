@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { MonthDaySelect } from '@/components/ui/MonthDaySelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -160,18 +161,24 @@ function ordinal(n: number): string {
   return ORDINALS[n] ?? `${n}th`;
 }
 
+// Day-of-month phrase that understands the "last day of month" sentinel (0).
+function cycleDayPhrase(cycleDay: number | null | undefined): string {
+  const d = cycleDay ?? 1;
+  return d === 0 ? 'last day' : ordinal(d);
+}
+
 function formatCycle(s: AppTaskSchedule): string {
   switch (s.cycleType) {
     case 'MONTHLY_DATE':
-      return `Every ${ordinal(s.cycleDay ?? 1)} of the month`;
+      return `Every ${cycleDayPhrase(s.cycleDay)} of the month`;
     case 'WEEKLY_DAY':
       return `Every ${WEEKDAYS[s.cycleDay ?? 0]}`;
     case 'MONTHLY_WEEKDAY':
       return `Every ${ordinal(s.cycleNth ?? 1)} ${WEEKDAYS[s.cycleDay ?? 0]}`;
     case 'QUARTERLY':
-      return `Every quarter (${ordinal(s.cycleDay ?? 1)} of month)`;
+      return `Every quarter (${cycleDayPhrase(s.cycleDay)} of month)`;
     case 'YEARLY':
-      return `Every year on ${MONTHS[(s.cycleNth ?? 1) - 1]?.label ?? 'Jan'} ${ordinal(s.cycleDay ?? 1)}`;
+      return `Every year on ${MONTHS[(s.cycleNth ?? 1) - 1]?.label ?? 'Jan'} ${cycleDayPhrase(s.cycleDay)}`;
     default:
       return `Every ${s.cycle} days`;
   }
@@ -598,7 +605,7 @@ function TodoRow({
               <>
                 {' '}due on{' '}
                 <span className="font-semibold text-foreground">
-                  {new Date(todo.dueDate).toLocaleDateString('en-CA', {
+                  {new Date(todo.dueDate.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-CA', {
                     year: 'numeric', month: 'long', day: 'numeric',
                   })}
                 </span>
@@ -1384,14 +1391,10 @@ function SchedulesSection({
               {editCycleType === 'MONTHLY_DATE' && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Day</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
+                  <MonthDaySelect
                     value={editCycleDay}
-                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                    className="h-7 w-20 text-xs px-2"
-                    autoFocus
+                    onChange={setEditCycleDay}
+                    className="h-7 w-36 text-xs"
                   />
                   <span className="text-xs text-muted-foreground">of each month</span>
                 </div>
@@ -1439,14 +1442,10 @@ function SchedulesSection({
               {editCycleType === 'QUARTERLY' && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Day</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
+                  <MonthDaySelect
                     value={editCycleDay}
-                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                    className="h-7 w-20 text-xs px-2"
-                    autoFocus
+                    onChange={setEditCycleDay}
+                    className="h-7 w-36 text-xs"
                   />
                   <span className="text-xs text-muted-foreground">of month (every 3 months)</span>
                 </div>
@@ -1463,13 +1462,10 @@ function SchedulesSection({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
+                  <MonthDaySelect
                     value={editCycleDay}
-                    onChange={e => setEditCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                    className="h-7 w-20 text-xs px-2"
+                    onChange={setEditCycleDay}
+                    className="h-7 w-36 text-xs"
                   />
                 </div>
               )}

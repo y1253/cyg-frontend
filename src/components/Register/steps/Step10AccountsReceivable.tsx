@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MonthDaySelect } from "@/components/ui/MonthDaySelect";
+import { monthDayLabel } from "@/lib/cycle";
 import type { FormData } from "../RegisterPage";
 
 const SELECT_CLASS =
@@ -12,10 +14,6 @@ const TEXTAREA_CLASS =
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ORDINALS = ["1st", "2nd", "3rd", "4th"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
-function ordinalSuffix(n: string) {
-  return ["1", "21", "31"].includes(n) ? "st" : ["2", "22"].includes(n) ? "nd" : ["3", "23"].includes(n) ? "rd" : "th";
-}
 
 interface Props {
   data: FormData;
@@ -154,18 +152,13 @@ function CyclePicker({
       {cycleType === "MONTHLY_DATE" && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${rule.idPrefix}-cycle-date`}>Day of month</Label>
-          <select
+          <MonthDaySelect
             id={`${rule.idPrefix}-cycle-date`}
             value={cycleDay}
-            onChange={(e) => onChange({ [rule.cycleDayKey]: Number(e.target.value) } as Partial<FormData>)}
-            className={SELECT_CLASS}
-          >
-            {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ [rule.cycleDayKey]: v } as Partial<FormData>)}
+          />
           <p className="text-xs text-muted-foreground">
-            Repeats on the {cycleDay}{ordinalSuffix(cycleDay)} of each month.
+            Repeats on {monthDayLabel(cycleDay)} of each month.
           </p>
         </div>
       )}
@@ -229,18 +222,13 @@ function CyclePicker({
       {cycleType === "QUARTERLY" && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${rule.idPrefix}-cycle-quarterly`}>Day of month</Label>
-          <select
+          <MonthDaySelect
             id={`${rule.idPrefix}-cycle-quarterly`}
             value={cycleDay}
-            onChange={(e) => onChange({ [rule.cycleDayKey]: Number(e.target.value) } as Partial<FormData>)}
-            className={SELECT_CLASS}
-          >
-            {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ [rule.cycleDayKey]: v } as Partial<FormData>)}
+          />
           <p className="text-xs text-muted-foreground">
-            Repeats every 3 months on the {cycleDay}{ordinalSuffix(cycleDay)}.
+            Repeats every 3 months on {monthDayLabel(cycleDay)}.
           </p>
         </div>
       )}
@@ -264,20 +252,15 @@ function CyclePicker({
             </div>
             <div className="flex flex-col gap-1.5 flex-1">
               <Label htmlFor={`${rule.idPrefix}-cycle-yearly-day`}>Day</Label>
-              <select
+              <MonthDaySelect
                 id={`${rule.idPrefix}-cycle-yearly-day`}
                 value={cycleDay}
-                onChange={(e) => onChange({ [rule.cycleDayKey]: Number(e.target.value) } as Partial<FormData>)}
-                className={SELECT_CLASS}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                onChange={(v) => onChange({ [rule.cycleDayKey]: v } as Partial<FormData>)}
+              />
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Repeats every year on {MONTHS[Number(cycleNth) - 1]} {cycleDay}{ordinalSuffix(cycleDay)}.
+            Repeats every year on {MONTHS[Number(cycleNth) - 1]} ({monthDayLabel(cycleDay)}).
           </p>
         </div>
       )}

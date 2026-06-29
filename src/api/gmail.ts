@@ -39,10 +39,27 @@ export interface ChatMessage {
   createTime: string;
 }
 
+// One conversation (Google Chat space) for the inbox list.
+export interface ChatConversation {
+  spaceId: string;
+  spaceName: string;
+  spaceType: string;
+  lastMessage: ChatMessage | null;
+  isRead: boolean;
+}
+
 export interface ChatListResult {
-  messages: ChatMessage[];
+  conversations: ChatConversation[];
   needsReconnect?: boolean;
   chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured';
+}
+
+export interface ChatThreadResult {
+  messages: ChatMessage[];
+  nextPageToken: string | null;
+  spaceName?: string;
+  spaceType?: string;
+  needsReconnect?: boolean;
 }
 
 export async function fetchAuthUrl(token: string, companyId: number): Promise<{ authUrl: string }> {
@@ -95,6 +112,46 @@ export async function fetchChats(token: string, companyId: number): Promise<Chat
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats`);
   if (!res.ok) throw new Error('Failed to fetch chats');
   return res.json() as Promise<ChatListResult>;
+}
+
+export async function fetchChatThread(
+  token: string,
+  companyId: number,
+  spaceId: string,
+  pageToken?: string,
+): Promise<ChatThreadResult> {
+  const params = new URLSearchParams({ spaceId });
+  if (pageToken) params.set('pageToken', pageToken);
+  const res = await fetchWithAuth(
+    token,
+    `${API}/gmail/companies/${companyId}/chat-thread?${params.toString()}`,
+  );
+  if (!res.ok) throw new Error('Failed to fetch chat thread');
+  return res.json() as Promise<ChatThreadResult>;
+}
+
+export async function markChatRead(
+  token: string,
+  companyId: number,
+  spaceId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/read`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spaceId }),
+  });
+}
+
+export async function markChatUnread(
+  token: string,
+  companyId: number,
+  spaceId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/unread`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spaceId }),
+  });
 }
 
 export async function markEmailRead(

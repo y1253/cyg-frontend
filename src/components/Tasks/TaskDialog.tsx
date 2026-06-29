@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { useCreateTask, useUpdateTask } from '@/hooks/useTasks';
 import type { AppTask, TaskCycleType } from '@/api/tasks';
+import { MonthDaySelect } from '@/components/ui/MonthDaySelect';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
@@ -156,13 +157,10 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             {defaultCycleType === 'MONTHLY_DATE' && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Day</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
+                <MonthDaySelect
                   value={defaultCycleDay}
-                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                  className="w-24"
+                  onChange={setDefaultCycleDay}
+                  className="w-40"
                 />
                 <span className="text-sm text-muted-foreground">of each month</span>
               </div>
@@ -213,13 +211,10 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             {defaultCycleType === 'QUARTERLY' && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Day</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
+                <MonthDaySelect
                   value={defaultCycleDay}
-                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                  className="w-24"
+                  onChange={setDefaultCycleDay}
+                  className="w-40"
                 />
                 <span className="text-sm text-muted-foreground">of month (every 3 months)</span>
               </div>
@@ -237,13 +232,10 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
                     ))}
                   </SelectContent>
                 </Select>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
+                <MonthDaySelect
                   value={defaultCycleDay}
-                  onChange={e => setDefaultCycleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                  className="w-24"
+                  onChange={setDefaultCycleDay}
+                  className="w-40"
                 />
               </div>
             )}
