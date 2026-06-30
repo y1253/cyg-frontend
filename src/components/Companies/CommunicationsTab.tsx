@@ -64,7 +64,9 @@ function formatEmailDate(dateStr: string): string {
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
   const now = new Date();
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86400000);
   if (diffDays === 0) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
   if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -425,6 +427,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               ))
             )}
           </div>
+
+          {/* Chat-send permission missing — replies will fail no matter how often
+              the account is reconnected (Chat API is Workspace-only). */}
+          {account.hasChatScope === false && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <AlertOctagon size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Chat replies aren't available for this account — Google didn't grant
+                chat-send permission. The Google Chat API requires a Google Workspace
+                account (personal @gmail.com accounts can't send chat), and Workspace
+                accounts need their domain admin to authorize this app for Chat.
+                Reconnecting alone won't fix this.
+              </span>
+            </div>
+          )}
 
           {/* Reply button */}
           {!chatReplyOpen && (

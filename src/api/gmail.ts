@@ -5,6 +5,9 @@ const API = '/api';
 export interface GmailAccount {
   gmailAddress: string;
   connectedAt: string;
+  // Whether Google granted the Chat send scope on the last connect. When false,
+  // chat replies will fail no matter how often the account is reconnected.
+  hasChatScope?: boolean;
 }
 
 export interface EmailSummary {
