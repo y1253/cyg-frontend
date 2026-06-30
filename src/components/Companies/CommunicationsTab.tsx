@@ -394,15 +394,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <p className="text-sm text-muted-foreground text-center py-6">No messages in this conversation.</p>
             ) : (
               threadMessages.map((m) => (
-                <div key={m.id} className="flex flex-col gap-1">
+                <div key={m.id} className={`flex flex-col gap-1 ${m.isOwn ? 'items-end' : 'items-start'}`}>
                   <div className="flex items-center gap-2">
-                    <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
-                      {(m.sender[0] ?? '?').toUpperCase()}
-                    </div>
-                    <span className="text-xs font-medium text-foreground/80">{m.sender}</span>
+                    {!m.isOwn && (
+                      <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
+                        {(m.sender[0] ?? '?').toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-xs font-medium text-foreground/80">{m.isOwn ? 'You' : m.sender}</span>
                     <span className="text-[11px] text-muted-foreground">{formatEmailDate(m.createTime)}</span>
                   </div>
-                  <div className="ml-8 rounded-md bg-background border px-3 py-2 text-sm whitespace-pre-wrap">
+                  <div
+                    className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
+                      m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
+                    }`}
+                  >
                     {m.text || '(empty message)'}
                   </div>
                 </div>

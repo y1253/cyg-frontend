@@ -37,6 +37,7 @@ export interface ChatMessage {
   sender: string;
   text: string;
   createTime: string;
+  isOwn?: boolean;
 }
 
 // One incoming chat message for the inbox list (chats behave like emails).
