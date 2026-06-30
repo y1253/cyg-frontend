@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2,
@@ -137,6 +137,16 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const markChatReadMutation = useMarkChatRead(companyId);
   const markChatUnreadMutation = useMarkChatUnread(companyId);
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
+
+  const threadScrollRef = useRef<HTMLDivElement>(null);
+
+  // Keep the chat thread pinned to the bottom so the newest message (and the
+  // user's just-sent reply) is visible without manual scrolling.
+  useEffect(() => {
+    if (!selectedSpaceId) return;
+    const el = threadScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [selectedSpaceId, chatThread?.messages?.length]);
 
   // Build unified sorted list for INBOX (emails + one row per chat conversation)
   const unifiedItems: UnifiedItem[] = isInbox
@@ -387,7 +397,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           </div>
 
           {/* Conversation thread */}
-          <div className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
+          <div ref={threadScrollRef} className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
             {chatThreadLoading && threadMessages.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">Loading conversation…</p>
             ) : threadMessages.length === 0 ? (
