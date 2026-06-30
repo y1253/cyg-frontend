@@ -19,7 +19,7 @@ import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { fetchAuthUrl } from '@/api/gmail';
-import type { EmailSummary, ChatConversation, EmailDetail } from '@/api/gmail';
+import type { EmailSummary, ChatInboxMessage, EmailDetail } from '@/api/gmail';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -46,13 +46,10 @@ const FOLDERS = [
 
 type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
-  | { kind: 'chat'; data: ChatConversation };
+  | { kind: 'chat'; data: ChatInboxMessage };
 
 function getItemTimestamp(item: UnifiedItem): number {
-  const raw =
-    item.kind === 'email'
-      ? item.data.date
-      : (item.data.lastMessage?.createTime ?? '');
+  const raw = item.kind === 'email' ? item.data.date : item.data.createTime;
   return new Date(raw).getTime() || 0;
 }
 
@@ -95,6 +92,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [connecting, setConnecting] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  // The clicked chat message — its createTime freezes the thread at that moment,
+  // and its id is the per-message read/unread target for the open thread.
+  const [openedChatMsgId, setOpenedChatMsgId] = useState<string | null>(null);
+  const [openedChatMsgTime, setOpenedChatMsgTime] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
   const [pageToken, setPageToken] = useState<string | undefined>(undefined);
   const [pageHistory, setPageHistory] = useState<string[]>([]);
@@ -125,6 +126,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { data: chatThread, isLoading: chatThreadLoading } = useGmailChatThread(
     companyId,
     account ? selectedSpaceId : null,
+    openedChatMsgId,
+    openedChatMsgTime,
   );
   const sendMutation = useSendEmail(companyId);
   const sendChatMutation = useSendChatMessage(companyId);
@@ -139,17 +142,17 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const unifiedItems: UnifiedItem[] = isInbox
     ? [
         ...(emailList?.messages ?? []).map((e): UnifiedItem => ({ kind: 'email', data: e })),
-        ...(chatData?.conversations ?? []).map((c): UnifiedItem => ({ kind: 'chat', data: c })),
+        ...(chatData?.messages ?? []).map((c): UnifiedItem => ({ kind: 'chat', data: c })),
       ].sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a))
     : [];
 
-  // Selected chat conversation (for the thread view header / reply target)
-  const selectedConversation = selectedSpaceId
-    ? (chatData?.conversations ?? []).find((c) => c.spaceId === selectedSpaceId) ?? null
+  // The opened chat message (for the thread view header / space name fallback).
+  const openedChatMsg = openedChatMsgId
+    ? (chatData?.messages ?? []).find((m) => m.id === openedChatMsgId) ?? null
     : null;
   // Display name for the open thread — prefer freshly-fetched thread metadata.
   const selectedSpaceName =
-    chatThread?.spaceName ?? selectedConversation?.spaceName ?? 'Conversation';
+    chatThread?.spaceName ?? openedChatMsg?.spaceName ?? 'Conversation';
 
   // SSE: real-time inbox updates
   useEffect(() => {
@@ -268,11 +271,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setReplyOpen(false);
   };
 
-  const handleOpenChat = (conv: ChatConversation) => {
-    if (!conv.isRead) markChatReadMutation.mutate(conv.spaceId);
-    setSelectedSpaceId(conv.spaceId);
+  const handleOpenChat = (msg: ChatInboxMessage) => {
+    if (!msg.isRead) markChatReadMutation.mutate(msg.id); // mark THIS message read, not the whole space
+    setSelectedSpaceId(msg.spaceId);
+    setOpenedChatMsgId(msg.id);
+    setOpenedChatMsgTime(msg.createTime); // freeze the thread at this message's moment
     setSelectedMsgId(null);
     setReplyOpen(false);
+    setChatReplyOpen(false);
+    setChatReplyText('');
+  };
+
+  const handleCloseChat = () => {
+    setSelectedSpaceId(null);
+    setOpenedChatMsgId(null);
+    setOpenedChatMsgTime(null);
     setChatReplyOpen(false);
     setChatReplyText('');
   };
@@ -340,7 +353,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       <div className="flex flex-col gap-4">
         <button
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-          onClick={() => { setSelectedSpaceId(null); setChatReplyOpen(false); setChatReplyText(''); }}
+          onClick={handleCloseChat}
         >
           <ArrowLeft size={14} /> Back
         </button>
@@ -357,10 +370,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               size="sm"
               variant="outline"
               className="gap-1 text-muted-foreground"
-              disabled={markChatUnreadMutation.isPending}
+              disabled={markChatUnreadMutation.isPending || !openedChatMsgId}
               onClick={() => {
-                markChatUnreadMutation.mutate(selectedSpaceId, {
-                  onSuccess: () => { setSelectedSpaceId(null); setChatReplyOpen(false); setChatReplyText(''); },
+                if (!openedChatMsgId) return;
+                markChatUnreadMutation.mutate(openedChatMsgId, {
+                  onSuccess: handleCloseChat,
                 });
               }}
             >
@@ -707,8 +721,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         </div>
       )}
 
-      {/* Chat fetched ok but no conversations found (history may be off) */}
-      {chatData?.chatStatus === 'ok' && chatData.conversations.length === 0 && (
+      {/* Chat fetched ok but no messages found (history may be off) */}
+      {chatData?.chatStatus === 'ok' && chatData.messages.length === 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>No recent Google Chat messages found. History may be disabled for your chat spaces.</span>
@@ -805,7 +819,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </div>
               ) : (
                 <div
-                  key={item.data.spaceId}
+                  key={item.data.id}
                   className={[
                     'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer',
                     !item.data.isRead ? 'bg-white hover:bg-purple-50/60' : 'bg-muted/10 hover:bg-purple-50/40',
@@ -823,8 +837,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     title={item.data.isRead ? 'Mark as unread' : 'Mark as read'}
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (item.data.isRead) markChatUnreadMutation.mutate(item.data.spaceId);
-                      else markChatReadMutation.mutate(item.data.spaceId);
+                      if (item.data.isRead) markChatUnreadMutation.mutate(item.data.id);
+                      else markChatReadMutation.mutate(item.data.id);
                     }}
                   >
                     <span className={[
@@ -834,27 +848,27 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   </button>
                   {/* Avatar */}
                   <div className="shrink-0 w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-semibold mt-0.5">
-                    {((item.data.lastMessage?.sender ?? '?')[0] ?? '?').toUpperCase()}
+                    {(item.data.sender[0] ?? '?').toUpperCase()}
                   </div>
                   {/* Content */}
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className={['text-sm truncate flex items-center gap-1.5', !item.data.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
                         <MessageSquare size={11} className="text-purple-500 shrink-0" />
-                        {item.data.lastMessage?.sender ?? 'Unknown'}
+                        {item.data.sender}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
                           Chat
                         </Badge>
                         <span className={['text-xs', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
-                          {item.data.lastMessage ? formatEmailDate(item.data.lastMessage.createTime) : ''}
+                          {formatEmailDate(item.data.createTime)}
                         </span>
                       </div>
                     </div>
                     <span className="text-xs font-medium text-muted-foreground truncate">{item.data.spaceName}</span>
                     <span className={['text-xs truncate', !item.data.isRead ? 'font-medium text-foreground/80' : 'text-muted-foreground'].join(' ')}>
-                      {item.data.lastMessage?.text ?? '(no messages)'}
+                      {item.data.text || '(no text)'}
                     </span>
                   </div>
                 </div>

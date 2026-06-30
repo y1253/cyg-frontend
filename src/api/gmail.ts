@@ -39,17 +39,20 @@ export interface ChatMessage {
   createTime: string;
 }
 
-// One conversation (Google Chat space) for the inbox list.
-export interface ChatConversation {
+// One incoming chat message for the inbox list (chats behave like emails).
+export interface ChatInboxMessage {
+  id: string;
   spaceId: string;
   spaceName: string;
   spaceType: string;
-  lastMessage: ChatMessage | null;
+  sender: string;
+  text: string;
+  createTime: string;
   isRead: boolean;
 }
 
 export interface ChatListResult {
-  conversations: ChatConversation[];
+  messages: ChatInboxMessage[];
   needsReconnect?: boolean;
   chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured';
 }
@@ -119,9 +122,11 @@ export async function fetchChatThread(
   companyId: number,
   spaceId: string,
   pageToken?: string,
+  untilCreateTime?: string,
 ): Promise<ChatThreadResult> {
   const params = new URLSearchParams({ spaceId });
   if (pageToken) params.set('pageToken', pageToken);
+  if (untilCreateTime) params.set('until', untilCreateTime);
   const res = await fetchWithAuth(
     token,
     `${API}/gmail/companies/${companyId}/chat-thread?${params.toString()}`,
@@ -133,24 +138,24 @@ export async function fetchChatThread(
 export async function markChatRead(
   token: string,
   companyId: number,
-  spaceId: string,
+  messageId: string,
 ): Promise<void> {
   await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/read`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spaceId }),
+    body: JSON.stringify({ messageId }),
   });
 }
 
 export async function markChatUnread(
   token: string,
   companyId: number,
-  spaceId: string,
+  messageId: string,
 ): Promise<void> {
   await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/unread`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spaceId }),
+    body: JSON.stringify({ messageId }),
   });
 }
 

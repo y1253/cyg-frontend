@@ -8,16 +8,16 @@ export function useMarkChatUnread(companyId: number) {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (spaceId: string) => markChatUnread(token!, companyId, spaceId),
-    onMutate: (spaceId: string) => {
+    mutationFn: (messageId: string) => markChatUnread(token!, companyId, messageId),
+    onMutate: (messageId: string) => {
       qc.setQueriesData<ChatListResult>(
         { queryKey: ['gmail-chats', companyId] },
         (old) => {
           if (!old) return old;
           return {
             ...old,
-            conversations: old.conversations.map((c) =>
-              c.spaceId === spaceId ? { ...c, isRead: false } : c,
+            messages: old.messages.map((m) =>
+              m.id === messageId ? { ...m, isRead: false } : m,
             ),
           };
         },
