@@ -25,6 +25,7 @@ export function useMarkChatRead(companyId: number) {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] });
+      void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
     },
   });
 }

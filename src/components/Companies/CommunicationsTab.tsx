@@ -295,9 +295,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     sendChatMutation.mutate(
       { spaceId: selectedSpaceId, text: chatReplyText },
       {
-        onSuccess: () => {
+        onSuccess: (created) => {
           setChatReplyOpen(false);
           setChatReplyText('');
+          // Advance the frozen cutoff to include the just-sent reply, which
+          // (via the cutoff being part of the thread query key) refetches the
+          // open conversation so the reply shows up right away.
+          setOpenedChatMsgTime(created.createTime);
         },
       },
     );

@@ -1673,7 +1673,7 @@ function SchedulesSection({
                     setEditId(s.id);
                     setEditCycleType(s.cycleType as CycleTypeLocal);
                     setEditCycle(String(s.cycle));
-                    setEditCycleDay(s.cycleDay ?? 0);
+                    setEditCycleDay(s.cycleDay != null && s.cycleDay > 28 ? 0 : (s.cycleDay ?? 0));
                     setEditCycleNth(s.cycleNth ?? 1);
                     setEditNote(s.note ?? '');
                     setEditStartDate(s.startDate ? s.startDate.slice(0, 10) : '');

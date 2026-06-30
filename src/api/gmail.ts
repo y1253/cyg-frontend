@@ -216,7 +216,7 @@ export async function sendChatMessage(
   companyId: number,
   spaceId: string,
   text: string,
-): Promise<void> {
+): Promise<ChatMessage> {
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chat-messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -226,6 +226,7 @@ export async function sendChatMessage(
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? 'Failed to send chat message');
   }
+  return res.json() as Promise<ChatMessage>;
 }
 
 export async function disconnectGmail(token: string, companyId: number): Promise<void> {
