@@ -1054,7 +1054,41 @@ function TabBar({
 
 // ─── Links section ───────────────────────────────────────────────────────────
 
-function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: boolean }) {
+function LinkPasswordField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="Optional"
+        className="pr-10"
+        autoComplete="off"
+      />
+      <button
+        type="button"
+        onClick={() => setShow(v => !v)}
+        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+        tabIndex={-1}
+        aria-label={show ? 'Hide password' : 'Show password'}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
+function LinksSection({ companyId }: { companyId: number }) {
   const { data: links = [], isLoading } = useLinks(companyId);
   const createMutation = useCreateLink(companyId);
   const updateMutation = useUpdateLink(companyId);
@@ -1063,12 +1097,29 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
   const [addOpen, setAddOpen] = useState(false);
   const [addLabel, setAddLabel] = useState('');
   const [addUrl, setAddUrl] = useState('');
+  const [addUsername, setAddUsername] = useState('');
+  const [addPassword, setAddPassword] = useState('');
+  const [addNote, setAddNote] = useState('');
 
   const [editId, setEditId] = useState<number | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editUrl, setEditUrl] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editNote, setEditNote] = useState('');
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  // Ids of links whose password is currently revealed (per-row eye toggle).
+  const [revealed, setRevealed] = useState<Set<number>>(new Set());
+
+  function toggleReveal(id: number) {
+    setRevealed(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function faviconUrl(url: string) {
     try {
@@ -1079,18 +1130,28 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
     }
   }
 
+  function resetAdd() {
+    setAddOpen(false);
+    setAddLabel('');
+    setAddUrl('');
+    setAddUsername('');
+    setAddPassword('');
+    setAddNote('');
+  }
+
   function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!addLabel || !addUrl) return;
     createMutation.mutate(
-      { companyId, label: addLabel, url: addUrl },
       {
-        onSuccess: () => {
-          setAddOpen(false);
-          setAddLabel('');
-          setAddUrl('');
-        },
+        companyId,
+        label: addLabel,
+        url: addUrl,
+        username: addUsername.trim() || undefined,
+        password: addPassword || undefined,
+        note: addNote.trim() || undefined,
       },
+      { onSuccess: resetAdd },
     );
   }
 
@@ -1098,13 +1159,25 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
     setEditId(link.id);
     setEditLabel(link.label);
     setEditUrl(link.url);
+    setEditUsername(link.username ?? '');
+    setEditPassword(link.password ?? '');
+    setEditNote(link.note ?? '');
   }
 
   function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editId) return;
     updateMutation.mutate(
-      { id: editId, data: { label: editLabel, url: editUrl } },
+      {
+        id: editId,
+        data: {
+          label: editLabel,
+          url: editUrl,
+          username: editUsername.trim(),
+          password: editPassword,
+          note: editNote.trim(),
+        },
+      },
       { onSuccess: () => setEditId(null) },
     );
   }
@@ -1113,16 +1186,14 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
 
   return (
     <div className="flex flex-col gap-3 max-w-3xl">
-      {isAdmin && (
-        <div className="flex justify-end">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(v => !v)}>
-            <Plus size={14} /> Add Link
-          </Button>
-        </div>
-      )}
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(v => !v)}>
+          <Plus size={14} /> Add Link
+        </Button>
+      </div>
 
       {/* Inline add form */}
-      {isAdmin && addOpen && (
+      {addOpen && (
         <form onSubmit={handleAdd} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
           <p className="text-sm font-medium">New Link</p>
           <div className="flex flex-col gap-1.5">
@@ -1144,13 +1215,37 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
               placeholder="https://..."
             />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-link-username">Username <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              id="add-link-username"
+              value={addUsername}
+              onChange={e => setAddUsername(e.target.value)}
+              placeholder="Optional"
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-link-password">Password <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <LinkPasswordField id="add-link-password" value={addPassword} onChange={setAddPassword} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="add-link-note">Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Textarea
+              id="add-link-note"
+              value={addNote}
+              onChange={e => setAddNote(e.target.value)}
+              placeholder="Optional"
+              rows={2}
+            />
+          </div>
           {createMutation.isError && (
             <p className="text-xs text-destructive">
               {createMutation.error instanceof Error ? createMutation.error.message : 'Error'}
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={resetAdd}>Cancel</Button>
             <Button type="submit" size="sm" disabled={!addLabel || !addUrl || createMutation.isPending}>
               {createMutation.isPending ? 'Saving…' : 'Save'}
             </Button>
@@ -1176,6 +1271,18 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
                 <Label>URL</Label>
                 <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} />
               </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Username <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Input value={editUsername} onChange={e => setEditUsername(e.target.value)} placeholder="Optional" autoComplete="off" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Password <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <LinkPasswordField id={`edit-link-password-${link.id}`} value={editPassword} onChange={setEditPassword} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Textarea value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Optional" rows={2} />
+              </div>
               {updateMutation.isError && (
                 <p className="text-xs text-destructive">
                   {updateMutation.error instanceof Error ? updateMutation.error.message : 'Error'}
@@ -1189,26 +1296,26 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
               </div>
             </form>
           ) : (
-            <div className="rounded-lg border bg-background px-4 py-3 flex items-center gap-3">
-              {faviconUrl(link.url) && (
-                <img
-                  src={faviconUrl(link.url)!}
-                  alt=""
-                  aria-hidden
-                  className="w-5 h-5 shrink-0 rounded-sm object-contain"
-                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                />
-              )}
-              <a
-                href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 text-sm font-medium hover:underline flex items-center gap-1.5"
-              >
-                {link.label}
-                <ExternalLink size={12} className="text-muted-foreground" />
-              </a>
-              {isAdmin && (
+            <div className="rounded-lg border bg-background px-4 py-3 flex flex-col gap-2">
+              <div className="flex items-center gap-3">
+                {faviconUrl(link.url) && (
+                  <img
+                    src={faviconUrl(link.url)!}
+                    alt=""
+                    aria-hidden
+                    className="w-5 h-5 shrink-0 rounded-sm object-contain"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+                <a
+                  href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 text-sm font-medium hover:underline flex items-center gap-1.5"
+                >
+                  {link.label}
+                  <ExternalLink size={12} className="text-muted-foreground" />
+                </a>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1226,6 +1333,40 @@ function LinksSection({ companyId, isAdmin }: { companyId: number; isAdmin: bool
                   >
                     <Trash2 size={13} />
                   </button>
+                </div>
+              </div>
+
+              {/* Credentials + note */}
+              {(link.username || link.password || link.note) && (
+                <div className="pl-8 flex flex-col gap-1.5 text-xs">
+                  {link.username && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-16 shrink-0">Username</span>
+                      <span className="font-medium break-all">{link.username}</span>
+                    </div>
+                  )}
+                  {link.password && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-16 shrink-0">Password</span>
+                      <span className="font-medium font-mono break-all">
+                        {revealed.has(link.id) ? link.password : '••••••••'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleReveal(link.id)}
+                        className="flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={revealed.has(link.id) ? 'Hide password' : 'Show password'}
+                      >
+                        {revealed.has(link.id) ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    </div>
+                  )}
+                  {link.note && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-muted-foreground w-16 shrink-0">Note</span>
+                      <span className="whitespace-pre-wrap break-words">{link.note}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2710,7 +2851,7 @@ export function CompanyDetailPage() {
 
         {/* ── Links tab ── */}
         {tab === 'links' && (
-          <LinksSection companyId={companyId} isAdmin={isAdmin} />
+          <LinksSection companyId={companyId} />
         )}
 
         {/* ── Schedules tab ── */}

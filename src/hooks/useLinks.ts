@@ -15,7 +15,7 @@ export function useCreateLink(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { companyId: number; label: string; url: string }) =>
+    mutationFn: (data: Parameters<typeof createLink>[1]) =>
       createLink(token!, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['links', companyId] });
@@ -27,7 +27,7 @@ export function useUpdateLink(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { label?: string; url?: string } }) =>
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateLink>[2] }) =>
       updateLink(token!, id, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['links', companyId] });

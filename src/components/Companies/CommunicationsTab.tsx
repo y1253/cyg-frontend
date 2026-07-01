@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  Mail, Send, ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2,
+  Mail, Send, ArrowLeft, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -47,6 +47,14 @@ const FOLDERS = [
 type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
   | { kind: 'chat'; data: ChatInboxMessage };
+
+// Minimal shape needed to natively quote a chat message in a reply.
+type QuoteTarget = {
+  id: string;
+  sender: string;
+  text: string;
+  lastUpdateTime: string;
+};
 
 function getItemTimestamp(item: UnifiedItem): number {
   const raw = item.kind === 'email' ? item.data.date : item.data.createTime;
@@ -109,6 +117,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [replyForm, setReplyForm] = useState({ to: '', subject: '', body: '', cc: '' });
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
   const [chatReplyText, setChatReplyText] = useState('');
+  // The message the reply will natively quote (default = the opened/anchor
+  // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
+  const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
   const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(false);
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
@@ -128,8 +139,6 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { data: chatThread, isLoading: chatThreadLoading } = useGmailChatThread(
     companyId,
     account ? selectedSpaceId : null,
-    openedChatMsgId,
-    openedChatMsgTime,
   );
   const sendMutation = useSendEmail(companyId);
   const sendChatMutation = useSendChatMessage(companyId);
@@ -141,14 +150,47 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
   const threadScrollRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  // Whether the anchor (opened) message is currently visible in the scroll
+  // container — drives the floating "Back to message" button. `anchorDir` is
+  // the direction to scroll to reach it when it's off-screen.
+  const [anchorVisible, setAnchorVisible] = useState(true);
+  const [anchorDir, setAnchorDir] = useState<'up' | 'down'>('up');
 
-  // Keep the chat thread pinned to the bottom so the newest message (and the
-  // user's just-sent reply) is visible without manual scrolling.
+  const scrollToAnchor = useCallback(() => {
+    anchorRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, []);
+
+  // On open (or when the anchor / thread changes), position the anchor message
+  // at the BOTTOM of the visible area so the view reads as if the conversation
+  // ends there — the dimmed "future" messages sit just below (scroll to see).
   useEffect(() => {
-    if (!selectedSpaceId) return;
-    const el = threadScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [selectedSpaceId, chatThread?.messages?.length]);
+    if (!selectedSpaceId || !openedChatMsgId) return;
+    const el = anchorRef.current;
+    if (el) el.scrollIntoView({ block: 'end' });
+    // Re-run when the loaded thread changes (anchor node mounts after fetch).
+  }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
+
+  // Track anchor visibility to toggle the "Back to message" button.
+  useEffect(() => {
+    const root = threadScrollRef.current;
+    const target = anchorRef.current;
+    if (!root || !target) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        setAnchorVisible(entry.isIntersecting);
+        if (!entry.isIntersecting && entry.rootBounds) {
+          // Anchor below the viewport → scroll down to reach it, else up.
+          setAnchorDir(
+            entry.boundingClientRect.top >= entry.rootBounds.bottom ? 'down' : 'up',
+          );
+        }
+      },
+      { root, threshold: 0.1 },
+    );
+    obs.observe(target);
+    return () => obs.disconnect();
+  }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
 
   // Build unified sorted list for INBOX (emails + one row per chat conversation)
   const unifiedItems: UnifiedItem[] = isInbox
@@ -161,6 +203,20 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
     ? (chatData?.messages ?? []).find((m) => m.id === openedChatMsgId) ?? null
+    : null;
+  const threadMessages = chatThread?.messages ?? [];
+  // The anchor message object — prefer the freshly-fetched thread copy (has the
+  // most up-to-date lastUpdateTime for quoting), fall back to the inbox row.
+  const anchorMsg: QuoteTarget | null = openedChatMsgId
+    ? threadMessages.find((m) => m.id === openedChatMsgId) ??
+      (openedChatMsg
+        ? {
+            id: openedChatMsg.id,
+            sender: openedChatMsg.sender,
+            text: openedChatMsg.text,
+            lastUpdateTime: openedChatMsg.lastUpdateTime,
+          }
+        : null)
     : null;
   // Display name for the open thread — prefer freshly-fetched thread metadata.
   const selectedSpaceName =
@@ -287,11 +343,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     if (!msg.isRead) markChatReadMutation.mutate(msg.id); // mark THIS message read, not the whole space
     setSelectedSpaceId(msg.spaceId);
     setOpenedChatMsgId(msg.id);
-    setOpenedChatMsgTime(msg.createTime); // freeze the thread at this message's moment
+    setOpenedChatMsgTime(msg.createTime); // anchor: messages after this are dimmed
     setSelectedMsgId(null);
     setReplyOpen(false);
     setChatReplyOpen(false);
     setChatReplyText('');
+    setQuoteTarget(null);
   };
 
   const handleCloseChat = () => {
@@ -300,20 +357,40 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setOpenedChatMsgTime(null);
     setChatReplyOpen(false);
     setChatReplyText('');
+    setQuoteTarget(null);
+  };
+
+  // Open the reply box, defaulting to natively quoting the anchor message
+  // (Google Chat's "Quote in reply"). The user can clear the quote before send.
+  const handleOpenChatReply = () => {
+    setQuoteTarget(anchorMsg);
+    setChatReplyOpen(true);
   };
 
   const handleSendChatReply = () => {
     if (!selectedSpaceId || !chatReplyText.trim()) return;
     sendChatMutation.mutate(
-      { spaceId: selectedSpaceId, text: chatReplyText },
       {
-        onSuccess: (created) => {
+        spaceId: selectedSpaceId,
+        text: chatReplyText,
+        ...(quoteTarget
+          ? {
+              quotedMessageName: quoteTarget.id,
+              quotedMessageLastUpdateTime: quoteTarget.lastUpdateTime,
+            }
+          : {}),
+      },
+      {
+        onSuccess: () => {
           setChatReplyOpen(false);
           setChatReplyText('');
-          // Advance the frozen cutoff to include the just-sent reply, which
-          // (via the cutoff being part of the thread query key) refetches the
-          // open conversation so the reply shows up right away.
-          setOpenedChatMsgTime(created.createTime);
+          setQuoteTarget(null);
+          // The thread query is invalidated by the mutation; once the refetch
+          // lands, scroll to the bottom so the just-sent reply is visible.
+          setTimeout(() => {
+            const el = threadScrollRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+          }, 300);
         },
       },
     );
@@ -364,7 +441,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // ── Chat conversation (thread) view ───────────────────────────────────────
 
   if (selectedSpaceId) {
-    const threadMessages = chatThread?.messages ?? [];
+    const anchorTime = openedChatMsgTime ? new Date(openedChatMsgTime).getTime() : null;
     return (
       <div className="flex flex-col gap-4">
         <button
@@ -399,32 +476,77 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           </div>
 
           {/* Conversation thread */}
-          <div ref={threadScrollRef} className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
-            {chatThreadLoading && threadMessages.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">Loading conversation…</p>
-            ) : threadMessages.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">No messages in this conversation.</p>
-            ) : (
-              threadMessages.map((m) => (
-                <div key={m.id} className={`flex flex-col gap-1 ${m.isOwn ? 'items-end' : 'items-start'}`}>
-                  <div className="flex items-center gap-2">
-                    {!m.isOwn && (
-                      <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
-                        {(m.sender[0] ?? '?').toUpperCase()}
+          <div className="relative">
+            <div ref={threadScrollRef} className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
+              {chatThreadLoading && threadMessages.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Loading conversation…</p>
+              ) : threadMessages.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No messages in this conversation.</p>
+              ) : (
+                threadMessages.map((m) => {
+                  const isAnchor = m.id === openedChatMsgId;
+                  // Messages newer than the anchor are the "future" — dimmed.
+                  const isFuture =
+                    anchorTime !== null && new Date(m.createTime).getTime() > anchorTime;
+                  // If this message quotes another, resolve the quoted one for a preview.
+                  const quoted = m.quotedMessageName
+                    ? threadMessages.find((q) => q.id === m.quotedMessageName)
+                    : null;
+                  return (
+                    <div
+                      key={m.id}
+                      ref={isAnchor ? anchorRef : undefined}
+                      className={`flex flex-col gap-1 transition-opacity ${m.isOwn ? 'items-end' : 'items-start'} ${isFuture ? 'opacity-50' : ''}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {!m.isOwn && (
+                          <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
+                            {(m.sender[0] ?? '?').toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-xs font-medium text-foreground/80">{m.isOwn ? 'You' : m.sender}</span>
+                        <span className="text-[11px] text-muted-foreground">{formatEmailDate(m.createTime)}</span>
                       </div>
-                    )}
-                    <span className="text-xs font-medium text-foreground/80">{m.isOwn ? 'You' : m.sender}</span>
-                    <span className="text-[11px] text-muted-foreground">{formatEmailDate(m.createTime)}</span>
-                  </div>
-                  <div
-                    className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
-                      m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
-                    }`}
-                  >
-                    {m.text || '(empty message)'}
-                  </div>
-                </div>
-              ))
+                      <div
+                        className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
+                          m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
+                        } ${isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''}`}
+                      >
+                        {/* Quoted-message preview (native "Quote in reply") */}
+                        {m.quotedMessageName && (
+                          <div
+                            className={`mb-1.5 border-l-2 pl-2 text-xs ${
+                              m.isOwn ? 'border-white/60 text-white/80' : 'border-purple-300 text-muted-foreground'
+                            }`}
+                          >
+                            {quoted ? (
+                              <>
+                                <span className="font-medium">{quoted.isOwn ? 'You' : quoted.sender}</span>
+                                <span className="line-clamp-2">{quoted.text || '(no text)'}</span>
+                              </>
+                            ) : (
+                              <span className="italic">Quoted a message</span>
+                            )}
+                          </div>
+                        )}
+                        {m.text || '(empty message)'}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Floating "Back to message" button — shows when the anchor scrolls
+                out of view, jumps back to the opened message. */}
+            {openedChatMsgId && !anchorVisible && threadMessages.length > 0 && (
+              <button
+                type="button"
+                onClick={scrollToAnchor}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-purple-600 text-white text-xs font-medium px-3 py-1.5 shadow-lg hover:bg-purple-700 transition-colors"
+              >
+                {anchorDir === 'down' ? <ArrowDown size={13} /> : <ArrowUp size={13} />} Back to message
+              </button>
             )}
           </div>
 
@@ -447,7 +569,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               size="sm"
               variant="outline"
               className="w-fit gap-1"
-              onClick={() => setChatReplyOpen(true)}
+              onClick={handleOpenChatReply}
             >
               <Reply size={14} /> Reply
             </Button>
@@ -459,6 +581,23 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Reply in {selectedSpaceName}
               </p>
+              {/* Quote-in-reply preview (removable, like Google Chat) */}
+              {quoteTarget && (
+                <div className="flex items-start gap-2 rounded-md border-l-2 border-purple-400 bg-purple-50/60 pl-2 pr-2 py-1.5 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-purple-800">Replying to {quoteTarget.sender}</span>
+                    <p className="text-muted-foreground line-clamp-2">{quoteTarget.text || '(no text)'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuoteTarget(null)}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    title="Remove quote"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Message</Label>
                 <textarea
@@ -497,7 +636,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   <Send size={13} />
                   {sendChatMutation.isPending ? 'Sending…' : 'Send Reply'}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyText(''); }}>
+                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyText(''); setQuoteTarget(null); }}>
                   Cancel
                 </Button>
               </div>

@@ -9,6 +9,11 @@ export interface CompanyLink {
   companyId: number;
   label: string;
   url: string;
+  username: string | null;
+  // Returned already DECRYPTED (plaintext) for the eye-reveal toggle. Any
+  // authenticated user may view it. Sent back encrypted server-side on write.
+  password: string | null;
+  note: string | null;
 }
 
 export async function fetchLinks(token: string, companyId: number): Promise<CompanyLink[]> {
@@ -21,7 +26,14 @@ export async function fetchLinks(token: string, companyId: number): Promise<Comp
 
 export async function createLink(
   token: string,
-  data: { companyId: number; label: string; url: string },
+  data: {
+    companyId: number;
+    label: string;
+    url: string;
+    username?: string;
+    password?: string;
+    note?: string;
+  },
 ): Promise<CompanyLink> {
   const res = await fetchWithAuth(token, `${API}/links`, {
     method: 'POST',
@@ -38,7 +50,13 @@ export async function createLink(
 export async function updateLink(
   token: string,
   id: number,
-  data: { label?: string; url?: string },
+  data: {
+    label?: string;
+    url?: string;
+    username?: string;
+    password?: string;
+    note?: string;
+  },
 ): Promise<CompanyLink> {
   const res = await fetchWithAuth(token, `${API}/links/${id}`, {
     method: 'PATCH',

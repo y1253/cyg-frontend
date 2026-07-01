@@ -40,6 +40,10 @@ export interface ChatMessage {
   sender: string;
   text: string;
   createTime: string;
+  // Needed to natively quote this message (quotedMessageMetadata).
+  lastUpdateTime: string;
+  // Resource name of the message THIS message quotes, if any (else null).
+  quotedMessageName?: string | null;
   isOwn?: boolean;
 }
 
@@ -52,6 +56,8 @@ export interface ChatInboxMessage {
   sender: string;
   text: string;
   createTime: string;
+  lastUpdateTime: string;
+  quotedMessageName?: string | null;
   isRead: boolean;
 }
 
@@ -126,11 +132,9 @@ export async function fetchChatThread(
   companyId: number,
   spaceId: string,
   pageToken?: string,
-  untilCreateTime?: string,
 ): Promise<ChatThreadResult> {
   const params = new URLSearchParams({ spaceId });
   if (pageToken) params.set('pageToken', pageToken);
-  if (untilCreateTime) params.set('until', untilCreateTime);
   const res = await fetchWithAuth(
     token,
     `${API}/gmail/companies/${companyId}/chat-thread?${params.toString()}`,
@@ -220,11 +224,12 @@ export async function sendChatMessage(
   companyId: number,
   spaceId: string,
   text: string,
+  quote?: { quotedMessageName: string; quotedMessageLastUpdateTime: string },
 ): Promise<ChatMessage> {
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chat-messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spaceId, text }),
+    body: JSON.stringify({ spaceId, text, ...quote }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
