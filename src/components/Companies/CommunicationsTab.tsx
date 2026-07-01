@@ -428,17 +428,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             )}
           </div>
 
-          {/* Chat-send permission missing — replies will fail no matter how often
-              the account is reconnected (Chat API is Workspace-only). */}
+          {/* Chat-send permission not granted — this account was connected before
+              chat replies existed and only has read access. Reconnect to fix. */}
           {account.hasChatScope === false && (
             <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <AlertOctagon size={14} className="mt-0.5 shrink-0" />
               <span>
-                Chat replies aren't available for this account — Google didn't grant
-                chat-send permission. The Google Chat API requires a Google Workspace
-                account (personal @gmail.com accounts can't send chat), and Workspace
-                accounts need their domain admin to authorize this app for Chat.
-                Reconnecting alone won't fix this.
+                This account hasn't granted permission to send chat replies — it was
+                connected before chat replies were enabled. Reconnect the account and
+                approve the chat permission to reply.
               </span>
             </div>
           )}
