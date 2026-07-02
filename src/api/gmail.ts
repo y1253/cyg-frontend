@@ -19,17 +19,44 @@ export interface EmailSummary {
   isRead: boolean;
 }
 
+// An attachment on an email. Bytes are fetched on demand from the download
+// endpoint using `attachmentId`.
+export interface EmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+  // Content-ID (brackets stripped) — matches inline `cid:` refs in the HTML body.
+  contentId: string | null;
+  // Inline images (shown in the body) are hidden from the attachment strip.
+  isInline: boolean;
+}
+
 export interface EmailDetail extends EmailSummary {
   to: string;
   threadId: string;
   messageId: string;
   bodyHtml: string | null;
   bodyText: string | null;
+  attachments: EmailAttachment[];
 }
 
 export interface EmailListResult {
   messages: EmailSummary[];
   nextPageToken: string | null;
+}
+
+// An attachment on a Chat message. Uploaded files stream via `resourceName`;
+// Drive-hosted files expose only `driveFileId` (opened via a Drive link).
+export interface ChatAttachment {
+  name: string;
+  contentName: string;
+  contentType: string;
+  resourceName: string | null;
+  driveFileId: string | null;
+  thumbnailUri: string | null;
+  downloadUri: string | null;
+  source: string | null;
 }
 
 export interface ChatMessage {
@@ -45,6 +72,7 @@ export interface ChatMessage {
   // Resource name of the message THIS message quotes, if any (else null).
   quotedMessageName?: string | null;
   isOwn?: boolean;
+  attachments?: ChatAttachment[];
 }
 
 // One incoming chat message for the inbox list (chats behave like emails).
@@ -59,6 +87,7 @@ export interface ChatInboxMessage {
   lastUpdateTime: string;
   quotedMessageName?: string | null;
   isRead: boolean;
+  hasAttachments?: boolean;
 }
 
 export interface ChatListResult {
@@ -243,4 +272,44 @@ export async function disconnectGmail(token: string, companyId: number): Promise
     method: 'DELETE',
   });
   if (!res.ok) throw new Error('Failed to disconnect Gmail');
+}
+
+type Disposition = 'inline' | 'attachment';
+
+// Build an authenticated URL for an email attachment. The JWT rides as a query
+// param (not a header) so the URL can be used directly as an <img>/<audio>/
+// <video> src or a download link. `disposition` controls the Content-Disposition
+// header ('inline' to render/play, 'attachment' to force a download).
+export function emailAttachmentUrl(
+  token: string,
+  companyId: number,
+  messageId: string,
+  att: EmailAttachment,
+  disposition?: Disposition,
+): string {
+  const params = new URLSearchParams({
+    token,
+    mimeType: att.mimeType,
+    filename: att.filename,
+  });
+  if (disposition) params.set('disposition', disposition);
+  return `${API}/gmail/companies/${companyId}/emails/${messageId}/attachments/${att.attachmentId}?${params.toString()}`;
+}
+
+// Build an authenticated URL for an uploaded Chat attachment. Only valid when the
+// attachment has a `resourceName` (Drive-hosted files use a Drive link instead).
+export function chatAttachmentUrl(
+  token: string,
+  companyId: number,
+  att: ChatAttachment,
+  disposition?: Disposition,
+): string {
+  const params = new URLSearchParams({
+    token,
+    resourceName: att.resourceName ?? '',
+    mimeType: att.contentType,
+    filename: att.contentName,
+  });
+  if (disposition) params.set('disposition', disposition);
+  return `${API}/gmail/companies/${companyId}/chat-attachment?${params.toString()}`;
 }

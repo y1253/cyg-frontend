@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Plus, Trash2,
-  Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen,
+  Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -18,8 +18,9 @@ import { useMarkChatUnread } from '@/hooks/useMarkChatUnread';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
-import { fetchAuthUrl } from '@/api/gmail';
-import type { EmailSummary, ChatInboxMessage, EmailDetail } from '@/api/gmail';
+import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
+import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
+import { AttachmentPreview } from './AttachmentPreview';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -66,6 +67,30 @@ function injectBaseTarget(html: string): string {
   const withHead = html.replace(/<head>/i, '<head><base target="_blank" rel="noreferrer">');
   if (withHead !== html) return withHead;
   return '<base target="_blank" rel="noreferrer">' + html;
+}
+
+// Rewrite inline `src="cid:XXX"` references in email HTML to authenticated
+// attachment URLs so embedded images render inside the sandboxed iframe.
+function rewriteInlineImages(
+  html: string,
+  attachments: EmailAttachment[],
+  urlFor: (att: EmailAttachment) => string,
+): string {
+  return html.replace(
+    /src\s*=\s*(["']?)cid:([^"'>\s]+)\1/gi,
+    (match, _quote: string, cid: string) => {
+      let decoded = cid;
+      try {
+        decoded = decodeURIComponent(cid);
+      } catch {
+        // keep raw cid if it isn't valid percent-encoding
+      }
+      const att = attachments.find(
+        (a) => a.contentId && (a.contentId === cid || a.contentId === decoded),
+      );
+      return att ? `src="${urlFor(att)}"` : match;
+    },
+  );
 }
 
 function formatEmailDate(dateStr: string): string {
@@ -442,6 +467,108 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   if (selectedSpaceId) {
     const anchorTime = openedChatMsgTime ? new Date(openedChatMsgTime).getTime() : null;
+
+    // My own replies whose real position is in the future/dimmed zone, grouped by the
+    // message they answer. These are surfaced again in regular color right after that
+    // message so a just-sent reply isn't buried among later dimmed activity.
+    const surfacedReplies = new Map<string, typeof threadMessages>();
+    if (anchorTime !== null) {
+      for (const m of threadMessages) {
+        const isFuture = new Date(m.createTime).getTime() > anchorTime;
+        if (m.isOwn && m.quotedMessageName && isFuture) {
+          const arr = surfacedReplies.get(m.quotedMessageName) ?? [];
+          arr.push(m);
+          surfacedReplies.set(m.quotedMessageName, arr);
+        }
+      }
+    }
+
+    // Render a single chat bubble. Reused for the normal chronological instance and
+    // for the surfaced (regular-color) copy of my own future replies.
+    const renderChatBubble = (
+      m: (typeof threadMessages)[number],
+      opts: {
+        keyStr: string;
+        dimmed: boolean;
+        isAnchor: boolean;
+        attachRef: boolean;
+        hideQuote: boolean;
+        surfaced?: boolean;
+      },
+    ) => {
+      const quoted =
+        !opts.hideQuote && m.quotedMessageName
+          ? threadMessages.find((q) => q.id === m.quotedMessageName)
+          : null;
+      return (
+        <div
+          key={opts.keyStr}
+          ref={opts.attachRef ? anchorRef : undefined}
+          className={`flex flex-col gap-1 transition-opacity ${m.isOwn ? 'items-end' : 'items-start'} ${opts.dimmed ? 'opacity-50' : ''}`}
+        >
+          <div className="flex items-center gap-2">
+            {!m.isOwn && (
+              <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
+                {(m.sender[0] ?? '?').toUpperCase()}
+              </div>
+            )}
+            <span className="text-xs font-medium text-foreground/80">{m.isOwn ? 'You' : m.sender}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {opts.surfaced ? 'Your reply' : formatEmailDate(m.createTime)}
+            </span>
+          </div>
+          <div
+            className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
+              m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
+            } ${opts.isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''} ${
+              opts.surfaced ? 'border-l-4 border-l-teal-300' : ''
+            }`}
+          >
+            {/* Quoted-message preview (native "Quote in reply") */}
+            {!opts.hideQuote && m.quotedMessageName && (
+              <div
+                className={`mb-1.5 border-l-2 pl-2 text-xs ${
+                  m.isOwn ? 'border-white/60 text-white/80' : 'border-purple-300 text-muted-foreground'
+                }`}
+              >
+                {quoted ? (
+                  <>
+                    <span className="font-medium">{quoted.isOwn ? 'You' : quoted.sender}</span>
+                    <span className="line-clamp-2">{quoted.text || '(no text)'}</span>
+                  </>
+                ) : (
+                  <span className="italic">Quoted a message</span>
+                )}
+              </div>
+            )}
+            {m.text || (m.attachments && m.attachments.length > 0 ? '' : '(empty message)')}
+            {m.attachments && m.attachments.length > 0 && (
+              <div className={`flex flex-col gap-2 ${m.text ? 'mt-2' : ''}`}>
+                {m.attachments.map((att) =>
+                  att.resourceName ? (
+                    <AttachmentPreview
+                      key={att.name}
+                      url={chatAttachmentUrl(token ?? '', companyId, att, 'inline')}
+                      downloadUrl={chatAttachmentUrl(token ?? '', companyId, att, 'attachment')}
+                      mimeType={att.contentType}
+                      filename={att.contentName}
+                    />
+                  ) : att.driveFileId ? (
+                    <AttachmentPreview
+                      key={att.name}
+                      mimeType={att.contentType}
+                      filename={att.contentName}
+                      driveHref={`https://drive.google.com/file/d/${att.driveFileId}/view`}
+                    />
+                  ) : null,
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     return (
       <div className="flex flex-col gap-4">
         <button
@@ -488,50 +615,29 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   // Messages newer than the anchor are the "future" — dimmed.
                   const isFuture =
                     anchorTime !== null && new Date(m.createTime).getTime() > anchorTime;
-                  // If this message quotes another, resolve the quoted one for a preview.
-                  const quoted = m.quotedMessageName
-                    ? threadMessages.find((q) => q.id === m.quotedMessageName)
-                    : null;
+                  const surfaced = surfacedReplies.get(m.id) ?? [];
                   return (
-                    <div
-                      key={m.id}
-                      ref={isAnchor ? anchorRef : undefined}
-                      className={`flex flex-col gap-1 transition-opacity ${m.isOwn ? 'items-end' : 'items-start'} ${isFuture ? 'opacity-50' : ''}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {!m.isOwn && (
-                          <div className="shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-semibold">
-                            {(m.sender[0] ?? '?').toUpperCase()}
-                          </div>
-                        )}
-                        <span className="text-xs font-medium text-foreground/80">{m.isOwn ? 'You' : m.sender}</span>
-                        <span className="text-[11px] text-muted-foreground">{formatEmailDate(m.createTime)}</span>
-                      </div>
-                      <div
-                        className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
-                          m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
-                        } ${isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''}`}
-                      >
-                        {/* Quoted-message preview (native "Quote in reply") */}
-                        {m.quotedMessageName && (
-                          <div
-                            className={`mb-1.5 border-l-2 pl-2 text-xs ${
-                              m.isOwn ? 'border-white/60 text-white/80' : 'border-purple-300 text-muted-foreground'
-                            }`}
-                          >
-                            {quoted ? (
-                              <>
-                                <span className="font-medium">{quoted.isOwn ? 'You' : quoted.sender}</span>
-                                <span className="line-clamp-2">{quoted.text || '(no text)'}</span>
-                              </>
-                            ) : (
-                              <span className="italic">Quoted a message</span>
-                            )}
-                          </div>
-                        )}
-                        {m.text || '(empty message)'}
-                      </div>
-                    </div>
+                    <Fragment key={m.id}>
+                      {renderChatBubble(m, {
+                        keyStr: m.id,
+                        dimmed: isFuture,
+                        isAnchor,
+                        attachRef: isAnchor,
+                        hideQuote: false,
+                      })}
+                      {/* My own future replies to this message, surfaced here in
+                          regular color right after the message they answer. */}
+                      {surfaced.map((r) =>
+                        renderChatBubble(r, {
+                          keyStr: `${r.id}:surfaced`,
+                          dimmed: false,
+                          isAnchor: false,
+                          attachRef: false,
+                          hideQuote: true,
+                          surfaced: true,
+                        }),
+                      )}
+                    </Fragment>
                   );
                 })
               )}
@@ -674,7 +780,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <div className="border rounded-md overflow-hidden mt-2">
               {emailDetail.bodyHtml ? (
                 <iframe
-                  srcDoc={injectBaseTarget(emailDetail.bodyHtml)}
+                  srcDoc={injectBaseTarget(
+                    rewriteInlineImages(
+                      emailDetail.bodyHtml,
+                      emailDetail.attachments ?? [],
+                      (att) =>
+                        emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline'),
+                    ),
+                  )}
                   sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                   className="w-full min-h-96 border-0"
                   title="Email body"
@@ -685,6 +798,32 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </pre>
               )}
             </div>
+
+            {/* Attachment strip — inline images already show in the body above */}
+            {(() => {
+              const strip = (emailDetail.attachments ?? []).filter((a) => !a.isInline);
+              if (strip.length === 0) return null;
+              return (
+                <div className="mt-2 flex flex-col gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    Attachments ({strip.length})
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {strip.map((att) => (
+                      <AttachmentPreview
+                        key={att.attachmentId}
+                        url={emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline')}
+                        downloadUrl={emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'attachment')}
+                        mimeType={att.mimeType}
+                        filename={att.filename}
+                        size={att.size}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Action buttons */}
             {!replyOpen && (
@@ -1041,8 +1180,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                       </div>
                     </div>
                     <span className="text-xs font-medium text-muted-foreground truncate">{item.data.spaceName}</span>
-                    <span className={['text-xs truncate', !item.data.isRead ? 'font-medium text-foreground/80' : 'text-muted-foreground'].join(' ')}>
-                      {item.data.text || '(no text)'}
+                    <span className={['text-xs truncate flex items-center gap-1', !item.data.isRead ? 'font-medium text-foreground/80' : 'text-muted-foreground'].join(' ')}>
+                      {item.data.hasAttachments && <Paperclip size={11} className="shrink-0" />}
+                      {item.data.text || (item.data.hasAttachments ? 'Attachment' : '(no text)')}
                     </span>
                   </div>
                 </div>
