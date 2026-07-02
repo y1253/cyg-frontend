@@ -495,6 +495,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setQuoteTarget(null);
   };
 
+  // Re-anchor the open conversation to an earlier message: it scrolls into focus,
+  // later messages dim as "future", and the bottom Reply then quotes it. This is
+  // how the user "navigates to" a previous message to reply there (no floating
+  // per-message composer in the current view). `m` is a loaded thread message.
+  const handleNavigateToMessage = (m: { id: string; createTime: string }) => {
+    setOpenedChatMsgId(m.id);
+    setOpenedChatMsgTime(m.createTime);
+    // Reset any in-progress reply so the composer re-targets the new anchor.
+    setChatReplyOpen(false);
+    setChatReplyText('');
+    setQuoteTarget(null);
+  };
+
   // Open the reply box, defaulting to natively quoting the anchor message
   // (Google Chat's "Quote in reply"). The user can clear the quote before send.
   const handleOpenChatReply = () => {
@@ -693,52 +706,68 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               {opts.surfaced ? 'Your reply' : formatEmailDate(m.createTime)}
             </span>
           </div>
-          <div
-            className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
-              m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
-            } ${opts.isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''} ${
-              opts.surfaced ? 'border-l-4 border-l-teal-300' : ''
-            }`}
-          >
-            {/* Quoted-message preview (native "Quote in reply") */}
-            {!opts.hideQuote && m.quotedMessageName && (
-              <div
-                className={`mb-1.5 border-l-2 pl-2 text-xs ${
-                  m.isOwn ? 'border-white/60 text-white/80' : 'border-purple-300 text-muted-foreground'
-                }`}
+          <div className={`flex items-center gap-1.5 group/msg max-w-full ${m.isOwn ? 'flex-row-reverse' : ''}`}>
+            <div
+              className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
+                m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
+              } ${opts.isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''} ${
+                opts.surfaced ? 'border-l-4 border-l-teal-300' : ''
+              }`}
+            >
+              {/* Quoted-message preview — click to navigate to the original message */}
+              {!opts.hideQuote && m.quotedMessageName && (
+                <div
+                  role={quoted ? 'button' : undefined}
+                  title={quoted ? 'Go to this message' : undefined}
+                  onClick={quoted ? () => handleNavigateToMessage(quoted) : undefined}
+                  className={`mb-1.5 border-l-2 pl-2 text-xs ${
+                    m.isOwn ? 'border-white/60 text-white/80' : 'border-purple-300 text-muted-foreground'
+                  } ${quoted ? 'cursor-pointer hover:opacity-80' : ''}`}
+                >
+                  {quoted ? (
+                    <>
+                      <span className="font-medium">{quoted.isOwn ? 'You' : quoted.sender}</span>
+                      <span className="line-clamp-2">{quoted.text || '(no text)'}</span>
+                    </>
+                  ) : (
+                    <span className="italic">Quoted a message</span>
+                  )}
+                </div>
+              )}
+              {m.text || (m.attachments && m.attachments.length > 0 ? '' : '(empty message)')}
+              {m.attachments && m.attachments.length > 0 && (
+                <div className={`flex flex-col gap-2 ${m.text ? 'mt-2' : ''}`}>
+                  {m.attachments.map((att) =>
+                    att.resourceName ? (
+                      <AttachmentPreview
+                        key={att.name}
+                        url={chatAttachmentUrl(token ?? '', companyId, att, 'inline')}
+                        downloadUrl={chatAttachmentUrl(token ?? '', companyId, att, 'attachment')}
+                        mimeType={att.contentType}
+                        filename={att.contentName}
+                      />
+                    ) : att.driveFileId ? (
+                      <AttachmentPreview
+                        key={att.name}
+                        mimeType={att.contentType}
+                        filename={att.contentName}
+                        driveHref={`https://drive.google.com/file/d/${att.driveFileId}/view`}
+                      />
+                    ) : null,
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Per-message Reply → navigate/re-anchor to this message, then reply there */}
+            {!opts.isAnchor && !opts.surfaced && (
+              <button
+                type="button"
+                title="Reply to this message"
+                onClick={() => handleNavigateToMessage(m)}
+                className="shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
               >
-                {quoted ? (
-                  <>
-                    <span className="font-medium">{quoted.isOwn ? 'You' : quoted.sender}</span>
-                    <span className="line-clamp-2">{quoted.text || '(no text)'}</span>
-                  </>
-                ) : (
-                  <span className="italic">Quoted a message</span>
-                )}
-              </div>
-            )}
-            {m.text || (m.attachments && m.attachments.length > 0 ? '' : '(empty message)')}
-            {m.attachments && m.attachments.length > 0 && (
-              <div className={`flex flex-col gap-2 ${m.text ? 'mt-2' : ''}`}>
-                {m.attachments.map((att) =>
-                  att.resourceName ? (
-                    <AttachmentPreview
-                      key={att.name}
-                      url={chatAttachmentUrl(token ?? '', companyId, att, 'inline')}
-                      downloadUrl={chatAttachmentUrl(token ?? '', companyId, att, 'attachment')}
-                      mimeType={att.contentType}
-                      filename={att.contentName}
-                    />
-                  ) : att.driveFileId ? (
-                    <AttachmentPreview
-                      key={att.name}
-                      mimeType={att.contentType}
-                      filename={att.contentName}
-                      driveHref={`https://drive.google.com/file/d/${att.driveFileId}/view`}
-                    />
-                  ) : null,
-                )}
-              </div>
+                <Reply size={14} />
+              </button>
             )}
           </div>
         </div>
