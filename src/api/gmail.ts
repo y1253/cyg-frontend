@@ -94,6 +94,10 @@ export interface ChatListResult {
   messages: ChatInboxMessage[];
   needsReconnect?: boolean;
   chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured';
+  // Infinite-scroll cursor: opaque per-space pageToken map for the next (older)
+  // page. `hasMore` is false when every space is exhausted.
+  nextCursor?: string | null;
+  hasMore?: boolean;
 }
 
 export interface ChatThreadResult {
@@ -150,8 +154,13 @@ export async function fetchEmail(
   return res.json() as Promise<EmailDetail>;
 }
 
-export async function fetchChats(token: string, companyId: number): Promise<ChatListResult> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats`);
+export async function fetchChats(
+  token: string,
+  companyId: number,
+  cursor?: string,
+): Promise<ChatListResult> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats${qs}`);
   if (!res.ok) throw new Error('Failed to fetch chats');
   return res.json() as Promise<ChatListResult>;
 }

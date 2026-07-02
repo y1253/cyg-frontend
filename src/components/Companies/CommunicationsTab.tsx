@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  Mail, Send, ArrowLeft, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Plus, Trash2,
+  Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
   Bold, Italic, Strikethrough, Code, List,
 } from 'lucide-react';
@@ -122,6 +122,19 @@ function senderInitial(from: string): string {
   return (name[0] ?? '?').toUpperCase();
 }
 
+// De-dupe a list by `id`, keeping first occurrence (guards against page overlap).
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const it of items) {
+    if (!seen.has(it.id)) {
+      seen.add(it.id);
+      out.push(it);
+    }
+  }
+  return out;
+}
+
 // Plain-text version of an HTML body (used as the text/plain MIME fallback).
 function htmlToText(html: string): string {
   const tmp = document.createElement('div');
@@ -154,8 +167,6 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [openedChatMsgId, setOpenedChatMsgId] = useState<string | null>(null);
   const [openedChatMsgTime, setOpenedChatMsgTime] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
-  const [pageToken, setPageToken] = useState<string | undefined>(undefined);
-  const [pageHistory, setPageHistory] = useState<string[]>([]);
   const [composeOpen, setComposeOpen] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '', cc: '' });
@@ -176,13 +187,22 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   const isInbox = selectedLabel === 'INBOX';
 
-  // Emails: in INBOX unified mode, no pagination token; other folders keep pagination
-  const { data: emailList, isLoading: emailsLoading } = useGmailEmails(
-    companyId,
-    account ? (isInbox ? undefined : pageToken) : undefined,
-    selectedLabel,
+  // Emails + chats are infinite queries; older pages load on scroll.
+  const emailQuery = useGmailEmails(companyId, selectedLabel);
+  const chatQuery = useGmailChats(companyId, account);
+  const emailsLoading = emailQuery.isLoading;
+  const chatsLoading = chatQuery.isLoading;
+  const chatsError = chatQuery.error;
+
+  // Flattened, de-duped items across all loaded pages.
+  const emailItems: EmailSummary[] = dedupeById(
+    (emailQuery.data?.pages ?? []).flatMap((p) => p.messages),
   );
-  const { data: chatData, isLoading: chatsLoading, error: chatsError } = useGmailChats(companyId, account);
+  const chatItems: ChatInboxMessage[] = dedupeById(
+    (chatQuery.data?.pages ?? []).flatMap((p) => p.messages),
+  );
+  // Chat status/notices come from the first page.
+  const chatFirst = chatQuery.data?.pages?.[0];
   const { data: emailDetail, isLoading: emailDetailLoading } = useGmailEmail(
     companyId,
     account ? selectedMsgId : null,
@@ -203,6 +223,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const chatReplyRef = useRef<HTMLTextAreaElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   // Whether the anchor (opened) message is currently visible in the scroll
   // container — drives the floating "Back to message" button. `anchorDir` is
   // the direction to scroll to reach it when it's off-screen.
@@ -244,17 +265,63 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     return () => obs.disconnect();
   }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
 
-  // Build unified sorted list for INBOX (emails + one row per chat conversation)
-  const unifiedItems: UnifiedItem[] = isInbox
-    ? [
-        ...(emailList?.messages ?? []).map((e): UnifiedItem => ({ kind: 'email', data: e })),
-        ...(chatData?.messages ?? []).map((c): UnifiedItem => ({ kind: 'chat', data: c })),
-      ].sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a))
-    : [];
+  // Infinite scroll: when the bottom sentinel nears the viewport, load the next
+  // (older) page of BOTH sources. `rootMargin` prefetches slightly early.
+  const emailHasNext = emailQuery.hasNextPage;
+  const emailFetchingNext = emailQuery.isFetchingNextPage;
+  const chatHasNext = chatQuery.hasNextPage;
+  const chatFetchingNext = chatQuery.isFetchingNextPage;
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
+        if (isInbox && chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
+      },
+      { root: null, rootMargin: '300px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isInbox,
+    selectedLabel,
+    selectedMsgId,
+    selectedSpaceId,
+    emailHasNext,
+    emailFetchingNext,
+    chatHasNext,
+    chatFetchingNext,
+  ]);
+
+  // Build unified sorted list for INBOX (emails + one row per incoming chat msg),
+  // newest first. Because emails and chats page independently, the visible tail is
+  // clamped to a watermark — the newest "oldest-loaded" boundary among sources that
+  // still have more — so the list never shows a half-loaded (out-of-order) tail.
+  const unifiedItems: UnifiedItem[] = (() => {
+    if (!isInbox) return [];
+    const emailUnified = emailItems.map((e): UnifiedItem => ({ kind: 'email', data: e }));
+    const chatUnified = chatItems.map((c): UnifiedItem => ({ kind: 'chat', data: c }));
+    const merged = [...emailUnified, ...chatUnified].sort(
+      (a, b) => getItemTimestamp(b) - getItemTimestamp(a),
+    );
+
+    // True oldest-loaded timestamp of a source (arrays aren't globally sorted).
+    const minTs = (arr: UnifiedItem[]) =>
+      arr.length ? Math.min(...arr.map(getItemTimestamp)) : -Infinity;
+    const emailTail = emailQuery.hasNextPage ? minTs(emailUnified) : -Infinity;
+    const chatTail = chatQuery.hasNextPage ? minTs(chatUnified) : -Infinity;
+    const cutoff = Math.max(emailTail, chatTail);
+    return cutoff === -Infinity
+      ? merged
+      : merged.filter((it) => getItemTimestamp(it) >= cutoff);
+  })();
 
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
-    ? (chatData?.messages ?? []).find((m) => m.id === openedChatMsgId) ?? null
+    ? chatItems.find((m) => m.id === openedChatMsgId) ?? null
     : null;
   const threadMessages = chatThread?.messages ?? [];
   // The anchor message object — prefer the freshly-fetched thread copy (has the
@@ -393,24 +460,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     });
   };
 
-  const handleNextPage = () => {
-    if (!emailList?.nextPageToken) return;
-    setPageHistory((h) => [...h, pageToken ?? '']);
-    setPageToken(emailList.nextPageToken);
-    setSelectedMsgId(null);
-  };
-
-  const handlePrevPage = () => {
-    const prev = pageHistory[pageHistory.length - 1];
-    setPageHistory((h) => h.slice(0, -1));
-    setPageToken(prev === '' ? undefined : prev);
-    setSelectedMsgId(null);
-  };
-
   const handleSelectFolder = (folderId: string) => {
     setSelectedLabel(folderId);
-    setPageToken(undefined);
-    setPageHistory([]);
     setSelectedMsgId(null);
     setSelectedSpaceId(null);
   };
@@ -1167,7 +1218,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Re-connect notice for missing Chat scopes */}
-      {chatData?.needsReconnect && (
+      {chatFirst?.needsReconnect && (
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <span>
             Google Chat messages are unavailable.{' '}
@@ -1184,7 +1235,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* No Chat spaces notice */}
-      {!chatData?.needsReconnect && chatData?.chatStatus === 'no_spaces' && (
+      {!chatFirst?.needsReconnect && chatFirst?.chatStatus === 'no_spaces' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>No Google Chat spaces found for this account. Chat messages will appear here once conversations exist.</span>
@@ -1192,7 +1243,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Chat disabled notice */}
-      {chatData?.chatStatus === 'chat_disabled' && (
+      {chatFirst?.chatStatus === 'chat_disabled' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>Google Chat is not enabled for this account. Email messages are still available.</span>
@@ -1200,7 +1251,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Chat app not configured in Google Cloud Console */}
-      {chatData?.chatStatus === 'app_not_configured' && (
+      {chatFirst?.chatStatus === 'app_not_configured' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>Google Chat app is not configured. In Google Cloud Console → Google Chat API → Configuration, fill in the app name and set status to Enabled.</span>
@@ -1208,15 +1259,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Chat API error notice */}
-      {chatData?.chatStatus === 'error' && (
+      {chatFirst?.chatStatus === 'error' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>Could not load Google Chat messages. Email messages are still available.</span>
         </div>
       )}
 
-      {/* Chat query failed entirely (network error / 5xx — chatData stays undefined) */}
-      {!!chatsError && !chatData && (
+      {/* Chat query failed entirely (network error / 5xx — no first page) */}
+      {!!chatsError && !chatFirst && (
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <span className="flex items-center gap-2">
             <MessageSquare size={13} className="shrink-0" />
@@ -1234,7 +1285,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Chat fetched ok but no messages found (history may be off) */}
-      {chatData?.chatStatus === 'ok' && chatData.messages.length === 0 && (
+      {chatFirst?.chatStatus === 'ok' && chatItems.length === 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>No recent Google Chat messages found. History may be disabled for your chat spaces.</span>
@@ -1393,10 +1444,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         /* ── Email-only folder view (Sent / Spam / Trash) ── */
         <>
           <Card className="overflow-hidden gap-0 py-0 rounded-lg">
-            {(emailList?.messages ?? []).length === 0 ? (
+            {emailItems.length === 0 ? (
               <div className="py-12 text-center text-sm text-muted-foreground">No messages</div>
             ) : (
-              (emailList?.messages ?? []).map((msg: EmailSummary, idx: number) => (
+              emailItems.map((msg: EmailSummary, idx: number) => (
                 <div
                   key={msg.id}
                   className={[
@@ -1444,29 +1495,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               ))
             )}
           </Card>
-
-          {/* Pagination (email-only folders) */}
-          <div className="flex items-center gap-2 justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pageHistory.length === 0}
-              onClick={handlePrevPage}
-              className="gap-1"
-            >
-              <ChevronLeft size={14} /> Previous
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!emailList?.nextPageToken}
-              onClick={handleNextPage}
-              className="gap-1"
-            >
-              Next <ChevronRight size={14} />
-            </Button>
-          </div>
         </>
+      )}
+
+      {/* Infinite-scroll sentinel + status (shown for both inbox and folders) */}
+      {!isLoading && (
+        <div ref={loadMoreRef} className="flex items-center justify-center py-4">
+          {emailFetchingNext || chatFetchingNext ? (
+            <span className="text-xs text-muted-foreground">Loading more…</span>
+          ) : (isInbox ? (!emailHasNext && !chatHasNext) : !emailHasNext) &&
+            (isInbox ? unifiedItems.length > 0 : emailItems.length > 0) ? (
+            <span className="text-xs text-muted-foreground/70">You're all caught up</span>
+          ) : null}
+        </div>
       )}
 
       {/* Compose dialog */}
