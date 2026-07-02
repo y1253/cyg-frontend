@@ -232,15 +232,28 @@ export async function sendEmail(
     to: string;
     subject: string;
     body: string;
+    bodyHtml?: string;
     cc?: string;
     inReplyTo?: string;
     threadId?: string;
+    files?: File[];
   },
 ): Promise<void> {
+  // Sent as multipart/form-data so file attachments ride along. No explicit
+  // Content-Type header — the browser sets the multipart boundary itself.
+  const form = new FormData();
+  form.set('to', data.to);
+  form.set('subject', data.subject);
+  form.set('body', data.body);
+  if (data.bodyHtml) form.set('bodyHtml', data.bodyHtml);
+  if (data.cc) form.set('cc', data.cc);
+  if (data.inReplyTo) form.set('inReplyTo', data.inReplyTo);
+  if (data.threadId) form.set('threadId', data.threadId);
+  for (const file of data.files ?? []) form.append('attachments', file);
+
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/send`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: form,
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };

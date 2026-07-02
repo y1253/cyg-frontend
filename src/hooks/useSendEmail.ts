@@ -10,9 +10,11 @@ export function useSendEmail(companyId: number) {
       to: string;
       subject: string;
       body: string;
+      bodyHtml?: string;
       cc?: string;
       inReplyTo?: string;
       threadId?: string;
+      files?: File[];
     }) => sendEmail(token!, companyId, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });

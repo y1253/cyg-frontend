@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
+  Bold, Italic, Strikethrough, Code, List,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -21,6 +22,7 @@ import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
 import { AttachmentPreview } from './AttachmentPreview';
+import { RichTextEditor } from './RichTextEditor';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -120,6 +122,26 @@ function senderInitial(from: string): string {
   return (name[0] ?? '?').toUpperCase();
 }
 
+// Plain-text version of an HTML body (used as the text/plain MIME fallback).
+function htmlToText(html: string): string {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return (tmp.innerText || tmp.textContent || '').trim();
+}
+
+// Human-readable byte size, e.g. 1536 → "1.5 KB".
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
 export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
@@ -137,9 +159,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [composeOpen, setComposeOpen] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '', cc: '' });
+  const [composeFiles, setComposeFiles] = useState<File[]>([]);
+  const composeFileRef = useRef<HTMLInputElement>(null);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyForm, setReplyForm] = useState({ to: '', subject: '', body: '', cc: '' });
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
+  const replyFileRef = useRef<HTMLInputElement>(null);
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
   const [chatReplyText, setChatReplyText] = useState('');
   // The message the reply will natively quote (default = the opened/anchor
@@ -176,6 +202,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const chatReplyRef = useRef<HTMLTextAreaElement>(null);
   // Whether the anchor (opened) message is currently visible in the scroll
   // container — drives the floating "Back to message" button. `anchorDir` is
   // the direction to scroll to reach it when it's off-screen.
@@ -296,13 +323,42 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     }
   }, [token, companyId, qc]);
 
+  // Merge newly-picked files into an existing selection, de-duped by name+size.
+  const addFiles = (
+    setter: React.Dispatch<React.SetStateAction<File[]>>,
+    picked: FileList | null,
+  ) => {
+    if (!picked || picked.length === 0) return;
+    setter((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const next = [...prev];
+      for (const f of Array.from(picked)) {
+        const key = `${f.name}:${f.size}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          next.push(f);
+        }
+      }
+      return next;
+    });
+  };
+
   const handleSend = () => {
+    // composeForm.body holds rich-text HTML; send it plus a plain-text fallback.
     sendMutation.mutate(
-      { to: composeForm.to, subject: composeForm.subject, body: composeForm.body, cc: composeForm.cc || undefined },
+      {
+        to: composeForm.to,
+        subject: composeForm.subject,
+        body: htmlToText(composeForm.body),
+        bodyHtml: composeForm.body,
+        cc: composeForm.cc || undefined,
+        files: composeFiles,
+      },
       {
         onSuccess: () => {
           setComposeOpen(false);
           setComposeForm({ to: '', subject: '', body: '', cc: '' });
+          setComposeFiles([]);
         },
       },
     );
@@ -314,15 +370,18 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       {
         to: replyForm.to,
         subject: replyForm.subject,
-        body: replyForm.body,
+        body: htmlToText(replyForm.body),
+        bodyHtml: replyForm.body,
         cc: replyForm.cc || undefined,
         inReplyTo: emailDetail.messageId || undefined,
         threadId: emailDetail.threadId || undefined,
+        files: replyFiles,
       },
       {
         onSuccess: () => {
           setReplyOpen(false);
           setReplyForm({ to: '', subject: '', body: '', cc: '' });
+          setReplyFiles([]);
         },
       },
     );
@@ -392,6 +451,45 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setChatReplyOpen(true);
   };
 
+  // Wrap the chat textarea's current selection in Google Chat's formatting
+  // tokens (e.g. *bold*). With no selection, inserts a labelled placeholder.
+  const wrapChatSelection = (token: string, placeholder: string) => {
+    const el = chatReplyRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const value = chatReplyText;
+    const selected = value.slice(start, end) || placeholder;
+    const next = value.slice(0, start) + token + selected + token + value.slice(end);
+    setChatReplyText(next);
+    // Restore focus and select the wrapped text (minus the tokens).
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length + selected.length);
+    });
+  };
+
+  // Prefix each line spanned by the selection with "- " (Chat bulleted list).
+  const bulletChatSelection = () => {
+    const el = chatReplyRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const value = chatReplyText;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    const block = value.slice(lineStart, end);
+    const bulleted = block
+      .split('\n')
+      .map((line) => (line.startsWith('- ') ? line : `- ${line}`))
+      .join('\n');
+    const next = value.slice(0, lineStart) + bulleted + value.slice(end);
+    setChatReplyText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(lineStart, lineStart + bulleted.length);
+    });
+  };
+
   const handleSendChatReply = () => {
     if (!selectedSpaceId || !chatReplyText.trim()) return;
     sendChatMutation.mutate(
@@ -428,6 +526,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       body: '',
       cc: '',
     });
+    setReplyFiles([]);
     setReplyOpen(true);
   };
 
@@ -597,12 +696,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
     return (
       <div className="flex flex-col gap-4">
-        <button
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-          onClick={handleCloseChat}
-        >
-          <ArrowLeft size={14} /> Back
-        </button>
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-2 bg-background/95 backdrop-blur-sm">
+          <button
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
+            onClick={handleCloseChat}
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+        </div>
         <div className="flex flex-col gap-3">
           {/* Header */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -735,13 +836,35 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               )}
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Message</Label>
+                {/* Google Chat formatting toolbar — inserts the tokens Chat renders. */}
+                <div className="flex items-center gap-0.5 rounded-md border border-input bg-muted/20 px-1 py-0.5 w-fit">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Bold" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('*', 'bold text')}>
+                    <Bold size={15} />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Italic" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('_', 'italic text')}>
+                    <Italic size={15} />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Strikethrough" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('~', 'strikethrough')}>
+                    <Strikethrough size={15} />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Monospace" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('`', 'code')}>
+                    <Code size={15} />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Bulleted list" onMouseDown={(e) => e.preventDefault()} onClick={bulletChatSelection}>
+                    <List size={15} />
+                  </Button>
+                </div>
                 <textarea
+                  ref={chatReplyRef}
                   className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   value={chatReplyText}
                   onChange={(e) => setChatReplyText(e.target.value)}
                   placeholder="Write your reply…"
                   rows={5}
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  *bold* &nbsp; _italic_ &nbsp; ~strike~ &nbsp; `code`
+                </p>
               </div>
               {sendChatMutation.isError && (
                 <div className="flex flex-col gap-1.5">
@@ -787,12 +910,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   if (selectedMsgId) {
     return (
       <div className="flex flex-col gap-4">
-        <button
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-          onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
-        >
-          <ArrowLeft size={14} /> Back
-        </button>
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-2 bg-background/95 backdrop-blur-sm">
+          <button
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
+            onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+        </div>
 
         {emailDetailLoading && (
           <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
@@ -911,13 +1036,58 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">Message</Label>
-                  <textarea
-                    className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={replyForm.body}
-                    onChange={(e) => setReplyForm((f) => ({ ...f, body: e.target.value }))}
+                  <RichTextEditor
+                    html={replyForm.body}
+                    onChange={(h) => setReplyForm((f) => ({ ...f, body: h }))}
                     placeholder="Write your reply…"
-                    rows={5}
+                    minHeight={140}
                   />
+                </div>
+                {/* Attachments */}
+                <div className="flex flex-col gap-2">
+                  <input
+                    ref={replyFileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      addFiles(setReplyFiles, e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-fit gap-1"
+                    onClick={() => replyFileRef.current?.click()}
+                  >
+                    <Paperclip size={14} /> Attach
+                  </Button>
+                  {replyFiles.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {replyFiles.map((f, i) => (
+                        <div
+                          key={`${f.name}:${f.size}:${i}`}
+                          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                        >
+                          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                          {f.size > 0 && (
+                            <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+                          )}
+                          <button
+                            type="button"
+                            className="shrink-0 text-muted-foreground hover:text-foreground"
+                            title="Remove attachment"
+                            onClick={() => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {sendMutation.isError && (
                   <p className="text-xs text-destructive">
@@ -927,14 +1097,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    disabled={sendMutation.isPending}
+                    disabled={sendMutation.isPending || (!htmlToText(replyForm.body) && replyFiles.length === 0)}
                     onClick={handleSendReply}
                     className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
                   >
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setReplyOpen(false)}>
+                  <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); }}>
                     Cancel
                   </Button>
                 </div>
@@ -965,7 +1135,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <>
               <Button
                 size="sm"
-                onClick={() => setComposeOpen(true)}
+                onClick={() => { setComposeForm({ to: '', subject: '', body: '', cc: '' }); setComposeFiles([]); setComposeOpen(true); }}
                 className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
               >
                 <Plus size={14} /> Compose
@@ -1300,7 +1470,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       )}
 
       {/* Compose dialog */}
-      <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+      <Dialog open={composeOpen} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeFiles([]); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1334,13 +1504,58 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             </div>
             <div className="flex flex-col gap-1">
               <Label className="text-xs">Message</Label>
-              <textarea
-                className="w-full min-h-32 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={composeForm.body}
-                onChange={(e) => setComposeForm((f) => ({ ...f, body: e.target.value }))}
+              <RichTextEditor
+                html={composeForm.body}
+                onChange={(h) => setComposeForm((f) => ({ ...f, body: h }))}
                 placeholder="Write your message…"
-                rows={8}
+                minHeight={200}
               />
+            </div>
+            {/* Attachments */}
+            <div className="flex flex-col gap-2">
+              <input
+                ref={composeFileRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(setComposeFiles, e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-fit gap-1"
+                onClick={() => composeFileRef.current?.click()}
+              >
+                <Paperclip size={14} /> Attach
+              </Button>
+              {composeFiles.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {composeFiles.map((f, i) => (
+                    <div
+                      key={`${f.name}:${f.size}:${i}`}
+                      className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                      {f.size > 0 && (
+                        <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        title="Remove attachment"
+                        onClick={() => setComposeFiles((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             {sendMutation.isError && (
               <p className="text-xs text-destructive">
@@ -1349,11 +1564,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             )}
           </div>
           <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" onClick={() => setComposeOpen(false)}>
+            <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); }}>
               Cancel
             </Button>
             <Button
-              disabled={sendMutation.isPending}
+              disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
               onClick={handleSend}
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
             >
