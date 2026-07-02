@@ -468,20 +468,46 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   if (selectedSpaceId) {
     const anchorTime = openedChatMsgTime ? new Date(openedChatMsgTime).getTime() : null;
 
-    // My own replies whose real position is in the future/dimmed zone, grouped by the
-    // message they answer. These are surfaced again in regular color right after that
-    // message so a just-sent reply isn't buried among later dimmed activity.
+    const isFutureTime = (createTime: string) =>
+      anchorTime !== null && new Date(createTime).getTime() > anchorTime;
+    const byId = new Map<string, (typeof threadMessages)[number]>(
+      threadMessages.map((m) => [m.id, m]),
+    );
+
+    // My own future replies that answer a message currently in the REGULAR zone are
+    // surfaced again in regular color right after that message, so a just-sent reply
+    // isn't buried among later dimmed activity. A reply to a future/light message is
+    // NOT surfaced — relative to the anchor it's future and stays light.
     const surfacedReplies = new Map<string, typeof threadMessages>();
+    const surfacedIds = new Set<string>();
     if (anchorTime !== null) {
       for (const m of threadMessages) {
-        const isFuture = new Date(m.createTime).getTime() > anchorTime;
-        if (m.isOwn && m.quotedMessageName && isFuture) {
-          const arr = surfacedReplies.get(m.quotedMessageName) ?? [];
-          arr.push(m);
-          surfacedReplies.set(m.quotedMessageName, arr);
-        }
+        if (!(m.isOwn && m.quotedMessageName && isFutureTime(m.createTime))) continue;
+        const answered = byId.get(m.quotedMessageName);
+        if (!answered || isFutureTime(answered.createTime)) continue;
+        const arr = surfacedReplies.get(m.quotedMessageName) ?? [];
+        arr.push(m);
+        surfacedReplies.set(m.quotedMessageName, arr);
+        surfacedIds.add(m.id);
       }
     }
+
+    // A surfaced reply's dimmed chronological copy is only worth showing when its true
+    // order differs from its surfaced spot — i.e. some light (future, non-surfaced)
+    // message falls between the answered message and the reply. Otherwise the surfaced
+    // copy already sits in the right place and the dimmed copy is a redundant duplicate.
+    const showLightCopy = (r: (typeof threadMessages)[number]) => {
+      const answered = r.quotedMessageName ? byId.get(r.quotedMessageName) : undefined;
+      if (!answered) return true;
+      const xt = new Date(answered.createTime).getTime();
+      const rt = new Date(r.createTime).getTime();
+      return threadMessages.some((mm) => {
+        if (mm.id === r.id || surfacedIds.has(mm.id) || !isFutureTime(mm.createTime))
+          return false;
+        const mt = new Date(mm.createTime).getTime();
+        return mt > xt && mt < rt;
+      });
+    };
 
     // Render a single chat bubble. Reused for the normal chronological instance and
     // for the surfaced (regular-color) copy of my own future replies.
@@ -613,18 +639,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 threadMessages.map((m) => {
                   const isAnchor = m.id === openedChatMsgId;
                   // Messages newer than the anchor are the "future" — dimmed.
-                  const isFuture =
-                    anchorTime !== null && new Date(m.createTime).getTime() > anchorTime;
+                  const isFuture = isFutureTime(m.createTime);
                   const surfaced = surfacedReplies.get(m.id) ?? [];
+                  // A surfaced reply's own chronological bubble is dropped unless its
+                  // light copy conveys a different order (avoids redundant duplication).
+                  const skipChrono = surfacedIds.has(m.id) && !showLightCopy(m);
                   return (
                     <Fragment key={m.id}>
-                      {renderChatBubble(m, {
-                        keyStr: m.id,
-                        dimmed: isFuture,
-                        isAnchor,
-                        attachRef: isAnchor,
-                        hideQuote: false,
-                      })}
+                      {!skipChrono &&
+                        renderChatBubble(m, {
+                          keyStr: m.id,
+                          dimmed: isFuture,
+                          isAnchor,
+                          attachRef: isAnchor,
+                          hideQuote: false,
+                        })}
                       {/* My own future replies to this message, surfaced here in
                           regular color right after the message they answer. */}
                       {surfaced.map((r) =>
