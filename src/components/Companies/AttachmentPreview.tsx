@@ -53,8 +53,13 @@ export function AttachmentPreview({
     if (!isStreamedMedia || !url) return;
     let cancelled = false;
     let objectUrl: string | null = null;
-    // `url` already carries ?token=… — a plain fetch (no Range header) returns the full file.
-    fetch(url)
+    // Audio is transcoded to MP3 server-side (browsers can't decode some chat voice
+    // codecs). `url` already carries ?token=… so we just append the transcode flag.
+    const fetchUrl = mimeType.startsWith('audio/')
+      ? `${url}${url.includes('?') ? '&' : '?'}transcode=mp3`
+      : url;
+    // A plain fetch (no Range header) returns the full file in one shot.
+    fetch(fetchUrl)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.blob();
@@ -71,7 +76,7 @@ export function AttachmentPreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isStreamedMedia, url]);
+  }, [isStreamedMedia, url, mimeType]);
 
   const downloadCard = (
     <a
