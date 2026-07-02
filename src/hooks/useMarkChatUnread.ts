@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { markChatUnread } from '@/api/gmail';
 import type { ChatListResult } from '@/api/gmail';
@@ -10,15 +11,18 @@ export function useMarkChatUnread(companyId: number) {
   return useMutation({
     mutationFn: (messageId: string) => markChatUnread(token!, companyId, messageId),
     onMutate: (messageId: string) => {
-      qc.setQueriesData<ChatListResult>(
+      qc.setQueriesData<InfiniteData<ChatListResult>>(
         { queryKey: ['gmail-chats', companyId] },
         (old) => {
           if (!old) return old;
           return {
             ...old,
-            messages: old.messages.map((m) =>
-              m.id === messageId ? { ...m, isRead: false } : m,
-            ),
+            pages: old.pages.map((page) => ({
+              ...page,
+              messages: page.messages.map((m) =>
+                m.id === messageId ? { ...m, isRead: false } : m,
+              ),
+            })),
           };
         },
       );

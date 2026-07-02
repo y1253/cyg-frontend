@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Bold, Italic, Strikethrough, Code, List,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -142,6 +141,58 @@ function htmlToText(html: string): string {
   return (tmp.innerText || tmp.textContent || '').trim();
 }
 
+// Convert the chat editor's HTML into Google Chat's formatting tokens
+// (*bold*, _italic_, ~strike~, "- " bullets). Chat has no HTML — it renders
+// these tokens — so we serialize the WYSIWYG editor output on send.
+function htmlToChatMarkdown(html: string): string {
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  const walk = (node: Node): string => {
+    let out = '';
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out += child.textContent ?? '';
+        return;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) return;
+      const el = child as HTMLElement;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'br') {
+        out += '\n';
+        return;
+      }
+      if (tag === 'ul' || tag === 'ol') {
+        const lis = Array.from(el.children).filter(
+          (c) => c.tagName.toLowerCase() === 'li',
+        );
+        lis.forEach((li, i) => {
+          const liText = walk(li).trim();
+          out += (tag === 'ul' ? '- ' : `${i + 1}. `) + liText + '\n';
+        });
+        return;
+      }
+      let inner = walk(el);
+      const style = el.getAttribute('style') ?? '';
+      const isBold =
+        tag === 'b' || tag === 'strong' || /font-weight\s*:\s*(bold|[6-9]00)/i.test(style);
+      const isItalic = tag === 'i' || tag === 'em' || /font-style\s*:\s*italic/i.test(style);
+      const isStrike =
+        tag === 's' || tag === 'strike' || tag === 'del' || /line-through/i.test(style);
+      if (isBold) inner = `*${inner}*`;
+      if (isItalic) inner = `_${inner}_`;
+      if (isStrike) inner = `~${inner}~`;
+      // Block-level elements start on their own line.
+      out += tag === 'div' || tag === 'p' ? inner + '\n' : inner;
+    });
+    return out;
+  };
+
+  return walk(container)
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s+|\s+$/g, '');
+}
+
 // Human-readable byte size, e.g. 1536 → "1.5 KB".
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '';
@@ -178,7 +229,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const replyFileRef = useRef<HTMLInputElement>(null);
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
-  const [chatReplyText, setChatReplyText] = useState('');
+  const [chatReplyHtml, setChatReplyHtml] = useState('');
   // The message the reply will natively quote (default = the opened/anchor
   // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
   const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
@@ -222,7 +273,6 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const chatReplyRef = useRef<HTMLTextAreaElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   // Whether the anchor (opened) message is currently visible in the scroll
   // container — drives the floating "Back to message" button. `anchorDir` is
@@ -482,7 +532,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setSelectedMsgId(null);
     setReplyOpen(false);
     setChatReplyOpen(false);
-    setChatReplyText('');
+    setChatReplyHtml('');
     setQuoteTarget(null);
   };
 
@@ -491,7 +541,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setOpenedChatMsgId(null);
     setOpenedChatMsgTime(null);
     setChatReplyOpen(false);
-    setChatReplyText('');
+    setChatReplyHtml('');
     setQuoteTarget(null);
   };
 
@@ -504,7 +554,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setOpenedChatMsgTime(m.createTime);
     // Reset any in-progress reply so the composer re-targets the new anchor.
     setChatReplyOpen(false);
-    setChatReplyText('');
+    setChatReplyHtml('');
     setQuoteTarget(null);
   };
 
@@ -515,51 +565,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setChatReplyOpen(true);
   };
 
-  // Wrap the chat textarea's current selection in Google Chat's formatting
-  // tokens (e.g. *bold*). With no selection, inserts a labelled placeholder.
-  const wrapChatSelection = (token: string, placeholder: string) => {
-    const el = chatReplyRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const value = chatReplyText;
-    const selected = value.slice(start, end) || placeholder;
-    const next = value.slice(0, start) + token + selected + token + value.slice(end);
-    setChatReplyText(next);
-    // Restore focus and select the wrapped text (minus the tokens).
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(start + token.length, start + token.length + selected.length);
-    });
-  };
-
-  // Prefix each line spanned by the selection with "- " (Chat bulleted list).
-  const bulletChatSelection = () => {
-    const el = chatReplyRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const value = chatReplyText;
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-    const block = value.slice(lineStart, end);
-    const bulleted = block
-      .split('\n')
-      .map((line) => (line.startsWith('- ') ? line : `- ${line}`))
-      .join('\n');
-    const next = value.slice(0, lineStart) + bulleted + value.slice(end);
-    setChatReplyText(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(lineStart, lineStart + bulleted.length);
-    });
-  };
-
   const handleSendChatReply = () => {
-    if (!selectedSpaceId || !chatReplyText.trim()) return;
+    if (!selectedSpaceId || !htmlToText(chatReplyHtml).trim()) return;
     sendChatMutation.mutate(
       {
         spaceId: selectedSpaceId,
-        text: chatReplyText,
+        text: htmlToChatMarkdown(chatReplyHtml),
         ...(quoteTarget
           ? {
               quotedMessageName: quoteTarget.id,
@@ -570,7 +581,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       {
         onSuccess: () => {
           setChatReplyOpen(false);
-          setChatReplyText('');
+          setChatReplyHtml('');
           setQuoteTarget(null);
           // The thread query is invalidated by the mutation; once the refetch
           // lands, scroll to the bottom so the just-sent reply is visible.
@@ -916,35 +927,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               )}
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Message</Label>
-                {/* Google Chat formatting toolbar — inserts the tokens Chat renders. */}
-                <div className="flex items-center gap-0.5 rounded-md border border-input bg-muted/20 px-1 py-0.5 w-fit">
-                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Bold" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('*', 'bold text')}>
-                    <Bold size={15} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Italic" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('_', 'italic text')}>
-                    <Italic size={15} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Strikethrough" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('~', 'strikethrough')}>
-                    <Strikethrough size={15} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Monospace" onMouseDown={(e) => e.preventDefault()} onClick={() => wrapChatSelection('`', 'code')}>
-                    <Code size={15} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Bulleted list" onMouseDown={(e) => e.preventDefault()} onClick={bulletChatSelection}>
-                    <List size={15} />
-                  </Button>
-                </div>
-                <textarea
-                  ref={chatReplyRef}
-                  className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  value={chatReplyText}
-                  onChange={(e) => setChatReplyText(e.target.value)}
+                <RichTextEditor
+                  mode="chat"
+                  html={chatReplyHtml}
+                  onChange={setChatReplyHtml}
                   placeholder="Write your reply…"
-                  rows={5}
+                  minHeight={110}
                 />
-                <p className="text-[11px] text-muted-foreground">
-                  *bold* &nbsp; _italic_ &nbsp; ~strike~ &nbsp; `code`
-                </p>
               </div>
               {sendChatMutation.isError && (
                 <div className="flex flex-col gap-1.5">
@@ -967,14 +956,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <div className="flex gap-2">
                 <Button
                   size="sm"
-                  disabled={sendChatMutation.isPending || !chatReplyText.trim()}
+                  disabled={sendChatMutation.isPending || !htmlToText(chatReplyHtml).trim()}
                   onClick={handleSendChatReply}
                   className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
                 >
                   <Send size={13} />
                   {sendChatMutation.isPending ? 'Sending…' : 'Send Reply'}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyText(''); setQuoteTarget(null); }}>
+                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyHtml(''); setQuoteTarget(null); }}>
                   Cancel
                 </Button>
               </div>

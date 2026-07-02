@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { markEmailRead } from '@/api/gmail';
 import type { EmailListResult } from '@/api/gmail';
@@ -10,18 +11,25 @@ export function useMarkEmailRead(companyId: number) {
   return useMutation({
     mutationFn: (messageId: string) => markEmailRead(token!, companyId, messageId),
     onMutate: (messageId: string) => {
-      qc.setQueriesData<EmailListResult>(
+      qc.setQueriesData<InfiniteData<EmailListResult>>(
         { queryKey: ['gmail-emails', companyId] },
         (old) => {
           if (!old) return old;
           return {
             ...old,
-            messages: old.messages.map((m) =>
-              m.id === messageId ? { ...m, isRead: true } : m,
-            ),
+            pages: old.pages.map((page) => ({
+              ...page,
+              messages: page.messages.map((m) =>
+                m.id === messageId ? { ...m, isRead: true } : m,
+              ),
+            })),
           };
         },
       );
+      void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
+    },
+    onError: () => {
+      void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
       void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
     },
   });
