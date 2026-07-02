@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, FileText, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -40,6 +40,38 @@ export function AttachmentPreview({
   driveHref,
 }: AttachmentPreviewProps) {
   const [failed, setFailed] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  // Audio/video play from an in-memory Blob object URL rather than streaming the
+  // endpoint directly. Blob URLs support seeking natively and hand the decoder the
+  // complete file, so playback is reliable (streaming the endpoint made the media
+  // element issue ranged requests that could fail and permanently kill the player).
+  const isStreamedMedia =
+    !driveHref && !!url && (mimeType.startsWith('audio/') || mimeType.startsWith('video/'));
+
+  useEffect(() => {
+    if (!isStreamedMedia || !url) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    // `url` already carries ?token=… — a plain fetch (no Range header) returns the full file.
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isStreamedMedia, url]);
 
   const downloadCard = (
     <a
@@ -89,7 +121,11 @@ export function AttachmentPreview({
     if (mimeType.startsWith('audio/')) {
       return (
         <div className="max-w-xs">
-          <audio controls preload="metadata" src={url} onError={() => setFailed(true)} className="w-full" />
+          {blobUrl ? (
+            <audio controls preload="metadata" src={blobUrl} onError={() => setFailed(true)} className="w-full" />
+          ) : (
+            <span className="block text-xs text-muted-foreground">Loading audio…</span>
+          )}
           <span className="mt-1 block truncate text-xs text-muted-foreground">{filename}</span>
         </div>
       );
@@ -97,13 +133,17 @@ export function AttachmentPreview({
     if (mimeType.startsWith('video/')) {
       return (
         <div className="max-w-sm">
-          <video
-            controls
-            preload="metadata"
-            src={url}
-            onError={() => setFailed(true)}
-            className="w-full rounded-md border"
-          />
+          {blobUrl ? (
+            <video
+              controls
+              preload="metadata"
+              src={blobUrl}
+              onError={() => setFailed(true)}
+              className="w-full rounded-md border"
+            />
+          ) : (
+            <span className="block text-xs text-muted-foreground">Loading video…</span>
+          )}
           <span className="mt-1 block truncate text-xs text-muted-foreground">{filename}</span>
         </div>
       );
