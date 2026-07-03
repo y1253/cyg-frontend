@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
+  Sparkles, Check,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -18,6 +19,7 @@ import { useMarkChatUnread } from '@/hooks/useMarkChatUnread';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
+import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -141,6 +143,20 @@ function htmlToText(html: string): string {
   return (tmp.innerText || tmp.textContent || '').trim();
 }
 
+// Plain text → minimal HTML so an AI-polished reply renders in the RichTextEditor
+// and htmlToText / htmlToChatMarkdown still serialize it correctly on send.
+function textToHtml(text: string): string {
+  const escape = (s: string) =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  return text
+    .split('\n')
+    .map((line) => (line.trim() === '' ? '<br>' : escape(line)))
+    .join('<br>');
+}
+
 // Convert the chat editor's HTML into Google Chat's formatting tokens
 // (*bold*, _italic_, ~strike~, "- " bullets). Chat has no HTML — it renders
 // these tokens — so we serialize the WYSIWYG editor output on send.
@@ -230,6 +246,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const replyFileRef = useRef<HTMLInputElement>(null);
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
   const [chatReplyHtml, setChatReplyHtml] = useState('');
+  // AI "Polish reply": the polished text awaiting the user's decision, and the
+  // original plain draft it was made from (reused when re-polishing). Cleared on
+  // accept/discard and whenever a different message/reply is opened.
+  const [polishPreview, setPolishPreview] = useState<string | null>(null);
+  const [polishSource, setPolishSource] = useState<string | null>(null);
   // The message the reply will natively quote (default = the opened/anchor
   // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
   const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
@@ -269,11 +290,16 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const markUnreadMutation = useMarkEmailUnread(companyId);
   const markChatReadMutation = useMarkChatRead(companyId);
   const markChatUnreadMutation = useMarkChatUnread(companyId);
+  const polishMutation = usePolishReply();
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  // Inline reply forms render below a (potentially tall) message/thread; scroll
+  // them into view when opened so the user doesn't have to scroll down to reply.
+  const replyFormRef = useRef<HTMLDivElement>(null);
+  const chatReplyFormRef = useRef<HTMLDivElement>(null);
   // Whether the anchor (opened) message is currently visible in the scroll
   // container — drives the floating "Back to message" button. `anchorDir` is
   // the direction to scroll to reach it when it's off-screen.
@@ -283,6 +309,16 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const scrollToAnchor = useCallback(() => {
     anchorRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, []);
+
+  // When a reply form opens, scroll it into view (it mounts on the flag flip, so
+  // the effect runs after it's in the DOM and the ref is populated).
+  useEffect(() => {
+    if (replyOpen) replyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [replyOpen]);
+
+  useEffect(() => {
+    if (chatReplyOpen) chatReplyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [chatReplyOpen]);
 
   // On open (or when the anchor / thread changes), position the anchor message
   // at the BOTTOM of the visible area so the view reads as if the conversation
@@ -534,6 +570,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setChatReplyOpen(false);
     setChatReplyHtml('');
     setQuoteTarget(null);
+    resetPolish();
   };
 
   const handleCloseChat = () => {
@@ -543,6 +580,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setChatReplyOpen(false);
     setChatReplyHtml('');
     setQuoteTarget(null);
+    resetPolish();
   };
 
   // Re-anchor the open conversation to an earlier message: it scrolls into focus,
@@ -556,6 +594,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setChatReplyOpen(false);
     setChatReplyHtml('');
     setQuoteTarget(null);
+    resetPolish();
   };
 
   // Open the reply box, defaulting to natively quoting the anchor message
@@ -563,6 +602,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const handleOpenChatReply = () => {
     setQuoteTarget(anchorMsg);
     setChatReplyOpen(true);
+    resetPolish();
   };
 
   const handleSendChatReply = () => {
@@ -603,7 +643,103 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     });
     setReplyFiles([]);
     setReplyOpen(true);
+    resetPolish();
   };
+
+  // ── AI polish reply ────────────────────────────────────────────────────────
+
+  const resetPolish = () => {
+    setPolishPreview(null);
+    setPolishSource(null);
+    polishMutation.reset();
+  };
+
+  // Assemble the context sent to the AI: the whole email / whole conversation.
+  const buildEmailContext = (detail: EmailDetail): string =>
+    `Subject: ${detail.subject || '(no subject)'}\n` +
+    `From: ${detail.from}\n` +
+    `To: ${detail.to}\n\n` +
+    (detail.bodyText?.trim() || htmlToText(detail.bodyHtml ?? ''));
+
+  const buildChatContext = (): string =>
+    threadMessages.map((m) => `${m.isOwn ? 'You' : m.sender}: ${m.text}`).join('\n');
+
+  // Run the AI polish for a draft, stashing the source so "Re-polish" reuses it.
+  const runPolish = (kind: 'email' | 'chat', draftPlain: string, context: string) => {
+    if (!draftPlain.trim()) return;
+    setPolishSource(draftPlain);
+    polishMutation.mutate(
+      { kind, draft: draftPlain, context },
+      { onSuccess: (r) => setPolishPreview(r.polished) },
+    );
+  };
+
+  // Accept the polished text → replace the draft (the editor refreshes because
+  // focus is on the Accept button, not the contentEditable), then clear preview.
+  const acceptPolish = (kind: 'email' | 'chat') => {
+    if (polishPreview === null) return;
+    const html = textToHtml(polishPreview);
+    if (kind === 'email') setReplyForm((f) => ({ ...f, body: html }));
+    else setChatReplyHtml(html);
+    resetPolish();
+  };
+
+  // "Polish with AI" button for a reply action row — hidden once a preview is
+  // showing (the preview panel offers Re-polish instead).
+  const renderPolishButton = (kind: 'email' | 'chat', draftPlain: string, context: string) =>
+    polishPreview === null && (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        disabled={polishMutation.isPending || !draftPlain.trim()}
+        onClick={() => runPolish(kind, draftPlain, context)}
+      >
+        <Sparkles size={14} />
+        {polishMutation.isPending ? 'Polishing…' : 'Polish with AI'}
+      </Button>
+    );
+
+  // Preview panel shown above the action row after a polish completes: the
+  // polished text plus Accept / Re-polish / Discard. Also renders polish errors.
+  const renderPolishPreview = (kind: 'email' | 'chat', context: string) => (
+    <>
+      {polishPreview !== null && (
+        <div className="rounded-md border border-teal-200 bg-teal-50/60 p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-teal-700">
+            <Sparkles size={13} /> AI-polished version
+          </div>
+          <p className="text-sm whitespace-pre-wrap text-foreground">{polishPreview}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => acceptPolish(kind)}
+              className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+            >
+              <Check size={13} /> Accept
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={polishMutation.isPending}
+              onClick={() => runPolish(kind, polishSource ?? '', context)}
+            >
+              {polishMutation.isPending ? 'Polishing…' : 'Re-polish'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={resetPolish}>
+              Discard
+            </Button>
+          </div>
+        </div>
+      )}
+      {polishMutation.isError && (
+        <p className="text-xs text-destructive">
+          {(polishMutation.error as Error)?.message ?? 'Failed to polish reply'}
+        </p>
+      )}
+    </>
+  );
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -904,7 +1040,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
           {/* Inline chat reply form */}
           {chatReplyOpen && (
-            <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+            <div ref={chatReplyFormRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Reply in {selectedSpaceName}
               </p>
@@ -953,7 +1089,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   )}
                 </div>
               )}
-              <div className="flex gap-2">
+              {renderPolishPreview('chat', buildChatContext())}
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   disabled={sendChatMutation.isPending || !htmlToText(chatReplyHtml).trim()}
@@ -963,7 +1100,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   <Send size={13} />
                   {sendChatMutation.isPending ? 'Sending…' : 'Send Reply'}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyHtml(''); setQuoteTarget(null); }}>
+                {renderPolishButton('chat', htmlToText(chatReplyHtml), buildChatContext())}
+                <Button size="sm" variant="outline" onClick={() => { setChatReplyOpen(false); setChatReplyHtml(''); setQuoteTarget(null); resetPolish(); }}>
                   Cancel
                 </Button>
               </div>
@@ -1079,7 +1217,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
             {/* Inline reply form */}
             {replyOpen && (
-              <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+              <div ref={replyFormRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reply</p>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">To</Label>
@@ -1163,7 +1301,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
                   </p>
                 )}
-                <div className="flex gap-2">
+                {renderPolishPreview('email', buildEmailContext(emailDetail))}
+                <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     disabled={sendMutation.isPending || (!htmlToText(replyForm.body) && replyFiles.length === 0)}
@@ -1173,7 +1312,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); }}>
+                  {renderPolishButton('email', htmlToText(replyForm.body), buildEmailContext(emailDetail))}
+                  <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); resetPolish(); }}>
                     Cancel
                   </Button>
                 </div>
