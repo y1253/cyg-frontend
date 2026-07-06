@@ -17,6 +17,7 @@ export interface EmailSummary {
   date: string;
   snippet: string;
   isRead: boolean;
+  isCompleted?: boolean;
 }
 
 // An attachment on an email. Bytes are fetched on demand from the download
@@ -87,6 +88,7 @@ export interface ChatInboxMessage {
   lastUpdateTime: string;
   quotedMessageName?: string | null;
   isRead: boolean;
+  isCompleted?: boolean;
   hasAttachments?: boolean;
 }
 
@@ -129,10 +131,12 @@ export async function fetchEmails(
   companyId: number,
   pageToken?: string,
   labelId?: string,
+  q?: string,
 ): Promise<EmailListResult> {
   const params = new URLSearchParams();
   if (pageToken) params.set('pageToken', pageToken);
   if (labelId) params.set('labelIds', labelId);
+  if (q) params.set('q', q);
   const res = await fetchWithAuth(
     token,
     `${API}/gmail/companies/${companyId}/emails?${params.toString()}`,
@@ -158,8 +162,12 @@ export async function fetchChats(
   token: string,
   companyId: number,
   cursor?: string,
+  q?: string,
 ): Promise<ChatListResult> {
-  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const params = new URLSearchParams();
+  if (cursor) params.set('cursor', cursor);
+  if (q) params.set('q', q);
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats${qs}`);
   if (!res.ok) throw new Error('Failed to fetch chats');
   return res.json() as Promise<ChatListResult>;
@@ -221,6 +229,53 @@ export async function markEmailUnread(
   messageId: string,
 ): Promise<void> {
   await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/unread`, {
+    method: 'PATCH',
+  });
+}
+
+// Mark complete / uncomplete — shared per-message state for the Communications
+// inbox (email + chat). Chat ids contain "/", so they go in the body; email ids
+// go in the path (mirrors read/unread).
+export async function markChatComplete(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/complete`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId }),
+  });
+}
+
+export async function markChatUncomplete(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/uncomplete`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId }),
+  });
+}
+
+export async function markEmailComplete(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/complete`, {
+    method: 'PATCH',
+  });
+}
+
+export async function markEmailUncomplete(
+  token: string,
+  companyId: number,
+  messageId: string,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/uncomplete`, {
     method: 'PATCH',
   });
 }

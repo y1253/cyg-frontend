@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check,
+  Sparkles, Check, CheckCircle2, Search,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -16,6 +16,10 @@ import { useSendChatMessage } from '@/hooks/useSendChatMessage';
 import { useMarkEmailUnread } from '@/hooks/useMarkEmailUnread';
 import { useMarkChatRead } from '@/hooks/useMarkChatRead';
 import { useMarkChatUnread } from '@/hooks/useMarkChatUnread';
+import { useMarkEmailComplete } from '@/hooks/useMarkEmailComplete';
+import { useMarkEmailUncomplete } from '@/hooks/useMarkEmailUncomplete';
+import { useMarkChatComplete } from '@/hooks/useMarkChatComplete';
+import { useMarkChatUncomplete } from '@/hooks/useMarkChatUncomplete';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
@@ -35,6 +39,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 
 interface Props {
   companyId: number;
@@ -236,6 +247,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
   const [composeOpen, setComposeOpen] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
+  // The message awaiting "mark complete" confirmation (carries kind so the right
+  // endpoint is hit). null = no confirm dialog open.
+  const [completeTarget, setCompleteTarget] = useState<{ kind: 'email' | 'chat'; id: string } | null>(null);
   const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '', cc: '' });
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const composeFileRef = useRef<HTMLInputElement>(null);
@@ -255,13 +269,28 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
   const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
   const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(false);
+  // Inbox search + filter. `searchInput` is the raw box; `searchQuery` is the
+  // debounced/committed term sent to the server. `filter` narrows by kind/state.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<
+    'all' | 'email' | 'chat' | 'completed' | 'read' | 'unread'
+  >('all');
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   const isInbox = selectedLabel === 'INBOX';
 
+  // Search only applies to the inbox (the search bar is inbox-only); folders are
+  // left unfiltered even if a term is still in the box from a previous inbox visit.
+  const activeSearch = isInbox ? searchQuery || undefined : undefined;
+
   // Emails + chats are infinite queries; older pages load on scroll.
-  const emailQuery = useGmailEmails(companyId, selectedLabel);
-  const chatQuery = useGmailChats(companyId, account);
+  const emailQuery = useGmailEmails(companyId, selectedLabel, activeSearch);
+  const chatQuery = useGmailChats(companyId, account, activeSearch);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
   const chatsError = chatQuery.error;
@@ -290,6 +319,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const markUnreadMutation = useMarkEmailUnread(companyId);
   const markChatReadMutation = useMarkChatRead(companyId);
   const markChatUnreadMutation = useMarkChatUnread(companyId);
+  const markEmailCompleteMutation = useMarkEmailComplete(companyId);
+  const markEmailUncompleteMutation = useMarkEmailUncomplete(companyId);
+  const markChatCompleteMutation = useMarkChatComplete(companyId);
+  const markChatUncompleteMutation = useMarkChatUncomplete(companyId);
   const polishMutation = usePolishReply();
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
 
@@ -404,6 +437,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       ? merged
       : merged.filter((it) => getItemTimestamp(it) >= cutoff);
   })();
+
+  // Apply the kind/state filter dropdown over the merged inbox. Search itself is
+  // already applied server-side (Gmail `q` for email, text match for chat).
+  const visibleItems = unifiedItems.filter((it) => {
+    if (filter === 'email' && it.kind !== 'email') return false;
+    if (filter === 'chat' && it.kind !== 'chat') return false;
+    if (filter === 'completed' && !it.data.isCompleted) return false;
+    if (filter === 'read' && !it.data.isRead) return false;
+    if (filter === 'unread' && it.data.isRead) return false;
+    return true;
+  });
+  // Whether the inbox is currently narrowed (drives empty-state copy).
+  const isFiltering = filter !== 'all' || activeSearch != null;
 
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
@@ -546,6 +592,40 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     });
   };
 
+  // Marking complete asks for confirmation first; the confirm dialog carries the
+  // message kind so the right endpoint is hit. Un-completing is a direct toggle.
+  const confirmComplete = () => {
+    if (!completeTarget) return;
+    const { kind, id } = completeTarget;
+    if (kind === 'email') markEmailCompleteMutation.mutate(id);
+    else markChatCompleteMutation.mutate(id);
+    setCompleteTarget(null);
+  };
+
+  const uncomplete = (kind: 'email' | 'chat', id: string) => {
+    if (kind === 'email') markEmailUncompleteMutation.mutate(id);
+    else markChatUncompleteMutation.mutate(id);
+  };
+
+  // Small blue completed-check toggle shown on each inbox row. Not-complete →
+  // opens the confirm popup; already-complete → undoes directly (no confirm).
+  const renderCompleteToggle = (kind: 'email' | 'chat', id: string, isCompleted: boolean) => (
+    <button
+      className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
+      title={isCompleted ? 'Completed — click to undo' : 'Mark complete'}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (isCompleted) uncomplete(kind, id);
+        else setCompleteTarget({ kind, id });
+      }}
+    >
+      <CheckCircle2
+        size={16}
+        className={isCompleted ? 'text-blue-600 fill-blue-100' : 'text-muted-foreground/40'}
+      />
+    </button>
+  );
+
   const handleSelectFolder = (folderId: string) => {
     setSelectedLabel(folderId);
     setSelectedMsgId(null);
@@ -664,29 +744,40 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const buildChatContext = (): string =>
     threadMessages.map((m) => `${m.isOwn ? 'You' : m.sender}: ${m.text}`).join('\n');
 
+  // Context for a brand-new compose (no prior thread). Kept non-empty so it
+  // satisfies the polish endpoint's required `context` field.
+  const buildComposeContext = (): string =>
+    `Subject: ${composeForm.subject || '(no subject)'}\n` +
+    `To: ${composeForm.to || '(unspecified)'}\n\n(New email — no prior conversation.)`;
+
+  // Where a polished draft is written back. Reply and compose both use the
+  // email polish tone; chat uses the chat tone.
+  type PolishTarget = 'reply' | 'compose' | 'chat';
+
   // Run the AI polish for a draft, stashing the source so "Re-polish" reuses it.
-  const runPolish = (kind: 'email' | 'chat', draftPlain: string, context: string) => {
+  const runPolish = (target: PolishTarget, draftPlain: string, context: string) => {
     if (!draftPlain.trim()) return;
     setPolishSource(draftPlain);
     polishMutation.mutate(
-      { kind, draft: draftPlain, context },
+      { kind: target === 'chat' ? 'chat' : 'email', draft: draftPlain, context },
       { onSuccess: (r) => setPolishPreview(r.polished) },
     );
   };
 
   // Accept the polished text → replace the draft (the editor refreshes because
   // focus is on the Accept button, not the contentEditable), then clear preview.
-  const acceptPolish = (kind: 'email' | 'chat') => {
+  const acceptPolish = (target: PolishTarget) => {
     if (polishPreview === null) return;
     const html = textToHtml(polishPreview);
-    if (kind === 'email') setReplyForm((f) => ({ ...f, body: html }));
+    if (target === 'reply') setReplyForm((f) => ({ ...f, body: html }));
+    else if (target === 'compose') setComposeForm((f) => ({ ...f, body: html }));
     else setChatReplyHtml(html);
     resetPolish();
   };
 
-  // "Polish with AI" button for a reply action row — hidden once a preview is
+  // "Polish with AI" button for an action row — hidden once a preview is
   // showing (the preview panel offers Re-polish instead).
-  const renderPolishButton = (kind: 'email' | 'chat', draftPlain: string, context: string) =>
+  const renderPolishButton = (target: PolishTarget, draftPlain: string, context: string) =>
     polishPreview === null && (
       <Button
         type="button"
@@ -694,7 +785,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         variant="outline"
         className="gap-1"
         disabled={polishMutation.isPending || !draftPlain.trim()}
-        onClick={() => runPolish(kind, draftPlain, context)}
+        onClick={() => runPolish(target, draftPlain, context)}
       >
         <Sparkles size={14} />
         {polishMutation.isPending ? 'Polishing…' : 'Polish with AI'}
@@ -703,7 +794,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   // Preview panel shown above the action row after a polish completes: the
   // polished text plus Accept / Re-polish / Discard. Also renders polish errors.
-  const renderPolishPreview = (kind: 'email' | 'chat', context: string) => (
+  const renderPolishPreview = (target: PolishTarget, context: string) => (
     <>
       {polishPreview !== null && (
         <div className="rounded-md border border-teal-200 bg-teal-50/60 p-3 flex flex-col gap-2">
@@ -714,7 +805,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              onClick={() => acceptPolish(kind)}
+              onClick={() => acceptPolish(target)}
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
             >
               <Check size={13} /> Accept
@@ -723,7 +814,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               size="sm"
               variant="outline"
               disabled={polishMutation.isPending}
-              onClick={() => runPolish(kind, polishSource ?? '', context)}
+              onClick={() => runPolish(target, polishSource ?? '', context)}
             >
               {polishMutation.isPending ? 'Polishing…' : 'Re-polish'}
             </Button>
@@ -940,20 +1031,43 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               </span>
               <span className="text-sm font-medium truncate">{selectedSpaceName}</span>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1 text-muted-foreground"
-              disabled={markChatUnreadMutation.isPending || !openedChatMsgId}
-              onClick={() => {
-                if (!openedChatMsgId) return;
-                markChatUnreadMutation.mutate(openedChatMsgId, {
-                  onSuccess: handleCloseChat,
-                });
-              }}
-            >
-              <MailOpen size={14} /> Mark as unread
-            </Button>
+            <div className="flex items-center gap-2">
+              {openedChatMsgId && (
+                (chatItems.find((m) => m.id === openedChatMsgId)?.isCompleted ?? false) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-blue-600 border-blue-200 hover:text-blue-700"
+                    onClick={() => uncomplete('chat', openedChatMsgId)}
+                  >
+                    <CheckCircle2 size={14} className="fill-blue-100" /> Completed
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setCompleteTarget({ kind: 'chat', id: openedChatMsgId })}
+                  >
+                    <CheckCircle2 size={14} /> Mark complete
+                  </Button>
+                )
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1 text-muted-foreground"
+                disabled={markChatUnreadMutation.isPending || !openedChatMsgId}
+                onClick={() => {
+                  if (!openedChatMsgId) return;
+                  markChatUnreadMutation.mutate(openedChatMsgId, {
+                    onSuccess: handleCloseChat,
+                  });
+                }}
+              >
+                <MailOpen size={14} /> Mark as unread
+              </Button>
+            </div>
           </div>
 
           {/* Conversation thread */}
@@ -1212,6 +1326,25 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     <MailOpen size={14} /> Mark as unread
                   </Button>
                 )}
+                {(emailItems.find((m) => m.id === emailDetail.id)?.isCompleted ?? false) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-blue-600 border-blue-200 hover:text-blue-700"
+                    onClick={() => uncomplete('email', emailDetail.id)}
+                  >
+                    <CheckCircle2 size={14} className="fill-blue-100" /> Completed
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id })}
+                  >
+                    <CheckCircle2 size={14} /> Mark complete
+                  </Button>
+                )}
               </div>
             )}
 
@@ -1301,7 +1434,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
                   </p>
                 )}
-                {renderPolishPreview('email', buildEmailContext(emailDetail))}
+                {renderPolishPreview('reply', buildEmailContext(emailDetail))}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
@@ -1312,7 +1445,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  {renderPolishButton('email', htmlToText(replyForm.body), buildEmailContext(emailDetail))}
+                  {renderPolishButton('reply', htmlToText(replyForm.body), buildEmailContext(emailDetail))}
                   <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); resetPolish(); }}>
                     Cancel
                   </Button>
@@ -1344,7 +1477,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <>
               <Button
                 size="sm"
-                onClick={() => { setComposeForm({ to: '', subject: '', body: '', cc: '' }); setComposeFiles([]); setComposeOpen(true); }}
+                onClick={() => { setComposeForm({ to: '', subject: '', body: '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
                 className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
               >
                 <Plus size={14} /> Compose
@@ -1474,16 +1607,56 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         ))}
       </div>
 
+      {/* Search + filter toolbar (inbox only) */}
+      {isInbox && (
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search inbox…"
+              className="pl-8 pr-8 h-9"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setSearchInput('')}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <Select value={filter} onValueChange={(v) => setFilter((v as typeof filter) ?? 'all')}>
+            <SelectTrigger size="sm" className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="email">Email</SelectItem>
+              <SelectItem value="chat">Chat</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="read">Read</SelectItem>
+              <SelectItem value="unread">Unread</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {/* Email / unified list */}
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
       ) : isInbox ? (
         /* ── Unified inbox (emails + chats) ── */
         <Card className="overflow-hidden gap-0 py-0 rounded-lg">
-          {unifiedItems.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Inbox is empty</div>
+          {visibleItems.length === 0 ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              {isFiltering ? 'No messages match your search' : 'Inbox is empty'}
+            </div>
           ) : (
-            unifiedItems.map((item, idx) =>
+            visibleItems.map((item, idx) =>
               item.kind === 'email' ? (
                 <div
                   key={item.data.id}
@@ -1524,6 +1697,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                         {item.data.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || item.data.from}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {renderCompleteToggle('email', item.data.id, !!item.data.isCompleted)}
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 font-medium">
                           Email
                         </Badge>
@@ -1579,6 +1753,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                         {item.data.sender}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {renderCompleteToggle('chat', item.data.id, !!item.data.isCompleted)}
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
                           Chat
                         </Badge>
@@ -1640,9 +1815,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                       <span className={['text-sm truncate', !msg.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
                         {msg.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || msg.from}
                       </span>
-                      <span className={['text-xs shrink-0', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
-                        {formatEmailDate(msg.date)}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {renderCompleteToggle('email', msg.id, !!msg.isCompleted)}
+                        <span className={['text-xs', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                          {formatEmailDate(msg.date)}
+                        </span>
+                      </div>
                     </div>
                     <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
                       {msg.subject || '(no subject)'}
@@ -1662,14 +1840,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           {emailFetchingNext || chatFetchingNext ? (
             <span className="text-xs text-muted-foreground">Loading more…</span>
           ) : (isInbox ? (!emailHasNext && !chatHasNext) : !emailHasNext) &&
-            (isInbox ? unifiedItems.length > 0 : emailItems.length > 0) ? (
+            (isInbox ? visibleItems.length > 0 : emailItems.length > 0) ? (
             <span className="text-xs text-muted-foreground/70">You're all caught up</span>
           ) : null}
         </div>
       )}
 
       {/* Compose dialog */}
-      <Dialog open={composeOpen} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeFiles([]); }}>
+      <Dialog open={composeOpen} onOpenChange={(open) => { setComposeOpen(open); if (!open) { setComposeFiles([]); resetPolish(); } }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1694,7 +1872,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">Subject</Label>
+              <Label className="text-xs">Subject (optional)</Label>
               <Input
                 value={composeForm.subject}
                 onChange={(e) => setComposeForm((f) => ({ ...f, subject: e.target.value }))}
@@ -1761,11 +1939,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 {(sendMutation.error as Error)?.message ?? 'Failed to send'}
               </p>
             )}
+            {renderPolishPreview('compose', buildComposeContext())}
           </div>
           <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); }}>
+            <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); resetPolish(); }}>
               Cancel
             </Button>
+            {renderPolishButton('compose', htmlToText(composeForm.body), buildComposeContext())}
             <Button
               disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
               onClick={handleSend}
@@ -1798,6 +1978,30 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               onClick={handleDisconnect}
             >
               {disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark-complete confirmation */}
+      <Dialog open={completeTarget !== null} onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Mark message complete?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Confirm you've completed this message. It stays in the inbox with a blue check,
+            visible to everyone.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setCompleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
+              onClick={confirmComplete}
+            >
+              <CheckCircle2 size={14} /> Mark complete
             </Button>
           </div>
         </DialogContent>
