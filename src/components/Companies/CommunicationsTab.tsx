@@ -156,6 +156,18 @@ function htmlToText(html: string): string {
   return (tmp.innerText || tmp.textContent || '').trim();
 }
 
+// Blank lines seeded above the signature so the caret starts well clear of it.
+const SIGNATURE_LEAD =
+  '<div><br></div><div><br></div><div><br></div><div><br></div>';
+
+// Split a compose/reply body into the user's text and the trailing CYG
+// signature block (marked with data-cyg-signature), so polish never touches it.
+function splitSignature(html: string): { body: string; sig: string } {
+  const idx = html.search(/<div[^>]*data-cyg-signature/i);
+  if (idx === -1) return { body: html, sig: '' };
+  return { body: html.slice(0, idx), sig: html.slice(idx) };
+}
+
 // Plain text → minimal HTML so an AI-polished reply renders in the RichTextEditor
 // and htmlToText / htmlToChatMarkdown still serialize it correctly on send.
 function textToHtml(text: string): string {
@@ -251,7 +263,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
-  const [completeTarget, setCompleteTarget] = useState<{ kind: 'email' | 'chat'; id: string } | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<{ kind: 'email' | 'chat'; id: string; fromDetail?: boolean } | null>(null);
   const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '', cc: '' });
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const composeFileRef = useRef<HTMLInputElement>(null);
@@ -606,10 +618,16 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // message kind so the right endpoint is hit. Un-completing is a direct toggle.
   const confirmComplete = () => {
     if (!completeTarget) return;
-    const { kind, id } = completeTarget;
+    const { kind, id, fromDetail } = completeTarget;
     if (kind === 'email') markEmailCompleteMutation.mutate(id);
     else markChatCompleteMutation.mutate(id);
     setCompleteTarget(null);
+    // If confirmed from inside an open message, also exit back to the inbox
+    // (so we don't re-prompt on the row).
+    if (fromDetail) {
+      if (kind === 'chat') handleCloseChat();
+      else setSelectedMsgId(null);
+    }
   };
 
   const uncomplete = (kind: 'email' | 'chat', id: string) => {
@@ -728,9 +746,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setReplyForm({
       to: extractEmail(detail.from),
       subject: prefixReSubject(detail.subject || ''),
-      // Seed the editable signature above the caret (matches Gmail; server no
-      // longer appends it).
-      body: account?.signatureHtml ? `<div><br></div>${account.signatureHtml}` : '',
+      // Seed the editable signature a few lines below the caret (matches Gmail;
+      // server no longer appends it).
+      body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '',
       cc: '',
     });
     setReplyFiles([]);
@@ -781,9 +799,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const acceptPolish = (target: PolishTarget) => {
     if (polishPreview === null) return;
     const html = textToHtml(polishPreview);
-    if (target === 'reply') setReplyForm((f) => ({ ...f, body: html }));
-    else if (target === 'compose') setComposeForm((f) => ({ ...f, body: html }));
-    else setChatReplyHtml(html);
+    // Re-attach the original (unpolished) signature after the polished text.
+    if (target === 'reply') {
+      const { sig } = splitSignature(replyForm.body);
+      setReplyForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
+    } else if (target === 'compose') {
+      const { sig } = splitSignature(composeForm.body);
+      setComposeForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
+    } else setChatReplyHtml(html);
     resetPolish();
   };
 
@@ -875,6 +898,33 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       </div>
     );
   }
+
+  // Mark-complete confirmation — shared across the inbox and both detail views
+  // so it can appear in-place wherever "Mark complete" is clicked.
+  const completeConfirmDialog = (
+    <Dialog open={completeTarget !== null} onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Mark message complete?</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Confirm you've completed this message. It stays in the inbox with a blue check,
+          visible to everyone.
+        </p>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => setCompleteTarget(null)}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
+            onClick={confirmComplete}
+          >
+            <CheckCircle2 size={14} /> Mark complete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 
   // ── Chat conversation (thread) view ───────────────────────────────────────
 
@@ -1059,10 +1109,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     size="sm"
                     variant="outline"
                     className="gap-1"
-                    onClick={() => {
-                      markChatCompleteMutation.mutate(openedChatMsgId);
-                      handleCloseChat();
-                    }}
+                    onClick={() => setCompleteTarget({ kind: 'chat', id: openedChatMsgId, fromDetail: true })}
                   >
                     <CheckCircle2 size={14} /> Mark complete
                   </Button>
@@ -1237,6 +1284,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             </div>
           )}
         </div>
+        {completeConfirmDialog}
       </div>
     );
   }
@@ -1355,10 +1403,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     size="sm"
                     variant="outline"
                     className="gap-1"
-                    onClick={() => {
-                      markEmailCompleteMutation.mutate(emailDetail.id);
-                      setSelectedMsgId(null);
-                    }}
+                    onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id, fromDetail: true })}
                   >
                     <CheckCircle2 size={14} /> Mark complete
                   </Button>
@@ -1465,7 +1510,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  {renderPolishButton('reply', htmlToText(replyForm.body), buildEmailContext(emailDetail))}
+                  {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext(emailDetail))}
                   <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); resetPolish(); }}>
                     Cancel
                   </Button>
@@ -1474,6 +1519,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             )}
           </div>
         )}
+        {completeConfirmDialog}
       </div>
     );
   }
@@ -1497,7 +1543,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <>
               <Button
                 size="sm"
-                onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ?? '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
+                onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
                 className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
               >
                 <Plus size={14} /> Compose
@@ -1968,7 +2014,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); resetPolish(); }}>
               Cancel
             </Button>
-            {renderPolishButton('compose', htmlToText(composeForm.body), buildComposeContext())}
+            {renderPolishButton('compose', htmlToText(splitSignature(composeForm.body).body), buildComposeContext())}
             <Button
               disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
               onClick={handleSend}
@@ -2007,28 +2053,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       </Dialog>
 
       {/* Mark-complete confirmation */}
-      <Dialog open={completeTarget !== null} onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Mark message complete?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Confirm you've completed this message. It stays in the inbox with a blue check,
-            visible to everyone.
-          </p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setCompleteTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
-              onClick={confirmComplete}
-            >
-              <CheckCircle2 size={14} /> Mark complete
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {completeConfirmDialog}
     </div>
   );
 }
