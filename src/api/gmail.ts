@@ -8,6 +8,15 @@ export interface GmailAccount {
   // Whether Google granted the Chat send scope on the last connect. When false,
   // chat replies will fail no matter how often the account is reconnected.
   hasChatScope?: boolean;
+  // Default CYG signature HTML, seeded into the compose/reply editor so it's
+  // visible + editable before sending (the server no longer appends it).
+  signatureHtml?: string;
+}
+
+// A past recipient/sender for Gmail-style recipient autocomplete.
+export interface GmailContact {
+  email: string;
+  name: string;
 }
 
 export interface EmailSummary {
@@ -124,6 +133,15 @@ export async function fetchGmailAccount(
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch Gmail account');
   return res.json() as Promise<GmailAccount>;
+}
+
+export async function fetchGmailContacts(
+  token: string,
+  companyId: number,
+): Promise<GmailContact[]> {
+  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/contacts`);
+  if (!res.ok) throw new Error('Failed to fetch contacts');
+  return res.json() as Promise<GmailContact[]>;
 }
 
 export async function fetchEmails(

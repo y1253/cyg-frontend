@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
+import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailEmail } from '@/hooks/useGmailEmail';
 import { useGmailChats } from '@/hooks/useGmailChats';
@@ -28,6 +29,7 @@ import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
 import { AttachmentPreview } from './AttachmentPreview';
 import { RichTextEditor } from './RichTextEditor';
+import { RecipientAutocomplete } from './RecipientAutocomplete';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -274,8 +276,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<
-    'all' | 'email' | 'chat' | 'completed' | 'read' | 'unread'
-  >('all');
+    'all' | 'email' | 'chat' | 'completed' | 'uncompleted' | 'read' | 'unread'
+  >('uncompleted');
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 350);
     return () => clearTimeout(t);
@@ -283,6 +285,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   const isInbox = selectedLabel === 'INBOX';
+
+  // Past recipients for To/CC autocomplete. Only fetched (once, then cached) when
+  // the admin is actually composing/replying — the endpoint scans many messages.
+  const { data: contacts } = useGmailContacts(
+    companyId,
+    !!account && isAdmin && (composeOpen || replyOpen),
+  );
 
   // Search only applies to the inbox (the search bar is inbox-only); folders are
   // left unfiltered even if a term is still in the box from a previous inbox visit.
@@ -444,12 +453,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     if (filter === 'email' && it.kind !== 'email') return false;
     if (filter === 'chat' && it.kind !== 'chat') return false;
     if (filter === 'completed' && !it.data.isCompleted) return false;
+    if (filter === 'uncompleted' && it.data.isCompleted) return false;
     if (filter === 'read' && !it.data.isRead) return false;
     if (filter === 'unread' && it.data.isRead) return false;
     return true;
   });
   // Whether the inbox is currently narrowed (drives empty-state copy).
-  const isFiltering = filter !== 'all' || activeSearch != null;
+  const isFiltering = (filter !== 'all' && filter !== 'uncompleted') || activeSearch != null;
 
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
@@ -718,7 +728,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setReplyForm({
       to: extractEmail(detail.from),
       subject: prefixReSubject(detail.subject || ''),
-      body: '',
+      // Seed the editable signature above the caret (matches Gmail; server no
+      // longer appends it).
+      body: account?.signatureHtml ? `<div><br></div>${account.signatureHtml}` : '',
       cc: '',
     });
     setReplyFiles([]);
@@ -1047,7 +1059,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     size="sm"
                     variant="outline"
                     className="gap-1"
-                    onClick={() => setCompleteTarget({ kind: 'chat', id: openedChatMsgId })}
+                    onClick={() => {
+                      markChatCompleteMutation.mutate(openedChatMsgId);
+                      handleCloseChat();
+                    }}
                   >
                     <CheckCircle2 size={14} /> Mark complete
                   </Button>
@@ -1340,7 +1355,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     size="sm"
                     variant="outline"
                     className="gap-1"
-                    onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id })}
+                    onClick={() => {
+                      markEmailCompleteMutation.mutate(emailDetail.id);
+                      setSelectedMsgId(null);
+                    }}
                   >
                     <CheckCircle2 size={14} /> Mark complete
                   </Button>
@@ -1354,16 +1372,18 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reply</p>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">To</Label>
-                  <Input
+                  <RecipientAutocomplete
                     value={replyForm.to}
-                    onChange={(e) => setReplyForm((f) => ({ ...f, to: e.target.value }))}
+                    onChange={(v) => setReplyForm((f) => ({ ...f, to: v }))}
+                    contacts={contacts ?? []}
                   />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">CC</Label>
-                  <Input
+                  <RecipientAutocomplete
                     value={replyForm.cc}
-                    onChange={(e) => setReplyForm((f) => ({ ...f, cc: e.target.value }))}
+                    onChange={(v) => setReplyForm((f) => ({ ...f, cc: v }))}
+                    contacts={contacts ?? []}
                     placeholder="Optional"
                   />
                 </div>
@@ -1477,7 +1497,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <>
               <Button
                 size="sm"
-                onClick={() => { setComposeForm({ to: '', subject: '', body: '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
+                onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ?? '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
                 className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
               >
                 <Plus size={14} /> Compose
@@ -1638,6 +1658,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <SelectItem value="email">Email</SelectItem>
               <SelectItem value="chat">Chat</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="uncompleted">Uncompleted</SelectItem>
               <SelectItem value="read">Read</SelectItem>
               <SelectItem value="unread">Unread</SelectItem>
             </SelectContent>
@@ -1857,17 +1878,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
               <Label className="text-xs">To</Label>
-              <Input
+              <RecipientAutocomplete
                 value={composeForm.to}
-                onChange={(e) => setComposeForm((f) => ({ ...f, to: e.target.value }))}
+                onChange={(v) => setComposeForm((f) => ({ ...f, to: v }))}
+                contacts={contacts ?? []}
                 placeholder="recipient@example.com"
               />
             </div>
             <div className="flex flex-col gap-1">
               <Label className="text-xs">CC</Label>
-              <Input
+              <RecipientAutocomplete
                 value={composeForm.cc}
-                onChange={(e) => setComposeForm((f) => ({ ...f, cc: e.target.value }))}
+                onChange={(v) => setComposeForm((f) => ({ ...f, cc: v }))}
+                contacts={contacts ?? []}
                 placeholder="Optional"
               />
             </div>
