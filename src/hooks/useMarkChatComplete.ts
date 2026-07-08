@@ -29,6 +29,7 @@ export function useMarkChatComplete(companyId: number) {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] });
+      void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-count', companyId] });
     },
   });
 }

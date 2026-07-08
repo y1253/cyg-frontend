@@ -30,5 +30,8 @@ export function useMarkEmailComplete(companyId: number) {
     onError: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
     },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-count', companyId] });
+    },
   });
 }

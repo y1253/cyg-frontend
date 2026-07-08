@@ -26,10 +26,11 @@ export function useMarkEmailRead(companyId: number) {
           };
         },
       );
-      void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
     },
     onError: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
     },
   });
