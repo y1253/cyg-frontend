@@ -321,10 +321,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const emailLabel = isInboxLike ? 'INBOX' : selectedLabel;
 
   // Past recipients for To/CC autocomplete. Only fetched (once, then cached) when
-  // the admin is actually composing/replying — the endpoint scans many messages.
+  // the user is actually composing/replying — the endpoint scans many messages.
   const { data: contacts } = useGmailContacts(
     companyId,
-    !!account && isAdmin && (composeOpen || replyOpen),
+    !!account && (composeOpen || replyOpen),
   );
 
   // Search only applies to the inbox (the search bar is inbox-only); folders are
@@ -1640,24 +1640,22 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
+            className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+          >
+            <Plus size={14} /> Compose
+          </Button>
           {isAdmin && (
-            <>
-              <Button
-                size="sm"
-                onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
-                className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-              >
-                <Plus size={14} /> Compose
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-destructive border-destructive/30 hover:bg-destructive/5 gap-1"
-                onClick={() => setDisconnectConfirmOpen(true)}
-              >
-                <Trash2 size={14} /> Disconnect
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/30 hover:bg-destructive/5 gap-1"
+              onClick={() => setDisconnectConfirmOpen(true)}
+            >
+              <Trash2 size={14} /> Disconnect
+            </Button>
           )}
         </div>
       </div>
