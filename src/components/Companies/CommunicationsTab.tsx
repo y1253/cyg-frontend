@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check, CheckCircle2, Search,
+  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -24,6 +24,7 @@ import { useMarkChatUncomplete } from '@/hooks/useMarkChatUncomplete';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { useMarkEmailRead } from '@/hooks/useMarkEmailRead';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
+import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
@@ -48,6 +49,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Props {
   companyId: number;
@@ -56,10 +58,16 @@ interface Props {
 
 const FOLDERS = [
   { id: 'INBOX', label: 'Inbox', icon: Inbox },
+  { id: 'UNCOMPLETED', label: 'Uncompleted', icon: Circle },
+  { id: 'UNREAD', label: 'Unread', icon: Mail },
   { id: 'SENT', label: 'Sent', icon: SendHorizonal },
   { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
   { id: 'TRASH', label: 'Trash', icon: Trash },
 ] as const;
+
+// Tabs backed by the unified INBOX view (emails + chats). UNCOMPLETED and UNREAD
+// fetch the same INBOX data and apply a forced completion/read filter on top.
+const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];
 
 type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
@@ -287,16 +295,30 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // debounced/committed term sent to the server. `filter` narrows by kind/state.
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<
-    'all' | 'email' | 'chat' | 'completed' | 'uncompleted' | 'read' | 'unread'
-  >('uncompleted');
+  const [filter, setFilter] = useState<'all' | 'email' | 'chat'>('all');
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 350);
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  // Bulk multi-select (admin, inbox only). `selectionMode` swaps row clicks from
+  // "open" to "toggle select"; `selectedIds` holds the picked message ids (email
+  // ids have no "/", chat ids do, so the kind is re-derived at action time). A
+  // pending bulk complete/uncomplete is parked in `bulkAction` for confirmation.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<'complete' | 'uncomplete' | null>(null);
+  // Leaving the inbox (folder switch) exits selection mode and drops the picks.
+  useEffect(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, [selectedLabel]);
+
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
-  const isInbox = selectedLabel === 'INBOX';
+  // INBOX, UNCOMPLETED and UNREAD all render the unified email+chat inbox.
+  const isInboxLike = INBOX_TABS.includes(selectedLabel);
+  // The Gmail label to actually fetch: the pseudo-tabs load real INBOX emails.
+  const emailLabel = isInboxLike ? 'INBOX' : selectedLabel;
 
   // Past recipients for To/CC autocomplete. Only fetched (once, then cached) when
   // the admin is actually composing/replying — the endpoint scans many messages.
@@ -307,10 +329,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   // Search only applies to the inbox (the search bar is inbox-only); folders are
   // left unfiltered even if a term is still in the box from a previous inbox visit.
-  const activeSearch = isInbox ? searchQuery || undefined : undefined;
+  const activeSearch = isInboxLike ? searchQuery || undefined : undefined;
 
   // Emails + chats are infinite queries; older pages load on scroll.
-  const emailQuery = useGmailEmails(companyId, selectedLabel, activeSearch);
+  const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch);
   const chatQuery = useGmailChats(companyId, account, activeSearch);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
@@ -346,6 +368,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const markChatUncompleteMutation = useMarkChatUncomplete(companyId);
   const polishMutation = usePolishReply();
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
+  const { data: uncompletedData } = useGmailUncompletedCount(companyId, account);
 
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -418,7 +441,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       ([entry]) => {
         if (!entry.isIntersecting) return;
         if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
-        if (isInbox && chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
+        if (isInboxLike && chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
       },
       { root: null, rootMargin: '300px' },
     );
@@ -426,7 +449,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     return () => obs.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    isInbox,
+    isInboxLike,
     selectedLabel,
     selectedMsgId,
     selectedSpaceId,
@@ -441,7 +464,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // clamped to a watermark — the newest "oldest-loaded" boundary among sources that
   // still have more — so the list never shows a half-loaded (out-of-order) tail.
   const unifiedItems: UnifiedItem[] = (() => {
-    if (!isInbox) return [];
+    if (!isInboxLike) return [];
     const emailUnified = emailItems.map((e): UnifiedItem => ({ kind: 'email', data: e }));
     const chatUnified = chatItems.map((c): UnifiedItem => ({ kind: 'chat', data: c }));
     const merged = [...emailUnified, ...chatUnified].sort(
@@ -464,14 +487,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const visibleItems = unifiedItems.filter((it) => {
     if (filter === 'email' && it.kind !== 'email') return false;
     if (filter === 'chat' && it.kind !== 'chat') return false;
-    if (filter === 'completed' && !it.data.isCompleted) return false;
-    if (filter === 'uncompleted' && it.data.isCompleted) return false;
-    if (filter === 'read' && !it.data.isRead) return false;
-    if (filter === 'unread' && it.data.isRead) return false;
+    // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
+    if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
+    if (selectedLabel === 'UNREAD' && it.data.isRead) return false;
     return true;
   });
-  // Whether the inbox is currently narrowed (drives empty-state copy).
-  const isFiltering = (filter !== 'all' && filter !== 'uncompleted') || activeSearch != null;
+  // Whether the inbox is currently narrowed by search/kind (drives empty-state copy).
+  const isFiltering = filter !== 'all' || activeSearch != null;
 
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
@@ -633,6 +655,52 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const uncomplete = (kind: 'email' | 'chat', id: string) => {
     if (kind === 'email') markEmailUncompleteMutation.mutate(id);
     else markChatUncompleteMutation.mutate(id);
+  };
+
+  // ── Bulk multi-select actions (inbox) ──────────────────────────────────────
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Master "select all" toggles every currently-visible (filtered + loaded) row.
+  const allVisibleSelected =
+    visibleItems.length > 0 && visibleItems.every((it) => selectedIds.has(it.data.id));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleItems.some((it) => selectedIds.has(it.data.id));
+  const toggleSelectAll = () => {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleItems.map((it) => it.data.id)));
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  // Fan a single action out over the selected messages, dispatching the matching
+  // existing (optimistic, self-invalidating) mutation per id by its kind. Note:
+  // email read/unread hits the Gmail API once per message — fine for this small
+  // admin tool; there is no batch endpoint. read/unread run immediately;
+  // complete/uncomplete are routed through a confirm dialog first (via bulkAction).
+  const runBulk = (action: 'read' | 'unread' | 'complete' | 'uncomplete') => {
+    const items = visibleItems.filter((it) => selectedIds.has(it.data.id));
+    for (const it of items) {
+      const email = it.kind === 'email';
+      if (action === 'read') (email ? markReadMutation : markChatReadMutation).mutate(it.data.id);
+      else if (action === 'unread') (email ? markUnreadMutation : markChatUnreadMutation).mutate(it.data.id);
+      else if (action === 'complete') (email ? markEmailCompleteMutation : markChatCompleteMutation).mutate(it.data.id);
+      else if (action === 'uncomplete') (email ? markEmailUncompleteMutation : markChatUncompleteMutation).mutate(it.data.id);
+    }
+    setSelectedIds(new Set());
+  };
+
+  const confirmBulkAction = () => {
+    if (bulkAction) runBulk(bulkAction);
+    setBulkAction(null);
   };
 
   // Small blue completed-check toggle shown on each inbox row. Not-complete →
@@ -920,6 +988,39 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             onClick={confirmComplete}
           >
             <CheckCircle2 size={14} /> Mark complete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // Bulk complete/uncomplete confirmation (inbox multi-select). read/unread apply
+  // without a prompt; state-changing bulk actions confirm here first.
+  const bulkConfirmDialog = (
+    <Dialog open={bulkAction !== null} onOpenChange={(open) => { if (!open) setBulkAction(null); }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>
+            {bulkAction === 'uncomplete'
+              ? `Mark ${selectedIds.size} message${selectedIds.size === 1 ? '' : 's'} not complete?`
+              : `Mark ${selectedIds.size} message${selectedIds.size === 1 ? '' : 's'} complete?`}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          {bulkAction === 'uncomplete'
+            ? 'This removes the completed check from the selected messages for everyone.'
+            : 'The selected messages stay in the inbox with a blue check, visible to everyone.'}
+        </p>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => setBulkAction(null)}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
+            onClick={confirmBulkAction}
+          >
+            {bulkAction === 'uncomplete' ? <Circle size={14} /> : <CheckCircle2 size={14} />}
+            {bulkAction === 'uncomplete' ? 'Mark not complete' : 'Mark complete'}
           </Button>
         </div>
       </DialogContent>
@@ -1526,7 +1627,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   // ── Inbox / folder view ───────────────────────────────────────────────────
 
-  const isLoading = isInbox ? (emailsLoading || chatsLoading) : emailsLoading;
+  const isLoading = isInboxLike ? (emailsLoading || chatsLoading) : emailsLoading;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1664,7 +1765,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           >
             <Icon size={13} />
             {label}
-            {id === 'INBOX' && (unreadData?.count ?? 0) > 0 && (
+            {id === 'UNCOMPLETED' && (uncompletedData?.count ?? 0) > 0 && (
+              <span className="ml-0.5 text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 font-semibold leading-none">
+                {uncompletedData!.count}
+              </span>
+            )}
+            {id === 'UNREAD' && (unreadData?.count ?? 0) > 0 && (
               <span className="ml-0.5 text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 font-semibold leading-none">
                 {unreadData!.count}
               </span>
@@ -1673,8 +1779,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         ))}
       </div>
 
-      {/* Search + filter toolbar (inbox only) */}
-      {isInbox && (
+      {/* Search + filter toolbar (inbox-like tabs only) */}
+      {isInboxLike && (
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1703,24 +1809,93 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <SelectItem value="all">All</SelectItem>
               <SelectItem value="email">Email</SelectItem>
               <SelectItem value="chat">Chat</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="uncompleted">Uncompleted</SelectItem>
-              <SelectItem value="read">Read</SelectItem>
-              <SelectItem value="unread">Unread</SelectItem>
             </SelectContent>
           </Select>
+          {/* Multi-select toggle (admin only) */}
+          {isAdmin && (
+            <Button
+              type="button"
+              variant={selectionMode ? 'default' : 'outline'}
+              size="sm"
+              className={selectionMode ? 'gap-1.5 bg-teal-600 hover:bg-teal-700 text-white' : 'gap-1.5'}
+              onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+            >
+              <ListChecks size={14} />
+              {selectionMode ? 'Done' : 'Select'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Bulk action bar (inbox-like, admin, selection mode) */}
+      {isInboxLike && isAdmin && selectionMode && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-teal-200 bg-teal-50/60 px-3 py-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-teal-900 cursor-pointer select-none">
+            <Checkbox
+              checked={allVisibleSelected}
+              indeterminate={someVisibleSelected}
+              onCheckedChange={toggleSelectAll}
+            />
+            Select all
+          </label>
+          <span className="text-xs text-muted-foreground">
+            {selectedIds.size} selected{' '}
+            <span className="text-muted-foreground/70">· of {visibleItems.length} loaded</span>
+          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            <Button
+              type="button" variant="outline" size="sm" className="gap-1"
+              disabled={selectedIds.size === 0}
+              onClick={() => runBulk('read')}
+            >
+              <MailOpen size={14} /> Mark read
+            </Button>
+            <Button
+              type="button" variant="outline" size="sm" className="gap-1"
+              disabled={selectedIds.size === 0}
+              onClick={() => runBulk('unread')}
+            >
+              <Mail size={14} /> Mark unread
+            </Button>
+            <Button
+              type="button" variant="outline" size="sm" className="gap-1 text-blue-700 border-blue-200 hover:bg-blue-50"
+              disabled={selectedIds.size === 0}
+              onClick={() => setBulkAction('complete')}
+            >
+              <CheckCircle2 size={14} /> Complete
+            </Button>
+            <Button
+              type="button" variant="outline" size="sm" className="gap-1"
+              disabled={selectedIds.size === 0}
+              onClick={() => setBulkAction('uncomplete')}
+            >
+              <Circle size={14} /> Uncomplete
+            </Button>
+            <Button
+              type="button" variant="ghost" size="sm" className="gap-1 text-muted-foreground"
+              onClick={exitSelection}
+            >
+              <X size={14} /> Cancel
+            </Button>
+          </div>
         </div>
       )}
 
       {/* Email / unified list */}
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
-      ) : isInbox ? (
+      ) : isInboxLike ? (
         /* ── Unified inbox (emails + chats) ── */
         <Card className="overflow-hidden gap-0 py-0 rounded-lg">
           {visibleItems.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
-              {isFiltering ? 'No messages match your search' : 'Inbox is empty'}
+              {isFiltering
+                ? 'No messages match your search'
+                : selectedLabel === 'UNCOMPLETED'
+                  ? 'No uncompleted messages'
+                  : selectedLabel === 'UNREAD'
+                    ? 'No unread messages'
+                    : 'Inbox is empty'}
             </div>
           ) : (
             visibleItems.map((item, idx) =>
@@ -1729,14 +1904,27 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   key={item.data.id}
                   className={[
                     'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer group',
-                    !item.data.isRead ? 'bg-white hover:bg-blue-50/60' : 'bg-muted/10 hover:bg-muted/30',
+                    selectionMode && selectedIds.has(item.data.id)
+                      ? 'bg-teal-50/70 hover:bg-teal-50'
+                      : !item.data.isRead ? 'bg-white hover:bg-blue-50/60' : 'bg-muted/10 hover:bg-muted/30',
                     idx > 0 ? 'border-t border-border/60' : '',
                   ].join(' ')}
-                  onClick={() => handleOpenEmail(item.data)}
+                  onClick={() =>
+                    selectionMode ? toggleSelected(item.data.id) : handleOpenEmail(item.data)
+                  }
                 >
                   {/* Unread accent bar */}
                   {!item.data.isRead && (
                     <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-teal-500 rounded-l-lg" />
+                  )}
+                  {/* Selection checkbox */}
+                  {selectionMode && (
+                    <div className="mt-1 shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(item.data.id)}
+                        onCheckedChange={() => toggleSelected(item.data.id)}
+                      />
+                    </div>
                   )}
                   {/* Read/unread toggle dot */}
                   <button
@@ -1784,14 +1972,27 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   key={item.data.id}
                   className={[
                     'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer',
-                    !item.data.isRead ? 'bg-white hover:bg-purple-50/60' : 'bg-muted/10 hover:bg-purple-50/40',
+                    selectionMode && selectedIds.has(item.data.id)
+                      ? 'bg-teal-50/70 hover:bg-teal-50'
+                      : !item.data.isRead ? 'bg-white hover:bg-purple-50/60' : 'bg-muted/10 hover:bg-purple-50/40',
                     idx > 0 ? 'border-t border-border/60' : '',
                   ].join(' ')}
-                  onClick={() => handleOpenChat(item.data)}
+                  onClick={() =>
+                    selectionMode ? toggleSelected(item.data.id) : handleOpenChat(item.data)
+                  }
                 >
                   {/* Unread accent bar */}
                   {!item.data.isRead && (
                     <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-purple-500 rounded-l-lg" />
+                  )}
+                  {/* Selection checkbox */}
+                  {selectionMode && (
+                    <div className="mt-1 shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(item.data.id)}
+                        onCheckedChange={() => toggleSelected(item.data.id)}
+                      />
+                    </div>
                   )}
                   {/* Read/unread toggle dot */}
                   <button
@@ -1906,8 +2107,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         <div ref={loadMoreRef} className="flex items-center justify-center py-4">
           {emailFetchingNext || chatFetchingNext ? (
             <span className="text-xs text-muted-foreground">Loading more…</span>
-          ) : (isInbox ? (!emailHasNext && !chatHasNext) : !emailHasNext) &&
-            (isInbox ? visibleItems.length > 0 : emailItems.length > 0) ? (
+          ) : (isInboxLike ? (!emailHasNext && !chatHasNext) : !emailHasNext) &&
+            (isInboxLike ? visibleItems.length > 0 : emailItems.length > 0) ? (
             <span className="text-xs text-muted-foreground/70">You're all caught up</span>
           ) : null}
         </div>
@@ -2054,6 +2255,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
       {/* Mark-complete confirmation */}
       {completeConfirmDialog}
+      {/* Bulk complete/uncomplete confirmation */}
+      {bulkConfirmDialog}
     </div>
   );
 }
