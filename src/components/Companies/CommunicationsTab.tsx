@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle,
+  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle, Forward,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -139,6 +139,14 @@ function prefixReSubject(subject: string): string {
   return /^re:/i.test(subject.trim()) ? subject : `Re: ${subject}`;
 }
 
+function prefixFwdSubject(subject: string): string {
+  return /^fwd?:/i.test(subject.trim()) ? subject : `Fwd: ${subject}`;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function senderInitial(from: string): string {
   const name = from.replace(/<[^>]+>/, '').trim().replace(/"/g, '');
   return (name[0] ?? '?').toUpperCase();
@@ -168,12 +176,71 @@ function htmlToText(html: string): string {
 const SIGNATURE_LEAD =
   '<div><br></div><div><br></div><div><br></div><div><br></div>';
 
-// Split a compose/reply body into the user's text and the trailing CYG
-// signature block (marked with data-cyg-signature), so polish never touches it.
+// Split a compose/reply/forward body into the user's text and the trailing
+// untouchable block — the CYG signature (data-cyg-signature) and/or a forwarded
+// quote (data-cyg-forward) — so polish never rewrites either. Cuts at whichever
+// marker appears first (an account with no signature still has its quote spared).
 function splitSignature(html: string): { body: string; sig: string } {
-  const idx = html.search(/<div[^>]*data-cyg-signature/i);
+  const idx = html.search(/<div[^>]*data-cyg-(signature|forward)/i);
   if (idx === -1) return { body: html, sig: '' };
   return { body: html.slice(0, idx), sig: html.slice(idx) };
+}
+
+// Scrub untrusted email HTML before it is seeded into the RichTextEditor.
+// The detail view renders bodies inside a sandboxed <iframe srcDoc>, but the
+// editor assigns `el.innerHTML = html` on a live contentEditable — where
+// `<img onerror>` / `<svg onload>` DO fire. Every forwarded body goes through
+// here first.
+const FORBIDDEN_TAGS = 'script,style,link,meta,iframe,object,embed,form,base';
+const URL_ATTRS = ['href', 'src', 'action'];
+
+function sanitizeForwardHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.body.querySelectorAll(FORBIDDEN_TAGS).forEach((el) => el.remove());
+  doc.body.querySelectorAll('*').forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (URL_ATTRS.includes(name) && /^\s*javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  // Inline images reference `cid:` parts of the ORIGINAL message. We re-attach
+  // their bytes as normal attachments instead, so drop the tags rather than
+  // leave broken-image icons for the recipient.
+  doc.body.querySelectorAll('img').forEach((img) => {
+    if (/^\s*cid:/i.test(img.getAttribute('src') ?? '')) img.remove();
+  });
+  return doc.body.innerHTML;
+}
+
+// The Gmail-style quoted block seeded into the forward editor. Order matters:
+// caret space → signature → quote, so `splitSignature` still cuts at the
+// signature and AI polish only ever touches the user's own text above it.
+function buildForwardedBody(detail: EmailDetail, signatureHtml: string): string {
+  const quoted = detail.bodyHtml
+    ? sanitizeForwardHtml(detail.bodyHtml)
+    : `<div>${escapeHtml(detail.bodyText ?? '').replace(/\n/g, '<br>')}</div>`;
+  const dateLabel = new Date(detail.date).toLocaleString();
+  return (
+    SIGNATURE_LEAD +
+    signatureHtml +
+    '<div><br></div>' +
+    // data-cyg-forward marks the quote as untouchable — see splitSignature.
+    '<div data-cyg-forward>' +
+    '<div>---------- Forwarded message ----------</div>' +
+    `<div>From: ${escapeHtml(detail.from)}</div>` +
+    `<div>Date: ${escapeHtml(dateLabel)}</div>` +
+    `<div>Subject: ${escapeHtml(detail.subject || '(no subject)')}</div>` +
+    `<div>To: ${escapeHtml(detail.to)}</div>` +
+    '<div><br></div>' +
+    quoted +
+    '</div>'
+  );
 }
 
 // Plain text → minimal HTML so an AI-polished reply renders in the RichTextEditor
@@ -275,6 +342,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const [composeForm, setComposeForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const composeFileRef = useRef<HTMLInputElement>(null);
+  // Forward: a compose-style dialog seeded from an existing email. `forwardSource`
+  // is held here (not read off `emailDetail`) so the dialog is independent of the
+  // detail view's lifecycle. `forwardSkipped` names attachments dropped because
+  // they exceed the server's limits.
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardForm, setForwardForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
+  const [forwardFiles, setForwardFiles] = useState<File[]>([]);
+  const [forwardAttLoading, setForwardAttLoading] = useState(false);
+  const [forwardAttError, setForwardAttError] = useState(false);
+  const [forwardSkipped, setForwardSkipped] = useState<string[]>([]);
+  const [forwardSource, setForwardSource] = useState<EmailDetail | null>(null);
+  const forwardFileRef = useRef<HTMLInputElement>(null);
+  // Bumped on every forward open — an in-flight attachment fetch whose token no
+  // longer matches has been superseded (dialog closed or reopened elsewhere).
+  const forwardReqRef = useRef(0);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyForm, setReplyForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
@@ -856,6 +938,96 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     resetPolish();
   };
 
+  // ── Forward ────────────────────────────────────────────────────────────────
+
+  // Server caps (gmail.controller.ts): FilesInterceptor('attachments', 10, { fileSize: 15MB }).
+  const MAX_FORWARD_FILES = 10;
+  const MAX_FORWARD_FILE_BYTES = 15 * 1024 * 1024;
+
+  const closeForward = () => {
+    forwardReqRef.current++;
+    setForwardOpen(false);
+    setForwardForm({ to: [], subject: '', body: '', cc: [] });
+    setForwardFiles([]);
+    setForwardSkipped([]);
+    setForwardAttError(false);
+    setForwardAttLoading(false);
+    setForwardSource(null);
+    resetPolish();
+  };
+
+  // Pull the original attachments back down through the authed attachment
+  // endpoint (the JWT rides in the query string) and turn them into Files so
+  // they re-upload with the forward. Inline images come along too — their
+  // `cid:` <img> tags were stripped from the quoted body.
+  const hydrateForwardAttachments = async (detail: EmailDetail, reqId: number) => {
+    const all = detail.attachments ?? [];
+    if (all.length === 0) return;
+
+    const tooBig = all.filter((a) => a.size > MAX_FORWARD_FILE_BYTES);
+    let keep = all.filter((a) => a.size <= MAX_FORWARD_FILE_BYTES);
+    const overflow = keep.slice(MAX_FORWARD_FILES);
+    keep = keep.slice(0, MAX_FORWARD_FILES);
+    const skipped = [...tooBig, ...overflow].map((a) => a.filename || 'attachment');
+    if (skipped.length) setForwardSkipped(skipped);
+    if (keep.length === 0) return;
+
+    setForwardAttLoading(true);
+    try {
+      const files = await Promise.all(
+        keep.map(async (att) => {
+          const res = await fetch(
+            emailAttachmentUrl(token ?? '', companyId, detail.id, att, 'attachment'),
+          );
+          if (!res.ok) throw new Error('Failed to fetch attachment');
+          const blob = await res.blob();
+          return new File([blob], att.filename || 'attachment', { type: att.mimeType });
+        }),
+      );
+      if (forwardReqRef.current !== reqId) return; // superseded
+      setForwardFiles(files);
+    } catch {
+      if (forwardReqRef.current !== reqId) return;
+      setForwardAttError(true);
+    } finally {
+      if (forwardReqRef.current === reqId) setForwardAttLoading(false);
+    }
+  };
+
+  const handleOpenForward = (detail: EmailDetail) => {
+    const reqId = ++forwardReqRef.current;
+    setForwardForm({
+      to: [],
+      cc: [],
+      subject: prefixFwdSubject(detail.subject || ''),
+      body: buildForwardedBody(detail, account?.signatureHtml ?? ''),
+    });
+    setForwardFiles([]);
+    setForwardSkipped([]);
+    setForwardAttError(false);
+    setForwardSource(detail);
+    setForwardOpen(true);
+    resetPolish();
+    // Non-blocking: the dialog is usable while attachments stream in.
+    void hydrateForwardAttachments(detail, reqId);
+  };
+
+  const handleSendForward = () => {
+    if (forwardForm.to.length === 0) return;
+    // No inReplyTo/threadId — a forward starts its own conversation.
+    sendMutation.mutate(
+      {
+        to: forwardForm.to.join(', '),
+        subject: forwardForm.subject,
+        body: htmlToText(forwardForm.body),
+        bodyHtml: forwardForm.body,
+        cc: forwardForm.cc.length ? forwardForm.cc.join(', ') : undefined,
+        files: forwardFiles,
+      },
+      { onSuccess: closeForward },
+    );
+  };
+
   // ── AI polish reply ────────────────────────────────────────────────────────
 
   const resetPolish = () => {
@@ -880,9 +1052,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     `Subject: ${composeForm.subject || '(no subject)'}\n` +
     `To: ${composeForm.to.join(', ') || '(unspecified)'}\n\n(New email — no prior conversation.)`;
 
+  // A forward polishes against the email being forwarded.
+  const forwardPolishContext = (): string =>
+    forwardSource ? buildEmailContext(forwardSource) : buildComposeContext();
+
   // Where a polished draft is written back. Reply and compose both use the
   // email polish tone; chat uses the chat tone.
-  type PolishTarget = 'reply' | 'compose' | 'chat';
+  type PolishTarget = 'reply' | 'compose' | 'chat' | 'forward';
 
   // Run the AI polish for a draft, stashing the source so "Re-polish" reuses it.
   const runPolish = (target: PolishTarget, draftPlain: string, context: string) => {
@@ -906,6 +1082,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     } else if (target === 'compose') {
       const { sig } = splitSignature(composeForm.body);
       setComposeForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
+    } else if (target === 'forward') {
+      // `sig` carries the signature AND the quoted forwarded block below it —
+      // polish only ever rewrites the user's own text above the signature.
+      const { sig } = splitSignature(forwardForm.body);
+      setForwardForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
     } else setChatReplyHtml(html);
     resetPolish();
   };
@@ -1506,6 +1687,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   onClick={() => handleOpenReply(emailDetail)}
                 >
                   <Reply size={14} /> Reply
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => handleOpenForward(emailDetail)}
+                >
+                  <Forward size={14} /> Forward
                 </Button>
                 {selectedMsgIsRead && (
                   <Button
@@ -2251,6 +2440,133 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <Button
               disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
               onClick={handleSend}
+              className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+            >
+              <Send size={14} />
+              {sendMutation.isPending ? 'Sending…' : 'Send'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Forward dialog — compose-shaped, seeded from the open email */}
+      <Dialog open={forwardOpen} onOpenChange={(open) => { if (!open) closeForward(); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Forward size={16} /> Forward
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">To</Label>
+              <RecipientAutocomplete
+                value={forwardForm.to}
+                onChange={(v) => setForwardForm((f) => ({ ...f, to: v }))}
+                contacts={contacts ?? []}
+                placeholder="recipient@example.com"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">CC</Label>
+              <RecipientAutocomplete
+                value={forwardForm.cc}
+                onChange={(v) => setForwardForm((f) => ({ ...f, cc: v }))}
+                contacts={contacts ?? []}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Subject</Label>
+              <Input
+                value={forwardForm.subject}
+                onChange={(e) => setForwardForm((f) => ({ ...f, subject: e.target.value }))}
+                placeholder="Subject"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Message</Label>
+              <RichTextEditor
+                html={forwardForm.body}
+                onChange={(h) => setForwardForm((f) => ({ ...f, body: h }))}
+                placeholder="Add a message…"
+                minHeight={200}
+              />
+            </div>
+            {/* Attachments — pre-filled from the original message */}
+            <div className="flex flex-col gap-2">
+              <input
+                ref={forwardFileRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(setForwardFiles, e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-fit gap-1"
+                onClick={() => forwardFileRef.current?.click()}
+              >
+                <Paperclip size={14} /> Attach
+              </Button>
+              {forwardAttLoading && (
+                <p className="text-xs text-muted-foreground">Loading attachments…</p>
+              )}
+              {forwardAttError && (
+                <p className="text-xs text-destructive">
+                  Couldn't load the original attachments. You can attach files manually.
+                </p>
+              )}
+              {forwardSkipped.length > 0 && (
+                <p className="text-xs text-amber-600">
+                  Not forwarded (too large or over the 10-file limit): {forwardSkipped.join(', ')}
+                </p>
+              )}
+              {forwardFiles.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {forwardFiles.map((f, i) => (
+                    <div
+                      key={`${f.name}:${f.size}:${i}`}
+                      className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                      {f.size > 0 && (
+                        <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        title="Remove attachment"
+                        onClick={() => setForwardFiles((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {sendMutation.isError && (
+              <p className="text-xs text-destructive">
+                {(sendMutation.error as Error)?.message ?? 'Failed to send'}
+              </p>
+            )}
+            {renderPolishPreview('forward', forwardPolishContext())}
+          </div>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" onClick={closeForward}>
+              Cancel
+            </Button>
+            {renderPolishButton('forward', htmlToText(splitSignature(forwardForm.body).body), forwardPolishContext())}
+            <Button
+              disabled={sendMutation.isPending || forwardForm.to.length === 0 || forwardAttLoading}
+              onClick={handleSendForward}
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
             >
               <Send size={14} />

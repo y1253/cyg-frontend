@@ -40,15 +40,33 @@ const EXT_KINDS: Record<string, AttachmentKind> = {
   pdf: 'pdf',
 };
 
+// MIME types that carry no information — always defer to the filename extension.
+const GENERIC_MIMES = new Set([
+  '',
+  'application/octet-stream',
+  'binary/octet-stream',
+  'application/download',
+  'application/force-download',
+]);
+
 // Resolve what to render from the MIME type first, then fall back to the filename
 // extension when the MIME is generic (e.g. voice attachments often arrive as
 // application/octet-stream, which would otherwise never enter the audio player).
+// Gmail's MIME strings are messy: they can carry parameters (`audio/mpeg; name="x"`),
+// arrive uppercased, or be absent entirely on `noname` parts — normalize before
+// matching, and only treat a filename tail as an extension when there is a real dot.
 function resolveKind(mimeType: string, filename: string): AttachmentKind {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType === 'application/pdf') return 'pdf';
-  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const mime = (mimeType ?? '').split(';')[0].trim().toLowerCase();
+  if (!GENERIC_MIMES.has(mime)) {
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime === 'application/pdf' || mime === 'application/x-pdf') return 'pdf';
+  }
+  const name = filename ?? '';
+  const dot = name.lastIndexOf('.');
+  // `dot > 0` — a leading-dot name like ".bashrc" has no extension.
+  const ext = dot > 0 ? name.slice(dot + 1).trim().toLowerCase() : '';
   return EXT_KINDS[ext] ?? 'other';
 }
 
@@ -70,6 +88,10 @@ interface AttachmentPreviewProps {
 // viewer, Drive files link out, everything else shows a download card. A download
 // button appears on hover over any attachment so downloading is always explicit —
 // clicking the attachment body previews, it never downloads by accident.
+//
+// A media element that can't decode its source keeps its player card and shows an
+// inline error; it must never fall through to the generic download card, or an
+// emailed voice note ends up looking like an unrecognized binary.
 export function AttachmentPreview({
   url,
   downloadUrl,
@@ -78,8 +100,16 @@ export function AttachmentPreview({
   size,
   driveHref,
 }: AttachmentPreviewProps) {
+  // `failed` only ever governs the IMAGE path — falling back to a download card is
+  // sensible for a broken <img>. Media failures are tracked separately so a single
+  // decode error can never collapse an audio/video attachment into an anonymous
+  // download card (which is what made emailed voice notes look like Word docs).
   const [failed, setFailed] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState(false);
+  // Set once the transcoded source has been rejected by the decoder, so the effect
+  // re-runs and retries with the original (untranscoded) bytes.
+  const [rawFallback, setRawFallback] = useState(false);
   const [lightbox, setLightbox] = useState(false);
 
   const kind = resolveKind(mimeType, filename);
@@ -96,7 +126,11 @@ export function AttachmentPreview({
     let objectUrl: string | null = null;
     // Audio is transcoded to MP3 server-side (browsers can't decode some chat voice
     // codecs). `url` already carries ?token=… so we just append the transcode flag.
-    const fetchUrl = kind === 'audio'
+    // On a retry (`rawFallback`) we ask for the original bytes instead: the server
+    // silently returns the untranscoded file when ffmpeg fails, so the "mp3" can
+    // really be Opus — some browsers decode the native codec fine.
+    const wantsTranscode = kind === 'audio' && !rawFallback;
+    const fetchUrl = wantsTranscode
       ? `${url}${url.includes('?') ? '&' : '?'}transcode=mp3`
       : url;
     // A plain fetch (no Range header) returns the full file in one shot.
@@ -111,13 +145,28 @@ export function AttachmentPreview({
         setBlobUrl(objectUrl);
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (cancelled) return;
+        // A failed transcode request still deserves the raw-bytes attempt.
+        if (wantsTranscode) setRawFallback(true);
+        else setMediaError(true);
       });
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isStreamedMedia, url, kind]);
+  }, [isStreamedMedia, url, kind, rawFallback]);
+
+  // The decoder rejected what we handed it. If that was the transcoded source, drop
+  // `blobUrl` and let the effect re-fetch the original bytes; otherwise give up and
+  // show an inline error (never a download card).
+  const handleMediaError = () => {
+    if (kind === 'audio' && !rawFallback) {
+      setBlobUrl(null);
+      setRawFallback(true);
+      return;
+    }
+    setMediaError(true);
+  };
 
   // Close the lightbox on Escape.
   useEffect(() => {
@@ -229,8 +278,12 @@ export function AttachmentPreview({
       return (
         <div className="group relative max-w-xs rounded-md border bg-background p-2">
           {downloadButton}
-          {blobUrl ? (
-            <audio controls preload="metadata" src={blobUrl} onError={() => setFailed(true)} className="w-full" />
+          {mediaError ? (
+            <span className="block text-xs text-destructive">
+              Couldn't play this file — use the download button.
+            </span>
+          ) : blobUrl ? (
+            <audio controls preload="metadata" src={blobUrl} onError={handleMediaError} className="w-full" />
           ) : (
             <span className="block text-xs text-muted-foreground">Loading audio…</span>
           )}
@@ -242,12 +295,16 @@ export function AttachmentPreview({
       return (
         <div className="group relative max-w-sm">
           {downloadButton}
-          {blobUrl ? (
+          {mediaError ? (
+            <span className="block rounded-md border bg-background p-2 text-xs text-destructive">
+              Couldn't play this file — use the download button.
+            </span>
+          ) : blobUrl ? (
             <video
               controls
               preload="metadata"
               src={blobUrl}
-              onError={() => setFailed(true)}
+              onError={handleMediaError}
               className="w-full rounded-md border"
             />
           ) : (
