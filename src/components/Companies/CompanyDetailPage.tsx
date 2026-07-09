@@ -1213,6 +1213,7 @@ function LinksSection({ companyId }: { companyId: number }) {
               value={addUrl}
               onChange={e => setAddUrl(e.target.value)}
               placeholder="https://..."
+              maxLength={2048}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -1269,7 +1270,7 @@ function LinksSection({ companyId }: { companyId: number }) {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>URL</Label>
-                <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} />
+                <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} maxLength={2048} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Username <span className="text-muted-foreground font-normal">(optional)</span></Label>

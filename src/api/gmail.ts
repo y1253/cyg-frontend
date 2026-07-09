@@ -27,6 +27,8 @@ export interface EmailSummary {
   snippet: string;
   isRead: boolean;
   isCompleted?: boolean;
+  // Real (non-inline) file attachments, surfaced on the list row as chips.
+  attachments?: EmailAttachment[];
 }
 
 // An attachment on an email. Bytes are fetched on demand from the download

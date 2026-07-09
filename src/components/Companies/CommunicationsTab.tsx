@@ -28,7 +28,7 @@ import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
-import { AttachmentPreview } from './AttachmentPreview';
+import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
 import { Button } from '@/components/ui/button';
@@ -272,12 +272,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<{ kind: 'email' | 'chat'; id: string; fromDetail?: boolean } | null>(null);
-  const [composeForm, setComposeForm] = useState({ to: '', subject: '', body: '', cc: '' });
+  const [composeForm, setComposeForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const composeFileRef = useRef<HTMLInputElement>(null);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
-  const [replyForm, setReplyForm] = useState({ to: '', subject: '', body: '', cc: '' });
+  const [replyForm, setReplyForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const replyFileRef = useRef<HTMLInputElement>(null);
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
@@ -587,20 +587,21 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   };
 
   const handleSend = () => {
+    if (composeForm.to.length === 0) return;
     // composeForm.body holds rich-text HTML; send it plus a plain-text fallback.
     sendMutation.mutate(
       {
-        to: composeForm.to,
+        to: composeForm.to.join(', '),
         subject: composeForm.subject,
         body: htmlToText(composeForm.body),
         bodyHtml: composeForm.body,
-        cc: composeForm.cc || undefined,
+        cc: composeForm.cc.length ? composeForm.cc.join(', ') : undefined,
         files: composeFiles,
       },
       {
         onSuccess: () => {
           setComposeOpen(false);
-          setComposeForm({ to: '', subject: '', body: '', cc: '' });
+          setComposeForm({ to: [], subject: '', body: '', cc: [] });
           setComposeFiles([]);
         },
       },
@@ -609,13 +610,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   const handleSendReply = () => {
     if (!emailDetail) return;
+    if (replyForm.to.length === 0) return;
     sendMutation.mutate(
       {
-        to: replyForm.to,
+        to: replyForm.to.join(', '),
         subject: replyForm.subject,
         body: htmlToText(replyForm.body),
         bodyHtml: replyForm.body,
-        cc: replyForm.cc || undefined,
+        cc: replyForm.cc.length ? replyForm.cc.join(', ') : undefined,
         inReplyTo: emailDetail.messageId || undefined,
         threadId: emailDetail.threadId || undefined,
         files: replyFiles,
@@ -623,7 +625,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       {
         onSuccess: () => {
           setReplyOpen(false);
-          setReplyForm({ to: '', subject: '', body: '', cc: '' });
+          setReplyForm({ to: [], subject: '', body: '', cc: [] });
           setReplyFiles([]);
         },
       },
@@ -722,6 +724,35 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     </button>
   );
 
+  // Gmail-style attachment chips shown under an email's subject/snippet in the list.
+  // Shows the first few, then a "+N" overflow (which just opens the email). Chip
+  // clicks stop propagation so the row's own click (open/select) doesn't fire.
+  const renderEmailAttachmentChips = (msg: EmailSummary) => {
+    const atts = msg.attachments ?? [];
+    if (atts.length === 0) return null;
+    const MAX_CHIPS = 3;
+    const shown = atts.slice(0, MAX_CHIPS);
+    const overflow = atts.length - shown.length;
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {shown.map((att) => (
+          <AttachmentChip
+            key={att.attachmentId}
+            url={emailAttachmentUrl(token ?? '', companyId, msg.id, att, 'inline')}
+            downloadUrl={emailAttachmentUrl(token ?? '', companyId, msg.id, att, 'attachment')}
+            mimeType={att.mimeType}
+            filename={att.filename}
+          />
+        ))}
+        {overflow > 0 && (
+          <span className="rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">
+            +{overflow}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const handleSelectFolder = (folderId: string) => {
     setSelectedLabel(folderId);
     setSelectedMsgId(null);
@@ -811,13 +842,14 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   };
 
   const handleOpenReply = (detail: EmailDetail) => {
+    const replyTo = extractEmail(detail.from);
     setReplyForm({
-      to: extractEmail(detail.from),
+      to: replyTo ? [replyTo] : [],
       subject: prefixReSubject(detail.subject || ''),
       // Seed the editable signature a few lines below the caret (matches Gmail;
       // server no longer appends it).
       body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '',
-      cc: '',
+      cc: [],
     });
     setReplyFiles([]);
     setReplyOpen(true);
@@ -846,7 +878,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // satisfies the polish endpoint's required `context` field.
   const buildComposeContext = (): string =>
     `Subject: ${composeForm.subject || '(no subject)'}\n` +
-    `To: ${composeForm.to || '(unspecified)'}\n\n(New email — no prior conversation.)`;
+    `To: ${composeForm.to.join(', ') || '(unspecified)'}\n\n(New email — no prior conversation.)`;
 
   // Where a polished draft is written back. Reply and compose both use the
   // email polish tone; chat uses the chat tone.
@@ -1642,7 +1674,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            onClick={() => { setComposeForm({ to: '', subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: '' }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
+            onClick={() => { setComposeForm({ to: [], subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: [] }); setComposeFiles([]); resetPolish(); setComposeOpen(true); }}
             className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
           >
             <Plus size={14} /> Compose
@@ -1963,6 +1995,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                       {item.data.subject || '(no subject)'}
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{item.data.snippet}</span>
+                    {renderEmailAttachmentChips(item.data)}
                   </div>
                 </div>
               ) : (
@@ -2092,6 +2125,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                       {msg.subject || '(no subject)'}
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{msg.snippet}</span>
+                    {renderEmailAttachmentChips(msg)}
                   </div>
                 </div>
               ))
