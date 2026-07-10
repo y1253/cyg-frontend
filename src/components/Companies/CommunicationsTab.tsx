@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle, Forward,
+  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle, Forward, Printer,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -27,7 +27,7 @@ import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
-import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment } from '@/api/gmail';
+import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
@@ -150,6 +150,107 @@ function escapeHtml(text: string): string {
 function senderInitial(from: string): string {
   const name = from.replace(/<[^>]+>/, '').trim().replace(/"/g, '');
   return (name[0] ?? '?').toUpperCase();
+}
+
+// Gmail-style print/download-as-PDF: open a fresh same-origin window, write a
+// self-contained printable document, and trigger the browser print dialog (whose
+// "Save as PDF" is the download path). Rebuilding the doc avoids the email body's
+// sandboxed iframe, which can't be printed directly.
+function openPrintWindow(title: string, contentHtml: string): void {
+  const win = window.open('', '_blank', 'noopener,noreferrer,width=800,height=1000');
+  if (!win) {
+    alert('Please allow pop-ups for this site to print or save as PDF.');
+    return;
+  }
+  const doc = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)}</title>
+<style>
+  @page { margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #111; margin: 0; padding: 24px; font-size: 13px; line-height: 1.5; }
+  .print-header { border-bottom: 1px solid #ddd; padding-bottom: 12px; margin-bottom: 16px; }
+  .print-header h1 { font-size: 18px; margin: 0 0 8px; }
+  .print-meta { font-size: 12px; color: #444; }
+  .print-meta div { margin: 1px 0; }
+  .print-meta .label { font-weight: 600; }
+  .print-body img { max-width: 100%; height: auto; }
+  .print-attachments { margin-top: 16px; padding-top: 8px; border-top: 1px solid #eee; font-size: 12px; color: #444; }
+  .print-attachments ul { margin: 4px 0 0; padding-left: 18px; }
+  .chat-msg { margin: 0 0 14px; page-break-inside: avoid; }
+  .chat-msg .who { font-size: 12px; font-weight: 600; color: #222; }
+  .chat-msg .when { font-size: 11px; color: #888; margin-left: 8px; font-weight: 400; }
+  .chat-msg .text { white-space: pre-wrap; margin-top: 2px; }
+</style>
+</head>
+<body>${contentHtml}</body>
+</html>`;
+  win.document.open();
+  win.document.write(doc);
+  win.document.close();
+  // Print after content (incl. images) has loaded; close the tab when done.
+  win.onload = () => {
+    win.focus();
+    win.print();
+  };
+  win.onafterprint = () => win.close();
+}
+
+// Build the printable HTML for a single email (header + rendered body + list of
+// non-inline attachments). Reuses the same inline-image rewrite + base-target
+// transforms as the on-screen iframe so embedded images resolve.
+function buildEmailPrintHtml(
+  email: EmailDetail,
+  urlFor: (att: EmailAttachment) => string,
+): string {
+  const bodyHtml = email.bodyHtml
+    ? injectBaseTarget(rewriteInlineImages(email.bodyHtml, email.attachments ?? [], urlFor))
+    : `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(
+        email.bodyText ?? '(empty)',
+      )}</pre>`;
+  const strip = (email.attachments ?? []).filter((a) => !a.isInline);
+  const attachmentsHtml = strip.length
+    ? `<div class="print-attachments"><span class="label">Attachments (${strip.length}):</span><ul>${strip
+        .map((a) => `<li>${escapeHtml(a.filename)}</li>`)
+        .join('')}</ul></div>`
+    : '';
+  return `<div class="print-header">
+    <h1>${escapeHtml(email.subject || '(no subject)')}</h1>
+    <div class="print-meta">
+      <div><span class="label">From:</span> ${escapeHtml(email.from)}</div>
+      <div><span class="label">To:</span> ${escapeHtml(email.to)}</div>
+      <div><span class="label">Date:</span> ${escapeHtml(formatEmailDate(email.date))}</div>
+    </div>
+  </div>
+  <div class="print-body">${bodyHtml}</div>
+  ${attachmentsHtml}`;
+}
+
+// Build the printable transcript for a chat conversation (plain text, one block
+// per message). `messages` is the loaded thread (frozen at the anchored message).
+function buildChatPrintHtml(spaceName: string, messages: ChatMessage[]): string {
+  const rows = messages
+    .map((m) => {
+      const when = m.createTime
+        ? new Date(m.createTime).toLocaleString([], {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          })
+        : '';
+      const atts = (m.attachments ?? [])
+        .map((a) => `<div class="text">📎 ${escapeHtml(a.contentName || a.name)}</div>`)
+        .join('');
+      return `<div class="chat-msg">
+        <div class="who">${escapeHtml(m.isOwn ? 'You' : m.sender)}<span class="when">${escapeHtml(when)}</span></div>
+        ${m.text ? `<div class="text">${escapeHtml(m.text)}</div>` : ''}
+        ${atts}
+      </div>`;
+    })
+    .join('');
+  return `<div class="print-header"><h1>${escapeHtml(spaceName)}</h1></div>${rows}`;
 }
 
 // De-dupe a list by `id`, keeping first occurrence (guards against page overlap).
@@ -406,10 +507,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     : `Search ${(FOLDERS.find((f) => f.id === selectedLabel)?.label ?? '').toLowerCase()}…`;
 
   // Past recipients for To/CC autocomplete. Only fetched (once, then cached) when
-  // the user is actually composing/replying — the endpoint scans many messages.
+  // the user is actually composing/replying/forwarding — the endpoint scans many messages.
   const { data: contacts } = useGmailContacts(
     companyId,
-    !!account && (composeOpen || replyOpen),
+    !!account && (composeOpen || replyOpen || forwardOpen),
   );
 
   // Search is server-side (Gmail `q`), so it covers the whole folder, not just
@@ -517,43 +618,20 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     return () => obs.disconnect();
   }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
 
-  // Infinite scroll: when the bottom sentinel nears the viewport, load the next
-  // (older) page of BOTH sources. `rootMargin` prefetches slightly early.
   const emailHasNext = emailQuery.hasNextPage;
   const emailFetchingNext = emailQuery.isFetchingNextPage;
   const chatHasNext = chatQuery.hasNextPage;
   const chatFetchingNext = chatQuery.isFetchingNextPage;
-  useEffect(() => {
-    const el = loadMoreRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
-        if (isInboxLike && chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
-      },
-      { root: null, rootMargin: '300px' },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isInboxLike,
-    selectedLabel,
-    selectedMsgId,
-    selectedSpaceId,
-    emailHasNext,
-    emailFetchingNext,
-    chatHasNext,
-    chatFetchingNext,
-  ]);
 
   // Build unified sorted list for INBOX (emails + one row per incoming chat msg),
   // newest first. Because emails and chats page independently, the visible tail is
   // clamped to a watermark — the newest "oldest-loaded" boundary among sources that
   // still have more — so the list never shows a half-loaded (out-of-order) tail.
-  const unifiedItems: UnifiedItem[] = (() => {
-    if (!isInboxLike) return [];
+  // `clampSource` is whichever source's tail == the cutoff (the one PINNING the
+  // list); advancing it is the only way to lower the cutoff and reveal more.
+  const { visible: unifiedItems, hiddenCount, clampSource } = useMemo(() => {
+    if (!isInboxLike)
+      return { visible: [] as UnifiedItem[], hiddenCount: 0, clampSource: null as 'email' | 'chat' | null };
     const emailUnified = emailItems.map((e): UnifiedItem => ({ kind: 'email', data: e }));
     const chatUnified = chatItems.map((c): UnifiedItem => ({ kind: 'chat', data: c }));
     const merged = [...emailUnified, ...chatUnified].sort(
@@ -566,10 +644,88 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     const emailTail = emailQuery.hasNextPage ? minTs(emailUnified) : -Infinity;
     const chatTail = chatQuery.hasNextPage ? minTs(chatUnified) : -Infinity;
     const cutoff = Math.max(emailTail, chatTail);
-    return cutoff === -Infinity
-      ? merged
-      : merged.filter((it) => getItemTimestamp(it) >= cutoff);
-  })();
+    const visible =
+      cutoff === -Infinity
+        ? merged
+        : merged.filter((it) => getItemTimestamp(it) >= cutoff);
+    const clampSource: 'email' | 'chat' | null =
+      cutoff === -Infinity ? null : emailTail >= chatTail ? 'email' : 'chat';
+    return { visible, hiddenCount: merged.length - visible.length, clampSource };
+  }, [isInboxLike, emailItems, chatItems, emailQuery.hasNextPage, chatQuery.hasNextPage]);
+
+  // Advance the PINNING source only (advancing the other loads pages that stay
+  // clamped out of view). Each successful page strictly lowers the cutoff, so the
+  // list provably grows and the observer loop below terminates.
+  const loadMore = useCallback(() => {
+    if (!isInboxLike) {
+      if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
+      return;
+    }
+    if (clampSource === 'chat') {
+      if (chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
+    } else {
+      // 'email' or null (the other side is exhausted) — walk email, then chat.
+      if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
+      else if (chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
+    }
+  }, [
+    isInboxLike,
+    clampSource,
+    emailHasNext,
+    emailFetchingNext,
+    chatHasNext,
+    chatFetchingNext,
+    emailQuery,
+    chatQuery,
+  ]);
+
+  // Runaway guard for the auto-fill loop: the observer re-fires while the sentinel
+  // stays inside rootMargin, so a bottomless pinning chat space (or a page that
+  // returns only duplicates so the tail can't move) could spin. Cap per burst and
+  // bail when the loaded count stalls; reset once the clamp is fully released.
+  const fillGuard = useRef({ lastTotal: -1, stalls: 0, fetches: 0 });
+  useEffect(() => {
+    if (hiddenCount === 0) fillGuard.current = { lastTotal: -1, stalls: 0, fetches: 0 };
+  }, [hiddenCount]);
+
+  // Infinite scroll: when the bottom sentinel nears the scroll container, load the
+  // next (older) page of the pinning source. `rootMargin` prefetches slightly early.
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const root = el.closest('.overflow-y-auto') as HTMLElement | null;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        const g = fillGuard.current;
+        const total = emailItems.length + chatItems.length;
+        if (total !== g.lastTotal) {
+          g.lastTotal = total;
+          g.stalls = 0;
+        } else {
+          g.stalls++;
+        }
+        if (g.stalls >= 2) return; // pages returned no new rows (overlap) — stop
+        if (g.fetches >= 12) return; // per-burst cap
+        g.fetches++;
+        loadMore();
+      },
+      { root, rootMargin: '400px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isInboxLike,
+    selectedLabel,
+    selectedMsgId,
+    selectedSpaceId,
+    loadMore,
+    emailHasNext,
+    emailFetchingNext,
+    chatHasNext,
+    chatFetchingNext,
+  ]);
 
   // Apply the kind/state filter dropdown over the merged inbox. Search itself is
   // already applied server-side (Gmail `q` for email, text match for chat).
@@ -1062,6 +1218,19 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const buildChatContext = (): string =>
     threadMessages.map((m) => `${m.isOwn ? 'You' : m.sender}: ${m.text}`).join('\n');
 
+  // Print / download-as-PDF (Gmail-style) for the opened email or chat.
+  const handlePrintEmail = (email: EmailDetail) => {
+    const html = buildEmailPrintHtml(email, (att) =>
+      emailAttachmentUrl(token ?? '', companyId, email.id, att, 'inline'),
+    );
+    openPrintWindow(email.subject || '(no subject)', html);
+  };
+
+  const handlePrintChat = () => {
+    const name = chatThread?.spaceName || selectedSpaceName || 'Conversation';
+    openPrintWindow(name, buildChatPrintHtml(name, threadMessages));
+  };
+
   // Context for a brand-new compose (no prior thread). Kept non-empty so it
   // satisfies the polish endpoint's required `context` field.
   const buildComposeContext = (): string =>
@@ -1424,6 +1593,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <span className="text-sm font-medium truncate">{selectedSpaceName}</span>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                disabled={threadMessages.length === 0}
+                onClick={handlePrintChat}
+              >
+                <Printer size={14} /> Print
+              </Button>
               {openedChatMsgId && (
                 (chatItems.find((m) => m.id === openedChatMsgId)?.isCompleted ?? false) ? (
                   <Button
@@ -1624,13 +1802,75 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   if (selectedMsgId) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-2 bg-background/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-2 bg-background/95 backdrop-blur-sm flex items-center justify-between gap-2">
           <button
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
           >
             <ArrowLeft size={14} /> Back
           </button>
+          {emailDetail && !replyOpen && !forwardOpen && (
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => handleOpenReply(emailDetail)}
+              >
+                <Reply size={14} /> Reply
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => handleOpenForward(emailDetail)}
+              >
+                <Forward size={14} /> Forward
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => handlePrintEmail(emailDetail)}
+              >
+                <Printer size={14} /> Print
+              </Button>
+              {selectedMsgIsRead && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-muted-foreground"
+                  disabled={markUnreadMutation.isPending}
+                  onClick={() => {
+                    markUnreadMutation.mutate(emailDetail.id, {
+                      onSuccess: () => { setSelectedMsgId(null); setReplyOpen(false); },
+                    });
+                  }}
+                >
+                  <MailOpen size={14} /> Mark as unread
+                </Button>
+              )}
+              {(emailItems.find((m) => m.id === emailDetail.id)?.isCompleted ?? false) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-blue-600 border-blue-200 hover:text-blue-700"
+                  onClick={() => uncomplete('email', emailDetail.id)}
+                >
+                  <CheckCircle2 size={14} className="fill-blue-100" /> Completed
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id, fromDetail: true })}
+                >
+                  <CheckCircle2 size={14} /> Mark complete
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {emailDetailLoading && (
@@ -1692,62 +1932,6 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </div>
               );
             })()}
-
-            {/* Action buttons */}
-            {!replyOpen && !forwardOpen && (
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1"
-                  onClick={() => handleOpenReply(emailDetail)}
-                >
-                  <Reply size={14} /> Reply
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1"
-                  onClick={() => handleOpenForward(emailDetail)}
-                >
-                  <Forward size={14} /> Forward
-                </Button>
-                {selectedMsgIsRead && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1 text-muted-foreground"
-                    disabled={markUnreadMutation.isPending}
-                    onClick={() => {
-                      markUnreadMutation.mutate(emailDetail.id, {
-                        onSuccess: () => { setSelectedMsgId(null); setReplyOpen(false); },
-                      });
-                    }}
-                  >
-                    <MailOpen size={14} /> Mark as unread
-                  </Button>
-                )}
-                {(emailItems.find((m) => m.id === emailDetail.id)?.isCompleted ?? false) ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1 text-blue-600 border-blue-200 hover:text-blue-700"
-                    onClick={() => uncomplete('email', emailDetail.id)}
-                  >
-                    <CheckCircle2 size={14} className="fill-blue-100" /> Completed
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1"
-                    onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id, fromDetail: true })}
-                  >
-                    <CheckCircle2 size={14} /> Mark complete
-                  </Button>
-                )}
-              </div>
-            )}
 
             {/* Inline reply form */}
             {replyOpen && (
