@@ -157,7 +157,9 @@ function senderInitial(from: string): string {
 // "Save as PDF" is the download path). Rebuilding the doc avoids the email body's
 // sandboxed iframe, which can't be printed directly.
 function openPrintWindow(title: string, contentHtml: string): void {
-  const win = window.open('', '_blank', 'noopener,noreferrer,width=800,height=1000');
+  // No `noopener`/`noreferrer` here — those make window.open return null (while
+  // still opening a blank tab), leaving nothing to write the document into.
+  const win = window.open('', '_blank', 'width=800,height=1000');
   if (!win) {
     alert('Please allow pop-ups for this site to print or save as PDF.');
     return;
@@ -191,11 +193,18 @@ function openPrintWindow(title: string, contentHtml: string): void {
   win.document.open();
   win.document.write(doc);
   win.document.close();
-  // Print after content (incl. images) has loaded; close the tab when done.
-  win.onload = () => {
+  win.focus();
+  // Print after content (incl. images) has loaded; handle the already-complete
+  // case too (the written doc may finish loading before we attach onload).
+  const triggerPrint = () => {
     win.focus();
     win.print();
   };
+  if (win.document.readyState === 'complete') {
+    setTimeout(triggerPrint, 300);
+  } else {
+    win.onload = triggerPrint;
+  }
   win.onafterprint = () => win.close();
 }
 
@@ -1801,8 +1810,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   if (selectedMsgId) {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-2 bg-background/95 backdrop-blur-sm flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-3">
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
@@ -1810,7 +1819,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <ArrowLeft size={14} /> Back
           </button>
           {emailDetail && !replyOpen && !forwardOpen && (
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant="outline"
