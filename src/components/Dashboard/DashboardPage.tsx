@@ -11,13 +11,24 @@ import {
 } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
+import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
 import type { CompanySummary } from '@/api/companies';
 
 type StatusFilter = 'all' | 'important' | 'overdue25' | 'unassigned';
 
 // ─── Company row ──────────────────────────────────────────────────────────────
 
-function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: () => void }) {
+function CompanyRow({
+  company,
+  uncompleted,
+  onClick,
+}: {
+  company: CompanySummary;
+  // Undefined when the company has no Gmail account connected — no count exists,
+  // which is different from a count of zero, so no badge is rendered.
+  uncompleted: number | undefined;
+  onClick: () => void;
+}) {
   const hasUrgent = company.urgentTodos > 0;
 
   return (
@@ -52,6 +63,11 @@ function CompanyRow({ company, onClick }: { company: CompanySummary; onClick: ()
         {company.importantTodos > 0 && (
           <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-none">
             {company.importantTodos} important
+          </span>
+        )}
+        {uncompleted !== undefined && (
+          <span className="text-[10px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 leading-none">
+            {uncompleted} uncompleted
           </span>
         )}
         <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
@@ -130,6 +146,8 @@ export function DashboardPage() {
   const isAdmin   = user?.role === 'ADMIN';
 
   const { data: companies = [], isLoading } = useCompanies();
+  // Resolves after the company list — badges fill in once it lands.
+  const { data: uncompletedCounts } = useGmailUncompletedCounts();
 
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -238,6 +256,7 @@ export function DashboardPage() {
             <CompanyRow
               key={company.id}
               company={company}
+              uncompleted={uncompletedCounts?.[company.id]}
               onClick={() => navigate(`/companies/${company.id}`)}
             />
           ))}

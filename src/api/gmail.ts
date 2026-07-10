@@ -318,6 +318,15 @@ export async function fetchUncompletedCount(
   return res.json() as Promise<{ count: number }>;
 }
 
+/** Uncompleted counts keyed by company id. Companies without Gmail connected are absent. */
+export async function fetchUncompletedCounts(
+  token: string,
+): Promise<Record<string, number>> {
+  const res = await fetchWithAuth(token, `${API}/gmail/uncompleted-counts`);
+  if (!res.ok) throw new Error('Failed to fetch uncompleted counts');
+  return res.json() as Promise<Record<string, number>>;
+}
+
 export async function sendEmail(
   token: string,
   companyId: number,

@@ -23,6 +23,10 @@ interface RichTextEditorProps {
   onChange: (html: string) => void;
   placeholder?: string;
   minHeight?: number;
+  // Caps the editor's height so its `overflow-y-auto` engages and a long body
+  // scrolls in place instead of pushing the Send button off the page. Undefined
+  // (the default) lets the editor grow to fit its content.
+  maxHeight?: number;
   // 'email' → full Gmail-style toolbar (HTML body). 'chat' → reduced toolbar
   // (Bold/Italic/Strikethrough/Bulleted list) for Google-Chat-compatible output.
   mode?: 'email' | 'chat';
@@ -115,6 +119,7 @@ export function RichTextEditor({
   onChange,
   placeholder,
   minHeight = 160,
+  maxHeight,
   mode = 'email',
 }: RichTextEditorProps) {
   const isChat = mode === 'chat';
@@ -342,7 +347,7 @@ export function RichTextEditor({
           onKeyUp={() => { saveSelection(); refreshActive(); }}
           onMouseUp={() => { saveSelection(); refreshActive(); }}
           onBlur={saveSelection}
-          style={{ minHeight }}
+          style={{ minHeight, maxHeight }}
           className="w-full overflow-y-auto px-3 py-2 text-sm outline-none [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground"
         />
       </div>

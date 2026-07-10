@@ -39,6 +39,7 @@ import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeletedCompanies';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
+import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
@@ -1991,6 +1992,7 @@ export function CompanyDetailPage() {
   const [disconnectGmailConfirmOpen, setDisconnectGmailConfirmOpen] = useState(false);
 
   const { data: gmailAccount } = useGmailAccount(companyId);
+  const { data: uncompletedData } = useGmailUncompletedCount(companyId, gmailAccount);
   const disconnectGmailMutation = useDisconnectGmail(companyId);
 
   const handleConnectGmail = useCallback(async () => {
@@ -2308,8 +2310,10 @@ export function CompanyDetailPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">Overdue 25 days</p>
               </div>
               <div className="rounded-lg border bg-background px-4 py-3 text-center">
-                <p className="text-2xl font-bold text-green-600">{resolvedTodos.length}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Resolved</p>
+                <p className="text-2xl font-bold text-red-600">
+                  {gmailAccount ? (uncompletedData?.count ?? 0) : '—'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Uncompleted</p>
               </div>
             </div>
 
@@ -2323,7 +2327,11 @@ export function CompanyDetailPage() {
             <span className="text-purple-600 font-medium">
               {openTodos.filter(t => getTodoUrgency(t.dueDate) === 'urgent').length} overdue 25d
             </span>
-            <span className="text-green-600 font-medium">{resolvedTodos.length} resolved</span>
+            {gmailAccount && (
+              <span className="text-red-600 font-medium">
+                {uncompletedData?.count ?? 0} uncompleted
+              </span>
+            )}
           </div>
         )}
 
@@ -2338,7 +2346,7 @@ export function CompanyDetailPage() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
 
         {/* ── Details tab ── */}
         {tab === 'details' && (

@@ -401,6 +401,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const isInboxLike = INBOX_TABS.includes(selectedLabel);
   // The Gmail label to actually fetch: the pseudo-tabs load real INBOX emails.
   const emailLabel = isInboxLike ? 'INBOX' : selectedLabel;
+  const searchPlaceholder = isInboxLike
+    ? 'Search inbox…'
+    : `Search ${(FOLDERS.find((f) => f.id === selectedLabel)?.label ?? '').toLowerCase()}…`;
 
   // Past recipients for To/CC autocomplete. Only fetched (once, then cached) when
   // the user is actually composing/replying — the endpoint scans many messages.
@@ -409,13 +412,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     !!account && (composeOpen || replyOpen),
   );
 
-  // Search only applies to the inbox (the search bar is inbox-only); folders are
-  // left unfiltered even if a term is still in the box from a previous inbox visit.
-  const activeSearch = isInboxLike ? searchQuery || undefined : undefined;
+  // Search is server-side (Gmail `q`), so it covers the whole folder, not just
+  // the pages loaded so far. Every folder has a search box.
+  const activeSearch = searchQuery || undefined;
 
-  // Emails + chats are infinite queries; older pages load on scroll.
+  // Emails + chats are infinite queries; older pages load on scroll. Chats only
+  // exist in the inbox, and searching them costs a server-side in-memory scan —
+  // so don't pay for it while the user is sitting in Sent/Spam/Trash.
   const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch);
-  const chatQuery = useGmailChats(companyId, account, activeSearch);
+  const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
   const chatsError = chatQuery.error;
@@ -458,6 +463,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // Inline reply forms render below a (potentially tall) message/thread; scroll
   // them into view when opened so the user doesn't have to scroll down to reply.
   const replyFormRef = useRef<HTMLDivElement>(null);
+  const forwardFormRef = useRef<HTMLDivElement>(null);
   const chatReplyFormRef = useRef<HTMLDivElement>(null);
   // Whether the anchor (opened) message is currently visible in the scroll
   // container — drives the floating "Back to message" button. `anchorDir` is
@@ -469,11 +475,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     anchorRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, []);
 
-  // When a reply form opens, scroll it into view (it mounts on the flag flip, so
-  // the effect runs after it's in the DOM and the ref is populated).
+  // When a reply or forward form opens, scroll it into view (it mounts on the
+  // flag flip, so the effect runs after it's in the DOM and the ref is populated).
   useEffect(() => {
     if (replyOpen) replyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [replyOpen]);
+    if (forwardOpen) forwardFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [replyOpen, forwardOpen]);
 
   useEffect(() => {
     if (chatReplyOpen) chatReplyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -839,6 +846,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     setSelectedLabel(folderId);
     setSelectedMsgId(null);
     setSelectedSpaceId(null);
+    // Drop the term rather than carry it into the new folder. Clear the debounced
+    // value too, or it drives the new folder's query for another 350ms.
+    setSearchInput('');
+    setSearchQuery('');
   };
 
   const handleOpenEmail = (msg: EmailSummary) => {
@@ -924,6 +935,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   };
 
   const handleOpenReply = (detail: EmailDetail) => {
+    // Reply and forward share the same inline slot below the message.
+    closeForward();
     const replyTo = extractEmail(detail.from);
     setReplyForm({
       to: replyTo ? [replyTo] : [],
@@ -995,6 +1008,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   };
 
   const handleOpenForward = (detail: EmailDetail) => {
+    // Reply and forward share the same inline slot below the message.
+    setReplyOpen(false);
+    setReplyFiles([]);
     const reqId = ++forwardReqRef.current;
     setForwardForm({
       to: [],
@@ -1678,7 +1694,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             })()}
 
             {/* Action buttons */}
-            {!replyOpen && (
+            {!replyOpen && !forwardOpen && (
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
@@ -1768,6 +1784,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                     onChange={(h) => setReplyForm((f) => ({ ...f, body: h }))}
                     placeholder="Write your reply…"
                     minHeight={140}
+                    maxHeight={320}
                   />
                 </div>
                 {/* Attachments */}
@@ -1834,6 +1851,132 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                   </Button>
                   {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext(emailDetail))}
                   <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); resetPolish(); }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Inline forward form — seeded from the open email */}
+            {forwardOpen && (
+              <div ref={forwardFormRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <Forward size={13} /> Forward
+                </p>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">To</Label>
+                  <RecipientAutocomplete
+                    value={forwardForm.to}
+                    onChange={(v) => setForwardForm((f) => ({ ...f, to: v }))}
+                    contacts={contacts ?? []}
+                    placeholder="recipient@example.com"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">CC</Label>
+                  <RecipientAutocomplete
+                    value={forwardForm.cc}
+                    onChange={(v) => setForwardForm((f) => ({ ...f, cc: v }))}
+                    contacts={contacts ?? []}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Subject</Label>
+                  <Input
+                    value={forwardForm.subject}
+                    onChange={(e) => setForwardForm((f) => ({ ...f, subject: e.target.value }))}
+                    placeholder="Subject"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Message</Label>
+                  <RichTextEditor
+                    html={forwardForm.body}
+                    onChange={(h) => setForwardForm((f) => ({ ...f, body: h }))}
+                    placeholder="Add a message…"
+                    minHeight={200}
+                    // Seeded with the whole quoted original — cap it so Send stays close.
+                    maxHeight={360}
+                  />
+                </div>
+                {/* Attachments — pre-filled from the original message */}
+                <div className="flex flex-col gap-2">
+                  <input
+                    ref={forwardFileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      addFiles(setForwardFiles, e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-fit gap-1"
+                    onClick={() => forwardFileRef.current?.click()}
+                  >
+                    <Paperclip size={14} /> Attach
+                  </Button>
+                  {forwardAttLoading && (
+                    <p className="text-xs text-muted-foreground">Loading attachments…</p>
+                  )}
+                  {forwardAttError && (
+                    <p className="text-xs text-destructive">
+                      Couldn't load the original attachments. You can attach files manually.
+                    </p>
+                  )}
+                  {forwardSkipped.length > 0 && (
+                    <p className="text-xs text-amber-600">
+                      Not forwarded (too large or over the 10-file limit): {forwardSkipped.join(', ')}
+                    </p>
+                  )}
+                  {forwardFiles.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {forwardFiles.map((f, i) => (
+                        <div
+                          key={`${f.name}:${f.size}:${i}`}
+                          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                        >
+                          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                          {f.size > 0 && (
+                            <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+                          )}
+                          <button
+                            type="button"
+                            className="shrink-0 text-muted-foreground hover:text-foreground"
+                            title="Remove attachment"
+                            onClick={() => setForwardFiles((prev) => prev.filter((_, j) => j !== i))}
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {sendMutation.isError && (
+                  <p className="text-xs text-destructive">
+                    {(sendMutation.error as Error)?.message ?? 'Failed to send'}
+                  </p>
+                )}
+                {renderPolishPreview('forward', forwardPolishContext())}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={sendMutation.isPending || forwardForm.to.length === 0 || forwardAttLoading}
+                    onClick={handleSendForward}
+                    className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+                  >
+                    <Send size={13} />
+                    {sendMutation.isPending ? 'Sending…' : 'Send'}
+                  </Button>
+                  {renderPolishButton('forward', htmlToText(splitSignature(forwardForm.body).body), forwardPolishContext())}
+                  <Button size="sm" variant="outline" onClick={closeForward}>
                     Cancel
                   </Button>
                 </div>
@@ -1998,53 +2141,56 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         ))}
       </div>
 
-      {/* Search + filter toolbar (inbox-like tabs only) */}
-      {isInboxLike && (
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search inbox…"
-              className="pl-8 pr-8 h-9"
-            />
-            {searchInput && (
-              <button
-                type="button"
-                title="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setSearchInput('')}
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-          <Select value={filter} onValueChange={(v) => setFilter((v as typeof filter) ?? 'all')}>
-            <SelectTrigger size="sm" className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="email">Email</SelectItem>
-              <SelectItem value="chat">Chat</SelectItem>
-            </SelectContent>
-          </Select>
-          {/* Multi-select toggle (admin only) */}
-          {isAdmin && (
-            <Button
+      {/* Search + filter toolbar. Search works in every folder; the kind filter and
+          multi-select are inbox-only (chats and completion state live there). */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="pl-8 pr-8 h-9"
+          />
+          {searchInput && (
+            <button
               type="button"
-              variant={selectionMode ? 'default' : 'outline'}
-              size="sm"
-              className={selectionMode ? 'gap-1.5 bg-teal-600 hover:bg-teal-700 text-white' : 'gap-1.5'}
-              onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+              title="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setSearchInput('')}
             >
-              <ListChecks size={14} />
-              {selectionMode ? 'Done' : 'Select'}
-            </Button>
+              <X size={14} />
+            </button>
           )}
         </div>
-      )}
+        {isInboxLike && (
+          <>
+            <Select value={filter} onValueChange={(v) => setFilter((v as typeof filter) ?? 'all')}>
+              <SelectTrigger size="sm" className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="chat">Chat</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Multi-select toggle (admin only) */}
+            {isAdmin && (
+              <Button
+                type="button"
+                variant={selectionMode ? 'default' : 'outline'}
+                size="sm"
+                className={selectionMode ? 'gap-1.5 bg-teal-600 hover:bg-teal-700 text-white' : 'gap-1.5'}
+                onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+              >
+                <ListChecks size={14} />
+                {selectionMode ? 'Done' : 'Select'}
+              </Button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Bulk action bar (inbox-like, admin, selection mode) */}
       {isInboxLike && isAdmin && selectionMode && (
@@ -2266,7 +2412,9 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
         <>
           <Card className="overflow-hidden gap-0 py-0 rounded-lg">
             {emailItems.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">No messages</div>
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                {activeSearch ? 'No messages match your search' : 'No messages'}
+              </div>
             ) : (
               emailItems.map((msg: EmailSummary, idx: number) => (
                 <div
@@ -2337,13 +2485,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
       {/* Compose dialog */}
       <Dialog open={composeOpen} onOpenChange={(open) => { setComposeOpen(open); if (!open) { setComposeFiles([]); resetPolish(); } }}>
-        <DialogContent className="sm:max-w-lg">
+        {/* Bounded flex column: the body scrolls, the footer stays pinned, so a
+            long message can never push Send off the viewport. */}
+        <DialogContent className="sm:max-w-lg flex flex-col max-h-[85vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send size={16} /> New Email
             </DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
             <div className="flex flex-col gap-1">
               <Label className="text-xs">To</Label>
               <RecipientAutocomplete
@@ -2432,7 +2582,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             )}
             {renderPolishPreview('compose', buildComposeContext())}
           </div>
-          <div className="flex justify-end gap-2 mt-2">
+          <div className="flex justify-end gap-2 mt-2 shrink-0">
             <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); resetPolish(); }}>
               Cancel
             </Button>
@@ -2440,133 +2590,6 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             <Button
               disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
               onClick={handleSend}
-              className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-            >
-              <Send size={14} />
-              {sendMutation.isPending ? 'Sending…' : 'Send'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Forward dialog — compose-shaped, seeded from the open email */}
-      <Dialog open={forwardOpen} onOpenChange={(open) => { if (!open) closeForward(); }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Forward size={16} /> Forward
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">To</Label>
-              <RecipientAutocomplete
-                value={forwardForm.to}
-                onChange={(v) => setForwardForm((f) => ({ ...f, to: v }))}
-                contacts={contacts ?? []}
-                placeholder="recipient@example.com"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">CC</Label>
-              <RecipientAutocomplete
-                value={forwardForm.cc}
-                onChange={(v) => setForwardForm((f) => ({ ...f, cc: v }))}
-                contacts={contacts ?? []}
-                placeholder="Optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Subject</Label>
-              <Input
-                value={forwardForm.subject}
-                onChange={(e) => setForwardForm((f) => ({ ...f, subject: e.target.value }))}
-                placeholder="Subject"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Message</Label>
-              <RichTextEditor
-                html={forwardForm.body}
-                onChange={(h) => setForwardForm((f) => ({ ...f, body: h }))}
-                placeholder="Add a message…"
-                minHeight={200}
-              />
-            </div>
-            {/* Attachments — pre-filled from the original message */}
-            <div className="flex flex-col gap-2">
-              <input
-                ref={forwardFileRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  addFiles(setForwardFiles, e.target.files);
-                  e.target.value = '';
-                }}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-fit gap-1"
-                onClick={() => forwardFileRef.current?.click()}
-              >
-                <Paperclip size={14} /> Attach
-              </Button>
-              {forwardAttLoading && (
-                <p className="text-xs text-muted-foreground">Loading attachments…</p>
-              )}
-              {forwardAttError && (
-                <p className="text-xs text-destructive">
-                  Couldn't load the original attachments. You can attach files manually.
-                </p>
-              )}
-              {forwardSkipped.length > 0 && (
-                <p className="text-xs text-amber-600">
-                  Not forwarded (too large or over the 10-file limit): {forwardSkipped.join(', ')}
-                </p>
-              )}
-              {forwardFiles.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {forwardFiles.map((f, i) => (
-                    <div
-                      key={`${f.name}:${f.size}:${i}`}
-                      className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                    >
-                      <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                      {f.size > 0 && (
-                        <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-                      )}
-                      <button
-                        type="button"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        title="Remove attachment"
-                        onClick={() => setForwardFiles((prev) => prev.filter((_, j) => j !== i))}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {sendMutation.isError && (
-              <p className="text-xs text-destructive">
-                {(sendMutation.error as Error)?.message ?? 'Failed to send'}
-              </p>
-            )}
-            {renderPolishPreview('forward', forwardPolishContext())}
-          </div>
-          <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" onClick={closeForward}>
-              Cancel
-            </Button>
-            {renderPolishButton('forward', htmlToText(splitSignature(forwardForm.body).body), forwardPolishContext())}
-            <Button
-              disabled={sendMutation.isPending || forwardForm.to.length === 0 || forwardAttLoading}
-              onClick={handleSendForward}
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
             >
               <Send size={14} />
