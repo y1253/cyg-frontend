@@ -571,6 +571,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const detailRootRef = useRef<HTMLDivElement>(null);
   // Inline reply forms render below a (potentially tall) message/thread; scroll
   // them into view when opened so the user doesn't have to scroll down to reply.
   const replyFormRef = useRef<HTMLDivElement>(null);
@@ -596,6 +597,15 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   useEffect(() => {
     if (chatReplyOpen) chatReplyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [chatReplyOpen]);
+
+  // Opening an email swaps the list for the detail view inside the page's scroll
+  // container, which keeps the list's scrollTop — the email would mount already
+  // scrolled, sitting behind the sticky toolbar. Snap back to the top.
+  useEffect(() => {
+    if (!selectedMsgId) return;
+    const scroller = detailRootRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
+    scroller?.scrollTo({ top: 0 });
+  }, [selectedMsgId]);
 
   // On open (or when the anchor / thread changes), position the anchor message
   // at the BOTTOM of the visible area so the view reads as if the conversation
@@ -1811,8 +1821,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   if (selectedMsgId) {
     return (
-      <div className="flex flex-col gap-3">
-        <div className="-mx-6 px-6 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
+      <div ref={detailRootRef} className="flex flex-col gap-3">
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
