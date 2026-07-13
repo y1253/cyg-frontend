@@ -29,6 +29,7 @@ import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
+import { EmailBodyFrame } from './EmailBodyFrame';
 import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
 import { Button } from '@/components/ui/button';
@@ -1811,7 +1812,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   if (selectedMsgId) {
     return (
       <div className="flex flex-col gap-3">
-        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
+        <div className="-mx-6 px-6 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
@@ -1894,29 +1895,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
               <div><span className="font-medium">To:</span> {emailDetail.to}</div>
               <div><span className="font-medium">Date:</span> {formatEmailDate(emailDetail.date)}</div>
             </div>
-            <div className="border rounded-md overflow-hidden mt-2">
-              {emailDetail.bodyHtml ? (
-                <iframe
-                  srcDoc={injectBaseTarget(
-                    rewriteInlineImages(
-                      emailDetail.bodyHtml,
-                      emailDetail.attachments ?? [],
-                      (att) =>
-                        emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline'),
-                    ),
-                  )}
-                  sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                  className="w-full min-h-96 border-0"
-                  title="Email body"
-                />
-              ) : (
-                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-                  {emailDetail.bodyText ?? '(empty)'}
-                </pre>
-              )}
-            </div>
-
-            {/* Attachment strip — inline images already show in the body above */}
+            {/* Attachment strip — inline images already show in the body below */}
             {(() => {
               const strip = (emailDetail.attachments ?? []).filter((a) => !a.isInline);
               if (strip.length === 0) return null;
@@ -1941,6 +1920,25 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
                 </div>
               );
             })()}
+
+            <div className="border rounded-md overflow-hidden mt-2">
+              {emailDetail.bodyHtml ? (
+                <EmailBodyFrame
+                  html={injectBaseTarget(
+                    rewriteInlineImages(
+                      emailDetail.bodyHtml,
+                      emailDetail.attachments ?? [],
+                      (att) =>
+                        emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline'),
+                    ),
+                  )}
+                />
+              ) : (
+                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+                  {emailDetail.bodyText ?? '(empty)'}
+                </pre>
+              )}
+            </div>
 
             {/* Inline reply form */}
             {replyOpen && (

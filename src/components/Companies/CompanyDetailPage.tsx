@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, Search, StickyNote, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -898,21 +898,35 @@ function CompanyNotesSection({
   if (!isAdmin && notes.length === 0) return null;
 
   return (
-    <div className="mb-4 rounded-lg border bg-amber-50/50 border-amber-200">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-amber-200">
-        <span className="text-sm font-semibold text-amber-900">Notes</span>
-        {isAdmin && !adding && !compact && (
-          <button
-            type="button"
-            onClick={startAdd}
-            className="flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium"
-          >
-            <Plus size={13} /> Add Note
-          </button>
-        )}
-      </div>
+    <div
+      className={`rounded-lg border bg-amber-50/50 border-amber-200 ${
+        compact ? 'mb-2 flex items-stretch overflow-hidden' : 'mb-4'
+      }`}
+    >
+      {compact ? (
+        <div className="flex items-center gap-1.5 shrink-0 px-3 border-r border-amber-200">
+          <StickyNote size={13} className="text-amber-600" />
+          <span className="text-xs font-semibold text-amber-900">Notes</span>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-amber-200">
+          <span className="text-sm font-semibold text-amber-900">Notes</span>
+          {isAdmin && !adding && (
+            <button
+              type="button"
+              onClick={startAdd}
+              className="flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium"
+            >
+              <Plus size={13} /> Add Note
+            </button>
+          )}
+        </div>
+      )}
 
-      <div className="divide-y divide-amber-100 overflow-y-auto notes-scroll" style={{ maxHeight: compact ? 72 : notesMaxH }}>
+      <div
+        className={`divide-y divide-amber-100 overflow-y-auto notes-scroll ${compact ? 'flex-1 min-w-0' : ''}`}
+        style={{ maxHeight: compact ? 72 : notesMaxH }}
+      >
         {/* Add note form */}
         {adding && (
           <div className="px-4 py-3 flex flex-col gap-2">
@@ -936,11 +950,11 @@ function CompanyNotesSection({
         )}
 
         {notes.length === 0 && !adding && (
-          <p className="px-4 py-3 text-xs text-amber-700/70 italic">No notes yet.</p>
+          <p className={`text-xs text-amber-700/70 italic ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>No notes yet.</p>
         )}
 
         {notes.map(note => (
-          <div key={note.id} className="px-4 py-3">
+          <div key={note.id} className={compact ? 'px-3 py-2' : 'px-4 py-3'}>
             {editingId === note.id ? (
               <div className="flex flex-col gap-2">
                 <textarea
@@ -2249,7 +2263,7 @@ export function CompanyDetailPage() {
 
       {/* Page header */}
       <div className={headerCollapsed ? 'px-6 pt-3 pb-0' : 'px-6 pt-6 pb-0'}>
-        <div className="flex items-center gap-3 mb-1">
+        <div className={`flex items-center gap-3 ${headerCollapsed ? 'mb-0.5' : 'mb-1'}`}>
           <button
             type="button"
             onClick={() => setHeaderCollapsed(c => !c)}
@@ -2321,7 +2335,7 @@ export function CompanyDetailPage() {
         )}
 
         {headerCollapsed && (
-          <div className="flex items-center gap-4 py-1 text-xs">
+          <div className="flex items-center gap-4 py-0.5 text-xs">
             <span className="font-medium text-foreground">{openTodos.length} open</span>
             <span className="text-amber-600 font-medium">{importantCount} important</span>
             <span className="text-purple-600 font-medium">
