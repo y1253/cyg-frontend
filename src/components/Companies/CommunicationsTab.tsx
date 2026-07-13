@@ -571,7 +571,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const detailRootRef = useRef<HTMLDivElement>(null);
+  const detailScrollRef = useRef<HTMLDivElement>(null);
   // Inline reply forms render below a (potentially tall) message/thread; scroll
   // them into view when opened so the user doesn't have to scroll down to reply.
   const replyFormRef = useRef<HTMLDivElement>(null);
@@ -598,13 +598,11 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     if (chatReplyOpen) chatReplyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [chatReplyOpen]);
 
-  // Opening an email swaps the list for the detail view inside the page's scroll
-  // container, which keeps the list's scrollTop — the email would mount already
-  // scrolled, sitting behind the sticky toolbar. Snap back to the top.
+  // Switching from one email to another reuses the same scroll box, so it would keep
+  // the previous email's scroll offset. Start each email at the top.
   useEffect(() => {
-    if (!selectedMsgId) return;
-    const scroller = detailRootRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
-    scroller?.scrollTo({ top: 0 });
+    if (!selectedMsgId || !detailScrollRef.current) return;
+    detailScrollRef.current.scrollTop = 0;
   }, [selectedMsgId]);
 
   // On open (or when the anchor / thread changes), position the anchor message
@@ -1821,8 +1819,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
   if (selectedMsgId) {
     return (
-      <div ref={detailRootRef} className="flex flex-col gap-3">
-        <div className="sticky top-0 z-20 -mx-6 -mt-5 px-6 pt-5 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
+      // Fills the tab's scroll container exactly, so the toolbar sits outside the
+      // scroll box and can never overlap the email at any scroll position.
+      <div className="flex flex-col h-full min-h-0">
+        <div className="shrink-0 -mx-6 -mt-5 px-6 pt-5 pb-3 bg-background border-b flex flex-wrap items-center gap-2">
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
@@ -1893,6 +1893,10 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           )}
         </div>
 
+        <div
+          ref={detailScrollRef}
+          className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6 pt-3 flex flex-col gap-3"
+        >
         {emailDetailLoading && (
           <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
         )}
@@ -2185,6 +2189,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
             )}
           </div>
         )}
+        </div>
         {completeConfirmDialog}
       </div>
     );
