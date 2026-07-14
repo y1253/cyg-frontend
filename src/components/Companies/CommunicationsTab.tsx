@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check, CheckCircle2, Search, ListChecks, Circle, Forward, Printer,
+  Sparkles, Check, CheckCircle2, ListChecks, Circle, Forward, Printer,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -30,6 +30,7 @@ import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { EmailBodyFrame } from './EmailBodyFrame';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
 import { Button } from '@/components/ui/button';
@@ -55,6 +56,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 interface Props {
   companyId: number;
   isAdmin: boolean;
+  /**
+   * Communications is the visible tab. The component is kept mounted while hidden
+   * (so the open message, folder, search and any in-progress draft survive a tab
+   * switch), so anything that should only happen while the user is *looking* at the
+   * tab — polling, the SSE stream, scroll restoration — is gated on this, not mount.
+   */
+  active: boolean;
 }
 
 const FOLDERS = [
@@ -69,6 +77,35 @@ const FOLDERS = [
 // Tabs backed by the unified INBOX view (emails + chats). UNCOMPLETED and UNREAD
 // fetch the same INBOX data and apply a forced completion/read filter on top.
 const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];
+
+// ── Persisted view state ──────────────────────────────────────────────────────
+// Where the user last was in this company's Communications tab, so a reload (or
+// leaving the company and coming back) reopens the same message/folder instead of
+// dumping them at the top of the inbox. Its own key — CompanyDetailPage's
+// `cmp-ui-<id>` writer rewrites that whole blob and would clobber extra fields.
+// Drafts/attachments are deliberately NOT persisted (a File can't be serialized);
+// those survive tab switches via keep-alive only.
+type CommUI = {
+  selectedLabel?: string;
+  selectedMsgId?: string | null;
+  selectedSpaceId?: string | null;
+  openedChatMsgId?: string | null;
+  openedChatMsgTime?: string | null;
+  filter?: 'all' | 'email' | 'chat';
+  searchInput?: string;
+};
+
+const commKey = (companyId: number) => `cmp-comm-${companyId}`;
+
+function readCommUI(companyId: number): CommUI {
+  try {
+    return JSON.parse(localStorage.getItem(commKey(companyId)) ?? '{}') as CommUI;
+  } catch {
+    return {};
+  }
+}
+
+const ALL_LABELS: string[] = FOLDERS.map((f) => f.id);
 
 type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
@@ -433,18 +470,25 @@ function formatBytes(bytes: number): string {
   return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
-export function CommunicationsTab({ companyId, isAdmin }: Props) {
+export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
 
+  // Where the user left off last time (see CommUI). The component is keyed by
+  // companyId in CompanyDetailPage, so this re-reads per company — no cross-company
+  // bleed, and no reset effect needed here.
+  const restored = useRef(readCommUI(companyId)).current;
+
   const [connecting, setConnecting] = useState(false);
-  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
-  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(restored.selectedMsgId ?? null);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(restored.selectedSpaceId ?? null);
   // The clicked chat message — its createTime freezes the thread at that moment,
   // and its id is the per-message read/unread target for the open thread.
-  const [openedChatMsgId, setOpenedChatMsgId] = useState<string | null>(null);
-  const [openedChatMsgTime, setOpenedChatMsgTime] = useState<string | null>(null);
-  const [selectedLabel, setSelectedLabel] = useState<string>('INBOX');
+  const [openedChatMsgId, setOpenedChatMsgId] = useState<string | null>(restored.openedChatMsgId ?? null);
+  const [openedChatMsgTime, setOpenedChatMsgTime] = useState<string | null>(restored.openedChatMsgTime ?? null);
+  const [selectedLabel, setSelectedLabel] = useState<string>(
+    ALL_LABELS.includes(restored.selectedLabel ?? '') ? restored.selectedLabel! : 'INBOX',
+  );
   const [composeOpen, setComposeOpen] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
@@ -483,16 +527,50 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // The message the reply will natively quote (default = the opened/anchor
   // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
   const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
-  const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(false);
+  // Gates the "Mark as unread" button. Opening an email always marks it read, so a
+  // restored open email is read by definition — otherwise the button would silently
+  // go missing from the toolbar after a reload. (Not worth persisting on its own.)
+  const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(!!restored.selectedMsgId);
   // Inbox search + filter. `searchInput` is the raw box; `searchQuery` is the
   // debounced/committed term sent to the server. `filter` narrows by kind/state.
-  const [searchInput, setSearchInput] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'email' | 'chat'>('all');
+  const [searchInput, setSearchInput] = useState(restored.searchInput ?? '');
+  // Seeded from the restored term too — otherwise the debounce below would render
+  // one unfiltered frame before catching up.
+  const [searchQuery, setSearchQuery] = useState((restored.searchInput ?? '').trim());
+  const [filter, setFilter] = useState<'all' | 'email' | 'chat'>(restored.filter ?? 'all');
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 350);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Remember where the user is, so a reload / revisit reopens the same place.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        commKey(companyId),
+        JSON.stringify({
+          selectedLabel,
+          selectedMsgId,
+          selectedSpaceId,
+          openedChatMsgId,
+          openedChatMsgTime,
+          filter,
+          searchInput,
+        } satisfies CommUI),
+      );
+    } catch {
+      // storage full / disabled — losing the restore point is not worth breaking on
+    }
+  }, [
+    companyId,
+    selectedLabel,
+    selectedMsgId,
+    selectedSpaceId,
+    openedChatMsgId,
+    openedChatMsgTime,
+    filter,
+    searchInput,
+  ]);
 
   // Bulk multi-select (admin, inbox only). `selectionMode` swaps row clicks from
   // "open" to "toggle select"; `selectedIds` holds the picked message ids (email
@@ -530,8 +608,8 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   // Emails + chats are infinite queries; older pages load on scroll. Chats only
   // exist in the inbox, and searching them costs a server-side in-memory scan —
   // so don't pay for it while the user is sitting in Sent/Spam/Trash.
-  const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch);
-  const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined);
+  const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch, active);
+  const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined, active);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
   const chatsError = chatQuery.error;
@@ -545,14 +623,18 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   );
   // Chat status/notices come from the first page.
   const chatFirst = chatQuery.data?.pages?.[0];
-  const { data: emailDetail, isLoading: emailDetailLoading } = useGmailEmail(
-    companyId,
-    account ? selectedMsgId : null,
-  );
-  const { data: chatThread, isLoading: chatThreadLoading } = useGmailChatThread(
-    companyId,
-    account ? selectedSpaceId : null,
-  );
+  // Not gated on `active`: it's a one-shot fetch with no polling, and its data is
+  // already cached — gating it would just refetch the open email on every return.
+  const {
+    data: emailDetail,
+    isLoading: emailDetailLoading,
+    isError: emailDetailError,
+  } = useGmailEmail(companyId, account ? selectedMsgId : null);
+  const {
+    data: chatThread,
+    isLoading: chatThreadLoading,
+    isError: chatThreadError,
+  } = useGmailChatThread(companyId, account ? selectedSpaceId : null, active);
   const sendMutation = useSendEmail(companyId);
   const sendChatMutation = useSendChatMessage(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
@@ -598,28 +680,43 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     if (chatReplyOpen) chatReplyFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [chatReplyOpen]);
 
-  // Switching from one email to another reuses the same scroll box, so it would keep
-  // the previous email's scroll offset. Start each email at the top.
-  useEffect(() => {
-    if (!selectedMsgId || !detailScrollRef.current) return;
-    detailScrollRef.current.scrollTop = 0;
-  }, [selectedMsgId]);
+  // Scroll offset of the email detail box. Two things to get right:
+  //  · switching from one email to another reuses the same box, so a new message
+  //    must start at the top rather than inherit the previous one's offset;
+  //  · hiding the tab (display:none) destroys the box's offset — it comes back at 0 —
+  //    so the live offset is tracked on scroll and re-applied when the tab is shown.
+  // It has to be captured as the user scrolls: by the time an effect cleanup could
+  // read it, display:none has already been committed and scrollTop reads 0.
+  const detailScrollTop = useRef(0);
+  const shownMsgId = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const el = detailScrollRef.current;
+    if (!active || !selectedMsgId || !el) return;
+    if (shownMsgId.current !== selectedMsgId) {
+      shownMsgId.current = selectedMsgId;
+      detailScrollTop.current = 0;
+    }
+    el.scrollTop = detailScrollTop.current;
+  }, [active, selectedMsgId]);
 
   // On open (or when the anchor / thread changes), position the anchor message
   // at the BOTTOM of the visible area so the view reads as if the conversation
   // ends there — the dimmed "future" messages sit just below (scroll to see).
-  useEffect(() => {
-    if (!selectedSpaceId || !openedChatMsgId) return;
+  useLayoutEffect(() => {
+    if (!active || !selectedSpaceId || !openedChatMsgId) return;
     const el = anchorRef.current;
     if (el) el.scrollIntoView({ block: 'end' });
-    // Re-run when the loaded thread changes (anchor node mounts after fetch).
-  }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
+    // Re-run when the loaded thread changes (anchor node mounts after fetch), and
+    // when the tab becomes visible again — while hidden the node had no layout box,
+    // so scrollIntoView was a no-op and the box's offset was reset to 0.
+  }, [active, selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
 
   // Track anchor visibility to toggle the "Back to message" button.
   useEffect(() => {
     const root = threadScrollRef.current;
     const target = anchorRef.current;
-    if (!root || !target) return;
+    if (!active || !root || !target) return;
     const obs = new IntersectionObserver(
       ([entry]) => {
         setAnchorVisible(entry.isIntersecting);
@@ -634,7 +731,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
     );
     obs.observe(target);
     return () => obs.disconnect();
-  }, [selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
+  }, [active, selectedSpaceId, openedChatMsgId, chatThread?.messages?.length]);
 
   const emailHasNext = emailQuery.hasNextPage;
   const emailFetchingNext = emailQuery.isFetchingNextPage;
@@ -780,9 +877,12 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
   const selectedSpaceName =
     chatThread?.spaceName ?? openedChatMsg?.spaceName ?? 'Conversation';
 
-  // SSE: real-time inbox updates
+  // SSE: real-time inbox updates. Closed while the tab is hidden — all it does then
+  // is mark a disabled query stale (which re-enabling does anyway) and flash a
+  // banner nobody can see. The unread/uncompleted badges are driven by their own
+  // count queries, which keep polling from CompanyDetailPage regardless.
   useEffect(() => {
-    if (!account || !token) return;
+    if (!active || !account || !token) return;
     const es = new EventSource(
       `/api/gmail/companies/${companyId}/events?token=${encodeURIComponent(token)}`,
     );
@@ -800,7 +900,7 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       }
     };
     return () => es.close();
-  }, [account, companyId, token, qc]);
+  }, [active, account, companyId, token, qc]);
 
   const handleConnect = useCallback(async () => {
     if (!token) return;
@@ -1661,7 +1761,23 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
           {/* Conversation thread */}
           <div className="relative">
             <div ref={threadScrollRef} className="border rounded-md bg-muted/10 max-h-[28rem] overflow-y-auto p-4 flex flex-col gap-3">
-              {chatThreadLoading && threadMessages.length === 0 ? (
+              {chatThreadError && threadMessages.length === 0 ? (
+                /* A restored thread may no longer be reachable (left the space, etc.). */
+                <div className="py-6 flex flex-col items-center gap-3 text-sm text-muted-foreground">
+                  This conversation is no longer available.
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedSpaceId(null);
+                      setOpenedChatMsgId(null);
+                      setOpenedChatMsgTime(null);
+                    }}
+                  >
+                    Back to inbox
+                  </Button>
+                </div>
+              ) : chatThreadLoading && threadMessages.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">Loading conversation…</p>
               ) : threadMessages.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">No messages in this conversation.</p>
@@ -1895,10 +2011,26 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
 
         <div
           ref={detailScrollRef}
+          onScroll={(e) => { detailScrollTop.current = e.currentTarget.scrollTop; }}
           className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6 pt-3 flex flex-col gap-3"
         >
         {emailDetailLoading && (
           <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
+        )}
+
+        {/* A restored message may have been deleted or moved since it was opened.
+            Say so rather than leaving an empty pane. */}
+        {emailDetailError && !emailDetail && (
+          <div className="py-8 flex flex-col items-center gap-3 text-sm text-muted-foreground">
+            This message is no longer available — it may have been deleted or moved.
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setSelectedMsgId(null); setReplyOpen(false); }}
+            >
+              Back to inbox
+            </Button>
+          </div>
         )}
 
         {emailDetail && (
@@ -2350,24 +2482,13 @@ export function CommunicationsTab({ companyId, isAdmin }: Props) {
       {/* Search + filter toolbar. Search works in every folder; the kind filter and
           multi-select are inbox-only (chats and completion state live there). */}
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <div className="flex-1">
+          <SearchInput
             value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
+            onChange={setSearchInput}
             placeholder={searchPlaceholder}
-            className="pl-8 pr-8 h-9"
+            className="h-9"
           />
-          {searchInput && (
-            <button
-              type="button"
-              title="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setSearchInput('')}
-            >
-              <X size={14} />
-            </button>
-          )}
         </div>
         {isInboxLike && (
           <>

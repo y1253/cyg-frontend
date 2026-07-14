@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, Search, StickyNote, Trash2, X } from 'lucide-react';
+import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { MonthDaySelect } from '@/components/ui/MonthDaySelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import {
@@ -1875,24 +1876,12 @@ function SchedulesSection({
   return (
     <div className="flex flex-col gap-3">
       {/* Search bar */}
-      <div className="relative">
-        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-        <Input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search schedules…"
-          className="h-8 pl-8 text-xs"
-        />
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            <X size={13} />
-          </button>
-        )}
-      </div>
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder="Search schedules…"
+        className="h-8 text-xs"
+      />
 
       {filtered.length === 0 && (
         <p className="text-sm text-muted-foreground">No schedules match your search.</p>
@@ -1958,6 +1947,33 @@ export function CompanyDetailPage() {
 
   type TaskSort = 'priority' | 'az' | 'za' | 'overdue' | 'number_asc' | 'number_desc';
   const [tab, setTab] = useState<Tab>(() => getStoredUI().tab ?? 'tasks');
+  // Communications is mounted lazily on first visit and then KEPT mounted (hidden)
+  // rather than unmounted on tab switch, so an open email/chat thread, the folder,
+  // the search box and any in-progress reply draft (incl. picked attachments, which
+  // can't be persisted) are still there when the user comes back. Companies whose
+  // Communications tab is never opened mount nothing and make no Gmail calls.
+  const [commVisited, setCommVisited] = useState(() => (getStoredUI().tab ?? 'tasks') === 'communications');
+
+  // Every tab body renders into the one scroll container below, so its scrollTop is
+  // clobbered by whichever tab is showing. Park each tab's offset on the way out and
+  // put it back on the way in, so leaving a tab and returning lands where you left.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollByTab = useRef<Partial<Record<Tab, number>>>({});
+
+  // The only path that changes the tab from the UI — so it's also where the
+  // Communications tab gets latched as visited (the other two paths, the initial
+  // state above and the [companyId] effect below, set it from the stored tab).
+  const handleTabChange = useCallback((next: Tab) => {
+    if (contentRef.current) scrollByTab.current[tab] = contentRef.current.scrollTop;
+    if (next === 'communications') setCommVisited(true);
+    setTab(next);
+  }, [tab]);
+
+  // Runs before CommunicationsTab's own anchor scroll, so a restored chat thread
+  // still wins and re-anchors on its opened message (the position we actually want).
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = scrollByTab.current[tab] ?? 0;
+  }, [tab]);
   const [headerCollapsed, setHeaderCollapsed] = useState<boolean>(() => getGlobalUI().headerCollapsed ?? false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState<{ expanded: boolean; seq: number }>(() => ({ expanded: getGlobalUI().expandedAll ?? true, seq: 0 }));
@@ -2053,6 +2069,8 @@ export function CompanyDetailPage() {
     const s = getStoredUI();
     const g = getGlobalUI();
     setTab(s.tab ?? 'tasks');
+    setCommVisited((s.tab ?? 'tasks') === 'communications');
+    scrollByTab.current = {};
     setTaskSort(g.taskSort ?? 'priority');
     setHeaderCollapsed(g.headerCollapsed ?? false);
     setSnoozedExpanded(g.snoozedExpanded ?? false);
@@ -2353,14 +2371,14 @@ export function CompanyDetailPage() {
 
         <TabBar
           active={tab}
-          onChange={setTab}
+          onChange={handleTabChange}
           openCount={openTodos.length}
           resolvedCount={resolvedTodos.length}
         />
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+      <div ref={contentRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
 
         {/* ── Details tab ── */}
         {tab === 'details' && (
@@ -2725,24 +2743,12 @@ export function CompanyDetailPage() {
         {tab === 'tasks' && (
           <div className="flex flex-col gap-4 max-w-3xl">
             {/* Search bar */}
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <Input
-                value={todoSearch}
-                onChange={e => setTodoSearch(e.target.value)}
-                placeholder="Search tasks…"
-                className="h-8 pl-8 text-xs"
-              />
-              {todoSearch && (
-                <button
-                  type="button"
-                  onClick={() => setTodoSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
+            <SearchInput
+              value={todoSearch}
+              onChange={setTodoSearch}
+              placeholder="Search tasks…"
+              className="h-8 text-xs"
+            />
             <div className="flex items-center justify-between">
               <button
                 type="button"
@@ -2907,9 +2913,27 @@ export function CompanyDetailPage() {
           </div>
         )}
 
-        {/* ── Communications tab ── */}
-        {tab === 'communications' && (
-          <CommunicationsTab companyId={companyId} isAdmin={isAdmin} />
+        {/* ── Communications tab (kept mounted once visited; hidden, not unmounted) ── */}
+        {commVisited && (
+          // display:contents — the wrapper generates no box of its own, so the tab's
+          // children lay out exactly as if they were still direct children of the
+          // scroll container: the detail view's `h-full` still resolves against it,
+          // the chat view's `sticky top-0` still sticks to it, and the `-mx-6 -mt-5`
+          // bleeds still reach its padding edge. A real div would break all three.
+          // `hidden` drops the subtree from layout while keeping the React tree —
+          // and therefore all of the tab's state — alive.
+          //
+          // `key` is load-bearing: this page reuses one component instance across
+          // /companies/:id (see the [companyId] effect above), so without it a kept-
+          // alive tab would carry company A's open message into company B.
+          <div className={tab === 'communications' ? 'contents' : 'hidden'}>
+            <CommunicationsTab
+              key={companyId}
+              companyId={companyId}
+              isAdmin={isAdmin}
+              active={tab === 'communications'}
+            />
+          </div>
         )}
       </div>
 

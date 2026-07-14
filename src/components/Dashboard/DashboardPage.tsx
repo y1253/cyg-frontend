@@ -1,144 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Search } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
 import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
-import type { CompanySummary } from '@/api/companies';
-
-type StatusFilter = 'all' | 'important' | 'overdue25' | 'unassigned';
-
-// ─── Company row ──────────────────────────────────────────────────────────────
-
-function CompanyRow({
-  company,
-  uncompleted,
-  onClick,
-}: {
-  company: CompanySummary;
-  // Undefined when the company has no Gmail account connected — no count exists,
-  // which is different from a count of zero, so no badge is rendered.
-  uncompleted: number | undefined;
-  onClick: () => void;
-}) {
-  const hasUrgent = company.urgentTodos > 0;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group w-full text-left flex items-center gap-5 px-4 py-3 rounded-lg border bg-background hover:bg-muted/50 transition-colors"
-    >
-      {/* Name + meta */}
-      <div className="flex-1 flex items-baseline gap-3 min-w-0">
-        <p className="font-medium text-[13px] truncate shrink-0 max-w-[280px]">
-          {company.businessName}
-        </p>
-        <p className="text-[11px] text-muted-foreground truncate hidden sm:block">
-          {company.country ?? '—'}
-          {' · '}
-          {company.assignedUser ? (
-            company.assignedUser.name
-          ) : (
-            <span className="text-orange-500 font-medium">Unassigned</span>
-          )}
-        </p>
-      </div>
-
-      {/* Status badges */}
-      <div className="flex items-center gap-2 shrink-0">
-        {hasUrgent && (
-          <span className="text-[10px] font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 leading-none">
-            {company.urgentTodos} 25d overdue
-          </span>
-        )}
-        {company.importantTodos > 0 && (
-          <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-none">
-            {company.importantTodos} important
-          </span>
-        )}
-        {uncompleted !== undefined && (
-          <span className="text-[10px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 leading-none">
-            {uncompleted} uncompleted
-          </span>
-        )}
-        <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
-          {company.totalTodos === 0 ? 'no tasks' : `${company.totalTodos} tasks`}
-        </span>
-      </div>
-
-      <ChevronRight
-        size={14}
-        className="text-muted-foreground/25 group-hover:text-muted-foreground/60 transition-colors shrink-0"
-      />
-    </button>
-  );
-}
-
-// ─── Skeleton row ─────────────────────────────────────────────────────────────
-
-function SkeletonRow({ wide }: { wide?: boolean }) {
-  return (
-    <div className="flex items-center gap-5 px-4 py-3 rounded-lg border bg-background animate-pulse">
-      <div className={`h-3 bg-muted rounded ${wide ? 'w-56' : 'w-40'}`} />
-      <div className="h-2.5 bg-muted rounded w-32 hidden sm:block" />
-      <div className="ml-auto h-2.5 bg-muted rounded w-14" />
-    </div>
-  );
-}
-
-// ─── Stats strip ──────────────────────────────────────────────────────────────
-
-function StatsStrip({
-  count,
-  total,
-  urgent,
-  important,
-}: {
-  count: number;
-  total: number;
-  urgent: number;
-  important: number;
-}) {
-  const sep = <span className="text-muted-foreground/25 select-none">·</span>;
-  return (
-    <div className="flex items-center gap-2.5 text-[12px] tabular-nums">
-      <span>
-        <span className="font-medium">{count}</span>
-        <span className="text-muted-foreground ml-1">companies</span>
-      </span>
-      {sep}
-      <span>
-        <span className="font-medium">{total}</span>
-        <span className="text-muted-foreground ml-1">open tasks</span>
-      </span>
-      {urgent > 0 && (
-        <>
-          {sep}
-          <span className="font-medium text-purple-600">{urgent}</span>
-          <span className="text-muted-foreground ml-1">25d overdue</span>
-        </>
-      )}
-      {important > 0 && (
-        <>
-          {sep}
-          <span className="font-medium text-amber-600">{important}</span>
-          <span className="text-muted-foreground ml-1">important</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
+import { CompanyListSkeleton } from './CompanyListSkeleton';
+import { CompanyRow } from './CompanyRow';
+import { DashboardToolbar } from './DashboardToolbar';
+import { StatsStrip } from './StatsStrip';
+import type { StatusFilter } from './types';
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -202,50 +71,20 @@ export function DashboardPage() {
         )}
       </div>
 
-      {/* Search + filter */}
-      <div className="flex items-center gap-2">
-        <div className="relative max-w-xs w-full">
-          <Search
-            size={13}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
-          <Input
-            className="pl-8 h-8 text-[12px]"
-            placeholder="Search companies or assignees…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        {isAdmin && (
-          <Select
-            value={statusFilter}
-            onValueChange={v => setStatusFilter((v ?? 'all') as StatusFilter)}
-          >
-            <SelectTrigger className="w-28 h-8 text-[12px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="overdue25">Overdue 25d</SelectItem>
-              <SelectItem value="important">Important</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-        {isFiltered && !isLoading && (
-          <span className="text-[11px] text-muted-foreground">
-            {filteredCompanies.length} of {companies.length}
-          </span>
-        )}
-      </div>
+      <DashboardToolbar
+        search={search}
+        onSearchChange={setSearch}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        isAdmin={isAdmin}
+        showCount={isFiltered && !isLoading}
+        filteredCount={filteredCompanies.length}
+        totalCount={companies.length}
+      />
 
       {/* Company list */}
       {isLoading ? (
-        <div className="flex flex-col gap-2">
-          {[52, 40, 60, 35, 50, 45].map((w, i) => (
-            <SkeletonRow key={i} wide={w > 48} />
-          ))}
-        </div>
+        <CompanyListSkeleton />
       ) : filteredCompanies.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
           {isFiltered ? 'No companies match your search.' : 'No companies yet.'}
