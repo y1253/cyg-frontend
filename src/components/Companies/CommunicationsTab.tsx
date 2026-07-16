@@ -593,14 +593,18 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const isFilteredFolder =
     selectedLabel === 'UNREAD' || selectedLabel === 'UNCOMPLETED';
   // The Gmail label to actually fetch. UNREAD fetches the unread-filtered inbox
-  // directly (Gmail ANDs the labels) so every unread row arrives in ~1 page instead
-  // of wading through read mail; INBOX/UNCOMPLETED load plain INBOX and filter locally.
+  // directly (Gmail ANDs the labels) so every unread row arrives in ~1 page. UNCOMPLETED
+  // has no Gmail label (completed is app state), so it hits a server virtual folder that
+  // pages the "INBOX minus completed" id list — every page holds only uncompleted rows,
+  // so the list matches the badge exactly. Plain INBOX loads the full inbox.
   const emailLabel =
     selectedLabel === 'UNREAD'
       ? 'INBOX,UNREAD'
-      : isInboxLike
-        ? 'INBOX'
-        : selectedLabel;
+      : selectedLabel === 'UNCOMPLETED'
+        ? 'UNCOMPLETED'
+        : isInboxLike
+          ? 'INBOX'
+          : selectedLabel;
   const searchPlaceholder = isInboxLike
     ? 'Search inbox…'
     : `Search ${(FOLDERS.find((f) => f.id === selectedLabel)?.label ?? '').toLowerCase()}…`;
