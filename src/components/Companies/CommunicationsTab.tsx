@@ -588,8 +588,19 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   // INBOX, UNCOMPLETED and UNREAD all render the unified email+chat inbox.
   const isInboxLike = INBOX_TABS.includes(selectedLabel);
-  // The Gmail label to actually fetch: the pseudo-tabs load real INBOX emails.
-  const emailLabel = isInboxLike ? 'INBOX' : selectedLabel;
+  // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
+  // they get the clamp relaxed + a target-driven auto-load so the list backs the badge.
+  const isFilteredFolder =
+    selectedLabel === 'UNREAD' || selectedLabel === 'UNCOMPLETED';
+  // The Gmail label to actually fetch. UNREAD fetches the unread-filtered inbox
+  // directly (Gmail ANDs the labels) so every unread row arrives in ~1 page instead
+  // of wading through read mail; INBOX/UNCOMPLETED load plain INBOX and filter locally.
+  const emailLabel =
+    selectedLabel === 'UNREAD'
+      ? 'INBOX,UNREAD'
+      : isInboxLike
+        ? 'INBOX'
+        : selectedLabel;
   const searchPlaceholder = isInboxLike
     ? 'Search inbox…'
     : `Search ${(FOLDERS.find((f) => f.id === selectedLabel)?.label ?? '').toLowerCase()}…`;
@@ -753,6 +764,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       (a, b) => getItemTimestamp(b) - getItemTimestamp(a),
     );
 
+    // Filtered folders (UNREAD/UNCOMPLETED) intend to show EVERY matching row so the
+    // list backs up the badge, so skip the clamp — it would hide already-loaded matches
+    // older than the oldest-loaded chat. Chat matches are all on page 1, so showing the
+    // full merged set can't drop a badge-counted item. Plain INBOX keeps the clamp.
+    if (isFilteredFolder)
+      return { visible: merged, hiddenCount: 0, clampSource: null as 'email' | 'chat' | null };
+
     // True oldest-loaded timestamp of a source (arrays aren't globally sorted).
     const minTs = (arr: UnifiedItem[]) =>
       arr.length ? Math.min(...arr.map(getItemTimestamp)) : -Infinity;
@@ -766,7 +784,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     const clampSource: 'email' | 'chat' | null =
       cutoff === -Infinity ? null : emailTail >= chatTail ? 'email' : 'chat';
     return { visible, hiddenCount: merged.length - visible.length, clampSource };
-  }, [isInboxLike, emailItems, chatItems, emailQuery.hasNextPage, chatQuery.hasNextPage]);
+  }, [isInboxLike, isFilteredFolder, emailItems, chatItems, emailQuery.hasNextPage, chatQuery.hasNextPage]);
 
   // Advance the PINNING source only (advancing the other loads pages that stay
   // clamped out of view). Each successful page strictly lowers the cutoff, so the
@@ -854,6 +872,64 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   });
   // Whether the inbox is currently narrowed by search/kind (drives empty-state copy).
   const isFiltering = filter !== 'all' || activeSearch != null;
+
+  // Filtered folders show EVERY matching row so the list backs up the badge count.
+  // Count matches across the whole loaded set (ignore the kind dropdown — the badge
+  // counts email+chat regardless) and auto-load pages until we reach the badge total.
+  const matchedCount = unifiedItems.filter((it) =>
+    selectedLabel === 'UNREAD'
+      ? !it.data.isRead
+      : selectedLabel === 'UNCOMPLETED'
+        ? !it.data.isCompleted
+        : false,
+  ).length;
+  const targetCount =
+    selectedLabel === 'UNREAD'
+      ? unreadData?.count
+      : selectedLabel === 'UNCOMPLETED'
+        ? uncompletedData?.count
+        : undefined;
+
+  // Drive pagination to completion so the user never has to scroll to make the list
+  // match the badge. Runs only in a filtered folder with no active search (the badge
+  // counts the whole folder, not the search subset, so it isn't a valid stop target).
+  // Own runaway guard (mirrors fillGuard): stop on target met, sources exhausted,
+  // matches stalled for 2 rounds, or a hard page cap. Reset on folder/search change.
+  const autoFillGuard = useRef({ fetches: 0, lastMatched: -1, stalls: 0 });
+  useEffect(() => {
+    autoFillGuard.current = { fetches: 0, lastMatched: -1, stalls: 0 };
+  }, [selectedLabel, activeSearch]);
+  useEffect(() => {
+    if (!isFilteredFolder || activeSearch) return;
+    if (targetCount == null || matchedCount >= targetCount) return;
+    if (emailFetchingNext || chatFetchingNext) return; // wait for the in-flight page
+    if (!emailHasNext && !chatHasNext) return;
+    const g = autoFillGuard.current;
+    // Only settled rounds reach here, so an unchanged count means the last page
+    // yielded no new matches — two such rounds and we stop (badge may over-count).
+    if (matchedCount === g.lastMatched) g.stalls++;
+    else {
+      g.lastMatched = matchedCount;
+      g.stalls = 0;
+    }
+    if (g.stalls >= 2) return;
+    if (g.fetches >= 20) return; // hard page cap
+    g.fetches++;
+    // Prioritise email (the diverging source); fall back to chat once it's exhausted.
+    if (emailHasNext) void emailQuery.fetchNextPage();
+    else void chatQuery.fetchNextPage();
+  }, [
+    isFilteredFolder,
+    activeSearch,
+    targetCount,
+    matchedCount,
+    emailHasNext,
+    emailFetchingNext,
+    chatHasNext,
+    chatFetchingNext,
+    emailQuery,
+    chatQuery,
+  ]);
 
   // The opened chat message (for the thread view header / space name fallback).
   const openedChatMsg = openedChatMsgId
@@ -1312,6 +1388,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         body: htmlToText(forwardForm.body),
         bodyHtml: forwardForm.body,
         cc: forwardForm.cc.length ? forwardForm.cc.join(', ') : undefined,
+        // Record the original message id so the inbox shows a "forwarded" marker.
+        forwardedFrom: forwardSource?.id,
         files: forwardFiles,
       },
       { onSuccess: closeForward },
@@ -2036,6 +2114,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         {emailDetail && (
           <div className="flex flex-col gap-3">
             <h2 className="font-semibold text-base">{emailDetail.subject || '(no subject)'}</h2>
+            {emailDetail.isForwarded && (
+              <div className="flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                <Forward size={13} />
+                You forwarded this message
+              </div>
+            )}
             <div className="text-xs text-muted-foreground space-y-0.5">
               <div><span className="font-medium">From:</span> {emailDetail.from}</div>
               <div><span className="font-medium">To:</span> {emailDetail.to}</div>
@@ -2653,8 +2737,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                         </span>
                       </div>
                     </div>
-                    <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
-                      {item.data.subject || '(no subject)'}
+                    <span className={['text-sm flex items-center gap-1.5 min-w-0', !item.data.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
+                      {item.data.isForwarded && (
+                        <span title="You forwarded this message" className="shrink-0 inline-flex text-teal-600">
+                          <Forward size={13} />
+                        </span>
+                      )}
+                      <span className="truncate">{item.data.subject || '(no subject)'}</span>
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{item.data.snippet}</span>
                     {renderEmailAttachmentChips(item.data)}
@@ -2785,8 +2874,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                         </span>
                       </div>
                     </div>
-                    <span className={['text-sm truncate', !msg.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
-                      {msg.subject || '(no subject)'}
+                    <span className={['text-sm flex items-center gap-1.5 min-w-0', !msg.isRead ? 'font-semibold' : 'text-foreground/80'].join(' ')}>
+                      {msg.isForwarded && (
+                        <span title="You forwarded this message" className="shrink-0 inline-flex text-teal-600">
+                          <Forward size={13} />
+                        </span>
+                      )}
+                      <span className="truncate">{msg.subject || '(no subject)'}</span>
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{msg.snippet}</span>
                     {renderEmailAttachmentChips(msg)}

@@ -14,6 +14,7 @@ export function useSendEmail(companyId: number) {
       cc?: string;
       inReplyTo?: string;
       threadId?: string;
+      forwardedFrom?: string;
       files?: File[];
     }) => sendEmail(token!, companyId, data),
     onSuccess: () => {

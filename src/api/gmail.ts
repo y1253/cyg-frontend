@@ -27,6 +27,9 @@ export interface EmailSummary {
   snippet: string;
   isRead: boolean;
   isCompleted?: boolean;
+  // True when this message has been forwarded from within the app (shared per
+  // company) — drives the inbox "forwarded" marker.
+  isForwarded?: boolean;
   // Real (non-inline) file attachments, surfaced on the list row as chips.
   attachments?: EmailAttachment[];
 }
@@ -338,6 +341,7 @@ export async function sendEmail(
     cc?: string;
     inReplyTo?: string;
     threadId?: string;
+    forwardedFrom?: string;
     files?: File[];
   },
 ): Promise<void> {
@@ -351,6 +355,7 @@ export async function sendEmail(
   if (data.cc) form.set('cc', data.cc);
   if (data.inReplyTo) form.set('inReplyTo', data.inReplyTo);
   if (data.threadId) form.set('threadId', data.threadId);
+  if (data.forwardedFrom) form.set('forwardedFrom', data.forwardedFrom);
   for (const file of data.files ?? []) form.append('attachments', file);
 
   const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/send`, {
