@@ -110,6 +110,10 @@ export interface ChatListResult {
   messages: ChatInboxMessage[];
   needsReconnect?: boolean;
   chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured';
+  // Set when chats load fine but their senders can't be named (every sender shows
+  // "Unknown"). 'scopes' = the grant lacks the People scopes → reconnect;
+  // 'api_disabled' = People API off / permission denied in the Google Cloud project.
+  senderNamesUnavailable?: 'scopes' | 'api_disabled' | null;
   // Infinite-scroll cursor: opaque per-space pageToken map for the next (older)
   // page. `hasMore` is false when every space is exhausted.
   nextCursor?: string | null;

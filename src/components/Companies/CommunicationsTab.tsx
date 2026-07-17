@@ -2504,6 +2504,18 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         </div>
       )}
 
+      {/* Chats load fine but senders can't be named — every sender shows "Unknown". */}
+      {!!chatFirst?.senderNamesUnavailable && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>
+            {chatFirst.senderNamesUnavailable === 'scopes'
+              ? 'Chat senders show as "Unknown" — reconnect the account to grant the contacts/directory permissions. If reconnecting does not help, add the directory.readonly and contacts.readonly scopes to the OAuth consent screen in Google Cloud Console first.'
+              : 'Chat senders show as "Unknown" — enable the People API in the Google Cloud project for this account.'}
+          </span>
+        </div>
+      )}
+
       {/* Chat API error notice */}
       {chatFirst?.chatStatus === 'error' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
