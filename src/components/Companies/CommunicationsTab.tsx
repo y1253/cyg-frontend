@@ -168,6 +168,15 @@ function formatEmailDate(dateStr: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Full, unambiguous timestamp for the forward history log. Unlike formatEmailDate
+// (which collapses recent dates to a weekday), a history entry needs the exact
+// date and time it was forwarded.
+function formatForwardTime(iso: string): string {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 function extractEmail(from: string): string {
   const match = /<(.+?)>/.exec(from);
   return match ? match[1] : from.trim();
@@ -2119,9 +2128,26 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           <div className="flex flex-col gap-3">
             <h2 className="font-semibold text-base">{emailDetail.subject || '(no subject)'}</h2>
             {emailDetail.isForwarded && (
-              <div className="flex items-center gap-1.5 text-xs font-medium text-teal-600">
-                <Forward size={13} />
-                You forwarded this message
+              <div className="flex flex-col gap-1 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-teal-600">
+                  <Forward size={13} />
+                  {(emailDetail.forwards?.length ?? 0) > 1
+                    ? `You forwarded this message ${emailDetail.forwards!.length} times`
+                    : 'You forwarded this message'}
+                </div>
+                {emailDetail.forwards && emailDetail.forwards.length > 0 && (
+                  <div className="pl-[18px] flex flex-col gap-0.5 text-muted-foreground">
+                    {emailDetail.forwards.map((f, i) => (
+                      <div key={i}>
+                        to{' '}
+                        <span className="font-medium text-foreground">
+                          {f.to || 'unknown recipient'}
+                        </span>{' '}
+                        · {formatForwardTime(f.at)}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="text-xs text-muted-foreground space-y-0.5">
@@ -2501,27 +2527,6 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <MessageSquare size={13} className="shrink-0" />
           <span>Google Chat app is not configured. In Google Cloud Console → Google Chat API → Configuration, fill in the app name and set status to Enabled.</span>
-        </div>
-      )}
-
-      {/* Some senders in the loaded rows actually resolved to "Unknown". 'undisclosed' is
-          not the user's to fix, so it reads as a neutral note rather than an amber alert. */}
-      {!!chatFirst?.senderNamesUnavailable && (
-        <div
-          className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${
-            chatFirst.senderNamesUnavailable === 'undisclosed'
-              ? 'bg-slate-50 border-slate-200 text-slate-600'
-              : 'bg-amber-50 border-amber-200 text-amber-800'
-          }`}
-        >
-          <MessageSquare size={13} className="shrink-0" />
-          <span>
-            {chatFirst.senderNamesUnavailable === 'scopes'
-              ? 'Some chat senders show as "Unknown" — reconnect the account to grant the contacts permissions. If reconnecting does not help, add the contacts.readonly scope to the OAuth consent screen in Google Cloud Console first.'
-              : chatFirst.senderNamesUnavailable === 'api_disabled'
-                ? 'Some chat senders show as "Unknown" — enable the People API in the Google Cloud project for this account.'
-                : 'Some chat senders show as "Unknown" — Google does not disclose the names of people outside this account’s saved contacts. Saving them as a contact in Google Contacts will name them here.'}
-          </span>
         </div>
       )}
 

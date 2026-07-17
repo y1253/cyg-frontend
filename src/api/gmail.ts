@@ -54,6 +54,11 @@ export interface EmailDetail extends EmailSummary {
   bodyHtml: string | null;
   bodyText: string | null;
   attachments: EmailAttachment[];
+  // Full forward history, oldest first — one entry per time this message was
+  // forwarded from within the app. `to` is the recipient(s); `at` is an ISO
+  // timestamp. Legacy forwards recorded before recipients were stored have an
+  // empty `to`.
+  forwards?: { to: string; at: string }[];
 }
 
 export interface EmailListResult {
