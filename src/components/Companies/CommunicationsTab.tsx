@@ -2504,14 +2504,23 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         </div>
       )}
 
-      {/* Chats load fine but senders can't be named — every sender shows "Unknown". */}
+      {/* Some senders in the loaded rows actually resolved to "Unknown". 'undisclosed' is
+          not the user's to fix, so it reads as a neutral note rather than an amber alert. */}
       {!!chatFirst?.senderNamesUnavailable && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+        <div
+          className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${
+            chatFirst.senderNamesUnavailable === 'undisclosed'
+              ? 'bg-slate-50 border-slate-200 text-slate-600'
+              : 'bg-amber-50 border-amber-200 text-amber-800'
+          }`}
+        >
           <MessageSquare size={13} className="shrink-0" />
           <span>
             {chatFirst.senderNamesUnavailable === 'scopes'
-              ? 'Chat senders show as "Unknown" — reconnect the account to grant the contacts/directory permissions. If reconnecting does not help, add the directory.readonly and contacts.readonly scopes to the OAuth consent screen in Google Cloud Console first.'
-              : 'Chat senders show as "Unknown" — enable the People API in the Google Cloud project for this account.'}
+              ? 'Some chat senders show as "Unknown" — reconnect the account to grant the contacts permissions. If reconnecting does not help, add the contacts.readonly scope to the OAuth consent screen in Google Cloud Console first.'
+              : chatFirst.senderNamesUnavailable === 'api_disabled'
+                ? 'Some chat senders show as "Unknown" — enable the People API in the Google Cloud project for this account.'
+                : 'Some chat senders show as "Unknown" — Google does not disclose the names of people outside this account’s saved contacts. Saving them as a contact in Google Contacts will name them here.'}
           </span>
         </div>
       )}
