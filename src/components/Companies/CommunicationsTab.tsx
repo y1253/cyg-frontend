@@ -1000,7 +1000,19 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       const onMessage = (e: MessageEvent<{ type: string }>) => {
         if (e.origin !== window.location.origin) return;
         if (e.data?.type === 'gmail-connected' || e.data?.type === 'gmail-error') {
-          void qc.invalidateQueries({ queryKey: ['gmail-account', companyId] });
+          // The server sweeps the backlog to "completed" on every connect, so refresh
+          // the lists and badges too — not just the account. The sweep is async and
+          // may still be running; the 15s poll on emails/chats catches the remainder.
+          for (const key of [
+            ['gmail-account', companyId],
+            ['gmail-emails', companyId],
+            ['gmail-chats', companyId],
+            ['gmail-unread-count', companyId],
+            ['gmail-uncompleted-count', companyId],
+            ['gmail-uncompleted-counts'],
+          ]) {
+            void qc.invalidateQueries({ queryKey: key });
+          }
           setConnecting(false);
           window.removeEventListener('message', onMessage);
         }
