@@ -5,7 +5,10 @@ export function MicrosoftSuccessPage() {
     if (window.opener) {
       window.opener.postMessage({ type: 'microsoft-connected' }, window.location.origin);
     }
-    window.close();
+    // Defer the close so it can't race the postMessage above (closing in the same
+    // tick can drop the message before the opener's listener receives it).
+    const t = setTimeout(() => window.close(), 100);
+    return () => clearTimeout(t);
   }, []);
 
   return (

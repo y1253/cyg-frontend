@@ -94,6 +94,10 @@ export interface EmailDetail extends EmailSummary {
 export interface EmailListResult {
   messages: EmailSummary[];
   nextPageToken: string | null;
+  // Set when the mailbox could not be read because the account's token/grant was
+  // rejected (401/403). The client shows a "reconnect" banner instead of a blank
+  // "Inbox is empty".
+  needsReconnect?: boolean;
 }
 
 // An attachment on a Chat message. Uploaded files stream via `resourceName`;

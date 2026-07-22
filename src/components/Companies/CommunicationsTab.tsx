@@ -665,6 +665,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   );
   // Chat status/notices come from the first page.
   const chatFirst = chatQuery.data?.pages?.[0];
+  // Email status/notices likewise come from the first page.
+  const emailFirst = emailQuery.data?.pages?.[0];
   // Not gated on `active`: it's a one-shot fetch with no polling, and its data is
   // already cached — gating it would just refetch the open email on every return.
   const {
@@ -1018,6 +1020,21 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     try {
       const { authUrl } = await fetchAuthUrl(token, companyId, prov);
       const popup = window.open(authUrl, `${prov}-oauth`, 'width=500,height=600');
+      // The server sweeps the backlog to "completed" on every connect, so refresh
+      // the account, lists and badges. The sweep is async and may still be running;
+      // the 15s poll on emails/chats catches the remainder.
+      const refreshAfterConnect = () => {
+        for (const key of [
+          ['gmail-account', companyId],
+          ['gmail-emails', companyId],
+          ['gmail-chats', companyId],
+          ['gmail-unread-count', companyId],
+          ['gmail-uncompleted-count', companyId],
+          ['gmail-uncompleted-counts'],
+        ]) {
+          void qc.invalidateQueries({ queryKey: key });
+        }
+      };
       const onMessage = (e: MessageEvent<{ type: string }>) => {
         if (e.origin !== window.location.origin) return;
         const t = e.data?.type;
@@ -1027,19 +1044,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           t === 'microsoft-connected' ||
           t === 'microsoft-error'
         ) {
-          // The server sweeps the backlog to "completed" on every connect, so refresh
-          // the lists and badges too — not just the account. The sweep is async and
-          // may still be running; the 15s poll on emails/chats catches the remainder.
-          for (const key of [
-            ['gmail-account', companyId],
-            ['gmail-emails', companyId],
-            ['gmail-chats', companyId],
-            ['gmail-unread-count', companyId],
-            ['gmail-uncompleted-count', companyId],
-            ['gmail-uncompleted-counts'],
-          ]) {
-            void qc.invalidateQueries({ queryKey: key });
-          }
+          refreshAfterConnect();
           setConnecting(false);
           window.removeEventListener('message', onMessage);
         }
@@ -1048,6 +1053,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       const poll = setInterval(() => {
         if (popup?.closed) {
           clearInterval(poll);
+          // Fallback: the postMessage from the success page can be missed (origin
+          // guard, or the popup closing before the message is delivered). Refetch
+          // the account + lists here too so the connected UI appears without a manual
+          // page reload.
+          refreshAfterConnect();
           setConnecting(false);
           window.removeEventListener('message', onMessage);
         }
@@ -2552,6 +2562,24 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           <button onClick={() => setNewEmailBanner(false)} className="text-teal-600 hover:text-teal-800">
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Re-connect notice when the mailbox itself was rejected (401/403) */}
+      {emailFirst?.needsReconnect && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <span className="flex items-center gap-2">
+            <Mail size={14} className="shrink-0 text-amber-600" />
+            {providerLabels.name} messages are unavailable.{' '}
+            {isAdmin
+              ? `Re-connect the ${providerLabels.name} account to restore them.`
+              : `An admin needs to re-connect the ${providerLabels.name} account.`}
+          </span>
+          {isAdmin && (
+            <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs" onClick={() => void handleConnect(provider)}>
+              Re-connect
+            </Button>
+          )}
         </div>
       )}
 
