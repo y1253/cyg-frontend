@@ -1035,6 +1035,34 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           void qc.invalidateQueries({ queryKey: key });
         }
       };
+      let settled = false;
+      const teardown = () => {
+        clearInterval(poll);
+        clearTimeout(safety);
+        window.removeEventListener('message', onMessage);
+        window.removeEventListener('focus', onReturn);
+        document.removeEventListener('visibilitychange', onVisible);
+      };
+      // Terminal: a definitive connect signal — refetch, stop, and clean up.
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        refreshAfterConnect();
+        setConnecting(false);
+        teardown();
+      };
+      // Non-terminal: the user returned to the app (focus / tab visible). Re-check
+      // the account — if OAuth finished, the refetch flips the UI to the inbox; if
+      // not yet, keep listening (a later return will catch it). Deliberately does
+      // NOT tear down, so an early focus (before OAuth completes) can't drop the
+      // real completion. This is the COOP-proof path: when a production
+      // Cross-Origin-Opener-Policy header severs window.opener, both postMessage
+      // and popup.closed silently fail, so returning focus is the only signal.
+      const onReturn = () => {
+        if (settled) return;
+        refreshAfterConnect();
+        setConnecting(false);
+      };
       const onMessage = (e: MessageEvent<{ type: string }>) => {
         if (e.origin !== window.location.origin) return;
         const t = e.data?.type;
@@ -1044,24 +1072,23 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           t === 'microsoft-connected' ||
           t === 'microsoft-error'
         ) {
-          refreshAfterConnect();
-          setConnecting(false);
-          window.removeEventListener('message', onMessage);
+          finish();
         }
       };
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') onReturn();
+      };
       window.addEventListener('message', onMessage);
+      window.addEventListener('focus', onReturn);
+      document.addEventListener('visibilitychange', onVisible);
       const poll = setInterval(() => {
-        if (popup?.closed) {
-          clearInterval(poll);
-          // Fallback: the postMessage from the success page can be missed (origin
-          // guard, or the popup closing before the message is delivered). Refetch
-          // the account + lists here too so the connected UI appears without a manual
-          // page reload.
-          refreshAfterConnect();
-          setConnecting(false);
-          window.removeEventListener('message', onMessage);
-        }
+        // Fallback: the postMessage from the success page can be missed (origin
+        // guard, or the popup closing before the message is delivered).
+        if (popup?.closed) finish();
       }, 500);
+      // Safety net so the focus/visibility listeners can't leak if no terminal
+      // signal ever arrives (e.g. COOP + the user never reopens the popup).
+      const safety = setTimeout(teardown, 10 * 60 * 1000);
     } catch {
       setConnecting(false);
     }
