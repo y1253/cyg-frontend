@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { disconnectGmail } from '@/api/gmail';
+import { disconnectGmail, clearCompanyProvider } from '@/api/gmail';
 
 export function useDisconnectGmail(companyId: number) {
   const { token } = useAuth();
@@ -8,8 +8,19 @@ export function useDisconnectGmail(companyId: number) {
   return useMutation({
     mutationFn: () => disconnectGmail(token!, companyId),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['gmail-account', companyId] });
-      void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
+      // Forget the connected provider and refetch every dependent query so the
+      // UI flips back to the connect screen with a clean slate (no manual reload).
+      clearCompanyProvider(companyId);
+      for (const key of [
+        ['gmail-account', companyId],
+        ['gmail-emails', companyId],
+        ['gmail-chats', companyId],
+        ['gmail-unread-count', companyId],
+        ['gmail-uncompleted-count', companyId],
+        ['gmail-uncompleted-counts'],
+      ]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
     },
   });
 }

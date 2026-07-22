@@ -2616,6 +2616,14 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         </div>
       )}
 
+      {/* Account has no Teams / Office 365 license — reconnecting won't help */}
+      {chatFirst?.chatStatus === 'no_license' && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>This {providerLabels.name} account has no Microsoft {providerLabels.chat} license, so {providerLabels.chat} messages can't be shown. Email messages are still available.</span>
+        </div>
+      )}
+
       {/* Chat app not configured in Google Cloud Console */}
       {chatFirst?.chatStatus === 'app_not_configured' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">

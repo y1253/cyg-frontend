@@ -15,6 +15,12 @@ export function setCompanyProvider(companyId: number, provider: EmailProvider): 
   providerByCompany.set(companyId, provider);
 }
 
+// Forget a company's provider (on disconnect) so a later reconnect under a
+// different provider routes to the right base instead of the stale one.
+export function clearCompanyProvider(companyId: number): void {
+  providerByCompany.delete(companyId);
+}
+
 // The per-company API base. 'MICROSOFT' → Graph-backed routes; anything else → Gmail.
 function base(companyId: number): string {
   return providerByCompany.get(companyId) === 'MICROSOFT'
@@ -148,7 +154,7 @@ export interface ChatInboxMessage {
 export interface ChatListResult {
   messages: ChatInboxMessage[];
   needsReconnect?: boolean;
-  chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured';
+  chatStatus?: 'ok' | 'needs_reconnect' | 'no_spaces' | 'error' | 'chat_disabled' | 'app_not_configured' | 'no_license';
   // Set only when chats load fine but at least one sender in the returned rows actually
   // shows "Unknown". 'scopes' = the grant lacks the People scopes → reconnect;
   // 'api_disabled' = People API off in the Google Cloud project; 'undisclosed' = People
