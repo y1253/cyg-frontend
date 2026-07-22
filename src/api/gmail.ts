@@ -2,10 +2,40 @@ import { fetchWithAuth } from './client';
 
 const API = '/api';
 
+// A company connects EITHER Gmail (Google) OR Outlook (Microsoft) — never both.
+export type EmailProvider = 'GOOGLE' | 'MICROSOFT';
+
+// companyId → its connected provider, learned when the account is fetched. Lets
+// every request below route to `/api/gmail/*` or `/api/microsoft/*` from just the
+// companyId, so no call site needs to thread the provider through. Stale/absent
+// entries harmlessly default to Google (no requests fire while disconnected).
+const providerByCompany = new Map<number, EmailProvider>();
+
+export function setCompanyProvider(companyId: number, provider: EmailProvider): void {
+  providerByCompany.set(companyId, provider);
+}
+
+// The per-company API base. 'MICROSOFT' → Graph-backed routes; anything else → Gmail.
+function base(companyId: number): string {
+  return providerByCompany.get(companyId) === 'MICROSOFT'
+    ? `${API}/microsoft`
+    : `${API}/gmail`;
+}
+
+// The auth-url/connect base for a provider not yet connected (chooser buttons).
+function connectBase(provider: EmailProvider): string {
+  return provider === 'MICROSOFT' ? `${API}/microsoft` : `${API}/gmail`;
+}
+
 export interface GmailAccount {
+  // Which provider this account belongs to — drives the API base + UI labels.
+  provider?: EmailProvider;
+  // Canonical connected address. `gmailAddress` is kept as an alias so existing
+  // references keep working; both hold the same value.
+  emailAddress?: string;
   gmailAddress: string;
   connectedAt: string;
-  // Whether Google granted the Chat send scope on the last connect. When false,
+  // Whether the Chat/Teams send scope was granted on the last connect. When false,
   // chat replies will fail no matter how often the account is reconnected.
   hasChatScope?: boolean;
   // Default CYG signature HTML, seeded into the compose/reply editor so it's
@@ -135,27 +165,41 @@ export interface ChatThreadResult {
   needsReconnect?: boolean;
 }
 
-export async function fetchAuthUrl(token: string, companyId: number): Promise<{ authUrl: string }> {
-  const res = await fetchWithAuth(token, `${API}/gmail/auth-url?companyId=${companyId}`);
+export async function fetchAuthUrl(
+  token: string,
+  companyId: number,
+  provider: EmailProvider = 'GOOGLE',
+): Promise<{ authUrl: string }> {
+  const res = await fetchWithAuth(
+    token,
+    `${connectBase(provider)}/auth-url?companyId=${companyId}`,
+  );
   if (!res.ok) throw new Error('Failed to get auth URL');
   return res.json() as Promise<{ authUrl: string }>;
 }
 
+// Fetch the company's connected account regardless of provider (unified endpoint).
+// Records the provider so every other request routes to the right base.
 export async function fetchGmailAccount(
   token: string,
   companyId: number,
 ): Promise<GmailAccount | null> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/account`);
+  const res = await fetchWithAuth(
+    token,
+    `${API}/communications/companies/${companyId}/account`,
+  );
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Failed to fetch Gmail account');
-  return res.json() as Promise<GmailAccount>;
+  if (!res.ok) throw new Error('Failed to fetch account');
+  const account = (await res.json()) as GmailAccount | null;
+  if (account?.provider) setCompanyProvider(companyId, account.provider);
+  return account;
 }
 
 export async function fetchGmailContacts(
   token: string,
   companyId: number,
 ): Promise<GmailContact[]> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/contacts`);
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/contacts`);
   if (!res.ok) throw new Error('Failed to fetch contacts');
   return res.json() as Promise<GmailContact[]>;
 }
@@ -173,7 +217,7 @@ export async function fetchEmails(
   if (q) params.set('q', q);
   const res = await fetchWithAuth(
     token,
-    `${API}/gmail/companies/${companyId}/emails?${params.toString()}`,
+    `${base(companyId)}/companies/${companyId}/emails?${params.toString()}`,
   );
   if (!res.ok) throw new Error('Failed to fetch emails');
   return res.json() as Promise<EmailListResult>;
@@ -186,7 +230,7 @@ export async function fetchEmail(
 ): Promise<EmailDetail> {
   const res = await fetchWithAuth(
     token,
-    `${API}/gmail/companies/${companyId}/emails/${messageId}`,
+    `${base(companyId)}/companies/${companyId}/emails/${messageId}`,
   );
   if (!res.ok) throw new Error('Failed to fetch email');
   return res.json() as Promise<EmailDetail>;
@@ -202,7 +246,7 @@ export async function fetchChats(
   if (cursor) params.set('cursor', cursor);
   if (q) params.set('q', q);
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats${qs}`);
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats${qs}`);
   if (!res.ok) throw new Error('Failed to fetch chats');
   return res.json() as Promise<ChatListResult>;
 }
@@ -217,7 +261,7 @@ export async function fetchChatThread(
   if (pageToken) params.set('pageToken', pageToken);
   const res = await fetchWithAuth(
     token,
-    `${API}/gmail/companies/${companyId}/chat-thread?${params.toString()}`,
+    `${base(companyId)}/companies/${companyId}/chat-thread?${params.toString()}`,
   );
   if (!res.ok) throw new Error('Failed to fetch chat thread');
   return res.json() as Promise<ChatThreadResult>;
@@ -228,7 +272,7 @@ export async function markChatRead(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/read`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/read`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageId }),
@@ -240,7 +284,7 @@ export async function markChatUnread(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/unread`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/unread`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageId }),
@@ -252,7 +296,7 @@ export async function markEmailRead(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/read`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/read`, {
     method: 'PATCH',
   });
 }
@@ -262,7 +306,7 @@ export async function markEmailUnread(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/unread`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/unread`, {
     method: 'PATCH',
   });
 }
@@ -275,7 +319,7 @@ export async function markChatComplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/complete`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/complete`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageId }),
@@ -287,7 +331,7 @@ export async function markChatUncomplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chats/uncomplete`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/uncomplete`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageId }),
@@ -299,7 +343,7 @@ export async function markEmailComplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/complete`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/complete`, {
     method: 'PATCH',
   });
 }
@@ -309,7 +353,7 @@ export async function markEmailUncomplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/emails/${messageId}/uncomplete`, {
+  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/uncomplete`, {
     method: 'PATCH',
   });
 }
@@ -318,7 +362,7 @@ export async function fetchUnreadCount(
   token: string,
   companyId: number,
 ): Promise<{ count: number }> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/unread-count`);
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/unread-count`);
   if (!res.ok) throw new Error('Failed to fetch unread count');
   return res.json() as Promise<{ count: number }>;
 }
@@ -327,16 +371,19 @@ export async function fetchUncompletedCount(
   token: string,
   companyId: number,
 ): Promise<{ count: number }> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/uncompleted-count`);
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/uncompleted-count`);
   if (!res.ok) throw new Error('Failed to fetch uncompleted count');
   return res.json() as Promise<{ count: number }>;
 }
 
-/** Uncompleted counts keyed by company id. Companies without Gmail connected are absent. */
+/**
+ * Uncompleted counts keyed by company id, across BOTH providers (unified endpoint).
+ * Companies without any connected account are absent.
+ */
 export async function fetchUncompletedCounts(
   token: string,
 ): Promise<Record<string, number>> {
-  const res = await fetchWithAuth(token, `${API}/gmail/uncompleted-counts`);
+  const res = await fetchWithAuth(token, `${API}/communications/uncompleted-counts`);
   if (!res.ok) throw new Error('Failed to fetch uncompleted counts');
   return res.json() as Promise<Record<string, number>>;
 }
@@ -369,7 +416,7 @@ export async function sendEmail(
   if (data.forwardedFrom) form.set('forwardedFrom', data.forwardedFrom);
   for (const file of data.files ?? []) form.append('attachments', file);
 
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/send`, {
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/send`, {
     method: 'POST',
     body: form,
   });
@@ -386,7 +433,7 @@ export async function sendChatMessage(
   text: string,
   quote?: { quotedMessageName: string; quotedMessageLastUpdateTime: string },
 ): Promise<ChatMessage> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/chat-messages`, {
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chat-messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ spaceId, text, ...quote }),
@@ -399,7 +446,7 @@ export async function sendChatMessage(
 }
 
 export async function disconnectGmail(token: string, companyId: number): Promise<void> {
-  const res = await fetchWithAuth(token, `${API}/gmail/companies/${companyId}/disconnect`, {
+  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/disconnect`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error('Failed to disconnect Gmail');
@@ -424,7 +471,7 @@ export function emailAttachmentUrl(
     filename: att.filename,
   });
   if (disposition) params.set('disposition', disposition);
-  return `${API}/gmail/companies/${companyId}/emails/${messageId}/attachments/${att.attachmentId}?${params.toString()}`;
+  return `${base(companyId)}/companies/${companyId}/emails/${messageId}/attachments/${att.attachmentId}?${params.toString()}`;
 }
 
 // Build an authenticated URL for an uploaded Chat attachment. Only valid when the
@@ -442,5 +489,5 @@ export function chatAttachmentUrl(
     filename: att.contentName,
   });
   if (disposition) params.set('disposition', disposition);
-  return `${API}/gmail/companies/${companyId}/chat-attachment?${params.toString()}`;
+  return `${base(companyId)}/companies/${companyId}/chat-attachment?${params.toString()}`;
 }

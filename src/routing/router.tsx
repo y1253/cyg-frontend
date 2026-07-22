@@ -14,6 +14,8 @@ import { PrivacyPage } from '../components/Legal/PrivacyPage';
 import { TermsPage } from '../components/Legal/TermsPage';
 import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
 import { GmailErrorPage } from '../components/Gmail/GmailErrorPage';
+import { MicrosoftSuccessPage } from '../components/Microsoft/MicrosoftSuccessPage';
+import { MicrosoftErrorPage } from '../components/Microsoft/MicrosoftErrorPage';
 
 export const router = createBrowserRouter([
   {
@@ -27,6 +29,14 @@ export const router = createBrowserRouter([
   {
     path: '/gmail/error',
     element: <GmailErrorPage />,
+  },
+  {
+    path: '/microsoft/success',
+    element: <MicrosoftSuccessPage />,
+  },
+  {
+    path: '/microsoft/error',
+    element: <MicrosoftErrorPage />,
   },
   {
     path: '/register',

@@ -27,6 +27,7 @@ import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { usePolishReply } from '@/hooks/usePolishReply';
 import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail';
+import type { EmailProvider } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { EmailBodyFrame } from './EmailBodyFrame';
@@ -595,6 +596,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   }, [selectedLabel]);
 
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
+  // Which provider is connected (drives the API base — via the registry in
+  // api/gmail.ts — plus all user-facing labels). Defaults to Google when unknown
+  // (nothing connected / still loading), which is harmless: no request fires then.
+  const provider: EmailProvider = account?.provider ?? 'GOOGLE';
+  const providerLabels =
+    provider === 'MICROSOFT'
+      ? { name: 'Outlook', chat: 'Teams' }
+      : { name: 'Gmail', chat: 'Google Chat' };
+  const accountAddress = account?.emailAddress ?? account?.gmailAddress ?? '';
   // INBOX, UNCOMPLETED and UNREAD all render the unified email+chat inbox.
   const isInboxLike = INBOX_TABS.includes(selectedLabel);
   // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
@@ -632,7 +642,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // Emails + chats are infinite queries; older pages load on scroll. Chats only
   // exist in the inbox, and searching them costs a server-side in-memory scan —
   // so don't pay for it while the user is sitting in Sent/Spam/Trash.
-  const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch, active);
+  // Gated on `account` too so the very first fetch waits until the provider is
+  // known (the api base is chosen from it), avoiding a stray /api/gmail hit for an
+  // Outlook company on mount.
+  const emailQuery = useGmailEmails(
+    companyId,
+    emailLabel,
+    activeSearch,
+    active && !!account,
+  );
   const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined, active);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
@@ -971,7 +989,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // banner nobody can see. The unread/uncompleted badges are driven by their own
   // count queries, which keep polling from CompanyDetailPage regardless.
   useEffect(() => {
-    if (!active || !account || !token) return;
+    // SSE is a Gmail-only push channel (Pub/Sub). Outlook has no equivalent here —
+    // it relies on the 15s polling on the email/chat queries instead.
+    if (!active || !account || !token || provider !== 'GOOGLE') return;
     const es = new EventSource(
       `/api/gmail/companies/${companyId}/events?token=${encodeURIComponent(token)}`,
     );
@@ -989,17 +1009,24 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       }
     };
     return () => es.close();
-  }, [active, account, companyId, token, qc]);
+  }, [active, account, companyId, token, qc, provider]);
 
-  const handleConnect = useCallback(async () => {
+  const handleConnect = useCallback(
+    async (prov: EmailProvider = 'GOOGLE') => {
     if (!token) return;
     setConnecting(true);
     try {
-      const { authUrl } = await fetchAuthUrl(token, companyId);
-      const popup = window.open(authUrl, 'gmail-oauth', 'width=500,height=600');
+      const { authUrl } = await fetchAuthUrl(token, companyId, prov);
+      const popup = window.open(authUrl, `${prov}-oauth`, 'width=500,height=600');
       const onMessage = (e: MessageEvent<{ type: string }>) => {
         if (e.origin !== window.location.origin) return;
-        if (e.data?.type === 'gmail-connected' || e.data?.type === 'gmail-error') {
+        const t = e.data?.type;
+        if (
+          t === 'gmail-connected' ||
+          t === 'gmail-error' ||
+          t === 'microsoft-connected' ||
+          t === 'microsoft-error'
+        ) {
           // The server sweeps the backlog to "completed" on every connect, so refresh
           // the lists and badges too — not just the account. The sweep is async and
           // may still be running; the 15s poll on emails/chats catches the remainder.
@@ -1028,7 +1055,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     } catch {
       setConnecting(false);
     }
-  }, [token, companyId, qc]);
+    },
+    [token, companyId, qc],
+  );
 
   // Merge newly-picked files into an existing selection, de-duped by name+size.
   const addFiles = (
@@ -1285,8 +1314,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     sendChatMutation.mutate(
       {
         spaceId: selectedSpaceId,
-        text: htmlToChatMarkdown(chatReplyHtml),
-        ...(quoteTarget
+        // Google Chat renders its own markdown tokens; Teams takes HTML directly.
+        // Quoting is Google-only (Teams ignores the quote metadata).
+        text:
+          provider === 'MICROSOFT'
+            ? chatReplyHtml
+            : htmlToChatMarkdown(chatReplyHtml),
+        ...(provider !== 'MICROSOFT' && quoteTarget
           ? {
               quotedMessageName: quoteTarget.id,
               quotedMessageLastUpdateTime: quoteTarget.lastUpdateTime,
@@ -1571,16 +1605,25 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       <div className="flex flex-col items-center justify-center py-20 gap-3">
         <Mail size={40} className="text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
-          No Gmail account connected — link one from the Billing section in Account Details.
+          No email account connected — link Gmail or Outlook (a company uses one at a time).
         </p>
         {isAdmin && (
-          <Button
-            onClick={() => void handleConnect()}
-            disabled={connecting}
-            className="bg-teal-600 hover:bg-teal-700 text-white"
-          >
-            {connecting ? 'Opening…' : 'Connect Gmail'}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => void handleConnect('GOOGLE')}
+              disabled={connecting}
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+            >
+              {connecting ? 'Opening…' : 'Connect Gmail'}
+            </Button>
+            <Button
+              onClick={() => void handleConnect('MICROSOFT')}
+              disabled={connecting}
+              variant="outline"
+            >
+              {connecting ? 'Opening…' : 'Connect Outlook'}
+            </Button>
+          </div>
         )}
       </div>
     );
@@ -1772,6 +1815,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                         mimeType={att.contentType}
                         filename={att.contentName}
                         driveHref={`https://drive.google.com/file/d/${att.driveFileId}/view`}
+                      />
+                    ) : att.downloadUri ? (
+                      // Teams file references live in SharePoint/OneDrive — link out
+                      // (we don't hold a Graph scope to stream their bytes).
+                      <AttachmentPreview
+                        key={att.name}
+                        mimeType={att.contentType}
+                        filename={att.contentName}
+                        driveHref={att.downloadUri}
                       />
                     ) : null,
                   )}
@@ -2002,10 +2054,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                       size="sm"
                       variant="outline"
                       className="self-start border-amber-300 text-amber-700 hover:bg-amber-50 text-xs"
-                      onClick={() => void handleConnect()}
+                      onClick={() => void handleConnect(provider)}
                       disabled={connecting}
                     >
-                      {connecting ? 'Opening…' : 'Re-connect Gmail to fix permissions'}
+                      {connecting
+                        ? 'Opening…'
+                        : `Re-connect ${providerLabels.name} to fix permissions`}
                     </Button>
                   )}
                 </div>
@@ -2464,7 +2518,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         <div className="flex items-center gap-2">
           <Mail size={16} className="text-teal-600" />
           <Badge variant="outline" className="text-teal-700 border-teal-200 bg-teal-50">
-            {account.gmailAddress}
+            {accountAddress}
           </Badge>
         </div>
         <div className="flex items-center gap-2">
@@ -2505,13 +2559,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {chatFirst?.needsReconnect && (
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <span>
-            Google Chat messages are unavailable.{' '}
+            {providerLabels.chat} messages are unavailable.{' '}
             {isAdmin
-              ? 'Re-connect the Gmail account to restore them.'
-              : 'An admin needs to re-connect the Gmail account.'}
+              ? `Re-connect the ${providerLabels.name} account to restore them.`
+              : `An admin needs to re-connect the ${providerLabels.name} account.`}
           </span>
           {isAdmin && (
-            <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs" onClick={() => void handleConnect()}>
+            <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100 text-xs" onClick={() => void handleConnect(provider)}>
               Re-connect
             </Button>
           )}
@@ -2522,7 +2576,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {!chatFirst?.needsReconnect && chatFirst?.chatStatus === 'no_spaces' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
-          <span>No Google Chat spaces found for this account. Chat messages will appear here once conversations exist.</span>
+          <span>No {providerLabels.chat} conversations found for this account. Chat messages will appear here once conversations exist.</span>
         </div>
       )}
 
@@ -2530,7 +2584,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {chatFirst?.chatStatus === 'chat_disabled' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
-          <span>Google Chat is not enabled for this account. Email messages are still available.</span>
+          <span>{providerLabels.chat} is not enabled for this account. Email messages are still available.</span>
         </div>
       )}
 
@@ -2546,7 +2600,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {chatFirst?.chatStatus === 'error' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <MessageSquare size={13} className="shrink-0" />
-          <span>Could not load Google Chat messages. Email messages are still available.</span>
+          <span>Could not load {providerLabels.chat} messages. Email messages are still available.</span>
         </div>
       )}
 
@@ -2555,7 +2609,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
           <span className="flex items-center gap-2">
             <MessageSquare size={13} className="shrink-0" />
-            Could not load Google Chat messages. Email messages are still available.
+            Could not load {providerLabels.chat} messages. Email messages are still available.
           </span>
           <Button
             size="sm"
@@ -2572,7 +2626,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {chatFirst?.chatStatus === 'ok' && chatItems.length === 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
           <MessageSquare size={13} className="shrink-0" />
-          <span>No recent Google Chat messages found. History may be disabled for your chat spaces.</span>
+          <span>No recent {providerLabels.chat} messages found. History may be disabled for your chat conversations.</span>
         </div>
       )}
 
@@ -3066,10 +3120,10 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       <Dialog open={disconnectConfirmOpen} onOpenChange={setDisconnectConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Disconnect Gmail?</DialogTitle>
+            <DialogTitle>Disconnect {providerLabels.name}?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will remove access to <strong>{account.gmailAddress}</strong>. You can reconnect
+            This will remove access to <strong>{accountAddress}</strong>. You can reconnect
             anytime from the Billing section.
           </p>
           <div className="flex justify-end gap-2 mt-4">

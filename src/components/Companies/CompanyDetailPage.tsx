@@ -43,6 +43,7 @@ import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
+import type { EmailProvider } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
 import { CommunicationsTab } from './CommunicationsTab';
 import type { TodoItem } from '@/api/companies';
@@ -2025,32 +2026,41 @@ export function CompanyDetailPage() {
   const { data: uncompletedData } = useGmailUncompletedCount(companyId, gmailAccount);
   const disconnectGmailMutation = useDisconnectGmail(companyId);
 
-  const handleConnectGmail = useCallback(async () => {
-    if (!token) return;
-    setConnectingGmail(true);
-    try {
-      const { authUrl } = await fetchAuthUrl(token, companyId);
-      const popup = window.open(authUrl, 'gmail-oauth', 'width=500,height=600,noopener');
-      const onMessage = (e: MessageEvent<{ type: string }>) => {
-        if (e.origin !== window.location.origin) return;
-        if (e.data?.type === 'gmail-connected' || e.data?.type === 'gmail-error') {
-          void qc.invalidateQueries({ queryKey: ['gmail-account', companyId] });
-          setConnectingGmail(false);
-          window.removeEventListener('message', onMessage);
-        }
-      };
-      window.addEventListener('message', onMessage);
-      const poll = setInterval(() => {
-        if (popup?.closed) {
-          clearInterval(poll);
-          setConnectingGmail(false);
-          window.removeEventListener('message', onMessage);
-        }
-      }, 500);
-    } catch {
-      setConnectingGmail(false);
-    }
-  }, [token, companyId, qc]);
+  const handleConnectGmail = useCallback(
+    async (provider: EmailProvider = 'GOOGLE') => {
+      if (!token) return;
+      setConnectingGmail(true);
+      try {
+        const { authUrl } = await fetchAuthUrl(token, companyId, provider);
+        const popup = window.open(authUrl, `${provider}-oauth`, 'width=500,height=600,noopener');
+        const onMessage = (e: MessageEvent<{ type: string }>) => {
+          if (e.origin !== window.location.origin) return;
+          const t = e.data?.type;
+          if (
+            t === 'gmail-connected' ||
+            t === 'gmail-error' ||
+            t === 'microsoft-connected' ||
+            t === 'microsoft-error'
+          ) {
+            void qc.invalidateQueries({ queryKey: ['gmail-account', companyId] });
+            setConnectingGmail(false);
+            window.removeEventListener('message', onMessage);
+          }
+        };
+        window.addEventListener('message', onMessage);
+        const poll = setInterval(() => {
+          if (popup?.closed) {
+            clearInterval(poll);
+            setConnectingGmail(false);
+            window.removeEventListener('message', onMessage);
+          }
+        }, 500);
+      } catch {
+        setConnectingGmail(false);
+      }
+    },
+    [token, companyId, qc],
+  );
 
   // Persist per-company tab to localStorage
   useEffect(() => {
@@ -2672,14 +2682,20 @@ export function CompanyDetailPage() {
                           </div>
                         )}
                       </div>
-                      {/* Gmail connection */}
+                      {/* Email connection (Gmail or Outlook — one at a time) */}
                       {isAdmin && (
                         <div className="flex items-center gap-3 pt-1 border-t">
-                          <p className="text-xs text-muted-foreground">Gmail</p>
+                          <p className="text-xs text-muted-foreground">
+                            {gmailAccount
+                              ? gmailAccount.provider === 'MICROSOFT'
+                                ? 'Outlook'
+                                : 'Gmail'
+                              : 'Email'}
+                          </p>
                           {gmailAccount ? (
                             <div className="flex items-center gap-2 flex-1">
                               <Badge variant="outline" className="text-teal-700 border-teal-200 bg-teal-50 text-xs">
-                                {gmailAccount.gmailAddress}
+                                {gmailAccount.emailAddress ?? gmailAccount.gmailAddress}
                               </Badge>
                               <Button
                                 size="sm"
@@ -2691,15 +2707,26 @@ export function CompanyDetailPage() {
                               </Button>
                             </div>
                           ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-xs text-teal-700 border-teal-200 hover:bg-teal-50"
-                              disabled={connectingGmail}
-                              onClick={() => void handleConnectGmail()}
-                            >
-                              {connectingGmail ? 'Opening…' : 'Connect Gmail'}
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs text-teal-700 border-teal-200 hover:bg-teal-50"
+                                disabled={connectingGmail}
+                                onClick={() => void handleConnectGmail('GOOGLE')}
+                              >
+                                {connectingGmail ? 'Opening…' : 'Connect Gmail'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs"
+                                disabled={connectingGmail}
+                                onClick={() => void handleConnectGmail('MICROSOFT')}
+                              >
+                                {connectingGmail ? 'Opening…' : 'Connect Outlook'}
+                              </Button>
+                            </div>
                           )}
                         </div>
                       )}
@@ -2943,10 +2970,14 @@ export function CompanyDetailPage() {
       <Dialog open={disconnectGmailConfirmOpen} onOpenChange={setDisconnectGmailConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Disconnect Gmail?</DialogTitle>
+            <DialogTitle>
+              Disconnect {gmailAccount?.provider === 'MICROSOFT' ? 'Outlook' : 'Gmail'}?
+            </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will remove access to <strong>{gmailAccount?.gmailAddress}</strong>. You can reconnect anytime from the Billing section.
+            This will remove access to{' '}
+            <strong>{gmailAccount?.emailAddress ?? gmailAccount?.gmailAddress}</strong>. You can
+            reconnect anytime from the Billing section.
           </p>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setDisconnectGmailConfirmOpen(false)}>
