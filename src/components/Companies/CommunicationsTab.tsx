@@ -605,6 +605,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       ? { name: 'Outlook', chat: 'Teams' }
       : { name: 'Gmail', chat: 'Google Chat' };
   const accountAddress = account?.emailAddress ?? account?.gmailAddress ?? '';
+  // Teams/Chat support. Personal Outlook accounts connect with mail-only scopes
+  // (Microsoft Graph doesn't expose personal Teams), so hasChatScope is false —
+  // suppress the chat query + banners entirely for them. Gmail always supports chat.
+  const chatSupported =
+    provider !== 'MICROSOFT' || account?.hasChatScope !== false;
   // INBOX, UNCOMPLETED and UNREAD all render the unified email+chat inbox.
   const isInboxLike = INBOX_TABS.includes(selectedLabel);
   // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
@@ -651,7 +656,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     activeSearch,
     active && !!account,
   );
-  const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined, active);
+  const chatQuery = useGmailChats(companyId, account, isInboxLike ? activeSearch : undefined, active && chatSupported);
   const emailsLoading = emailQuery.isLoading;
   const chatsLoading = chatQuery.isLoading;
   const chatsError = chatQuery.error;
@@ -1014,11 +1019,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   }, [active, account, companyId, token, qc, provider]);
 
   const handleConnect = useCallback(
-    async (prov: EmailProvider = 'GOOGLE') => {
+    async (prov: EmailProvider = 'GOOGLE', kind: 'work' | 'personal' = 'work') => {
     if (!token) return;
     setConnecting(true);
     try {
-      const { authUrl } = await fetchAuthUrl(token, companyId, prov);
+      const { authUrl } = await fetchAuthUrl(token, companyId, prov, kind);
       const popup = window.open(authUrl, `${prov}-oauth`, 'width=500,height=600');
       // The server sweeps the backlog to "completed" on every connect, so refresh
       // the account, lists and badges. The sweep is async and may still be running;
@@ -1645,22 +1650,32 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           No email account connected — link Gmail or Outlook (a company uses one at a time).
         </p>
         {isAdmin && (
-          <div className="flex gap-2">
-            <Button
-              onClick={() => void handleConnect('GOOGLE')}
+          <>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => void handleConnect('GOOGLE')}
+                disabled={connecting}
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+              >
+                {connecting ? 'Opening…' : 'Connect Gmail'}
+              </Button>
+              <Button
+                onClick={() => void handleConnect('MICROSOFT', 'work')}
+                disabled={connecting}
+                variant="outline"
+              >
+                {connecting ? 'Opening…' : 'Connect Outlook'}
+              </Button>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleConnect('MICROSOFT', 'personal')}
               disabled={connecting}
-              className="bg-teal-600 hover:bg-teal-700 text-white"
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
             >
-              {connecting ? 'Opening…' : 'Connect Gmail'}
-            </Button>
-            <Button
-              onClick={() => void handleConnect('MICROSOFT')}
-              disabled={connecting}
-              variant="outline"
-            >
-              {connecting ? 'Opening…' : 'Connect Outlook'}
-            </Button>
-          </div>
+              Use a personal Outlook account (email only)
+            </button>
+          </>
         )}
       </div>
     );
@@ -2624,6 +2639,14 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
               Re-connect
             </Button>
           )}
+        </div>
+      )}
+
+      {/* Personal Outlook account — Teams isn't available via Microsoft Graph */}
+      {provider === 'MICROSOFT' && account?.hasChatScope === false && isInboxLike && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border text-muted-foreground text-sm">
+          <MessageSquare size={13} className="shrink-0" />
+          <span>Teams messages aren't available for this Outlook account. Email is fully supported.</span>
         </div>
       )}
 

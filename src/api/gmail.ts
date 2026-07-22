@@ -179,10 +179,15 @@ export async function fetchAuthUrl(
   token: string,
   companyId: number,
   provider: EmailProvider = 'GOOGLE',
+  // Microsoft only: 'personal' connects a free/personal Outlook account (email
+  // only, no Teams); 'work' (default) requests full scopes incl. Teams.
+  kind: 'work' | 'personal' = 'work',
 ): Promise<{ authUrl: string }> {
+  const kindParam =
+    provider === 'MICROSOFT' && kind === 'personal' ? '&kind=personal' : '';
   const res = await fetchWithAuth(
     token,
-    `${connectBase(provider)}/auth-url?companyId=${companyId}`,
+    `${connectBase(provider)}/auth-url?companyId=${companyId}${kindParam}`,
   );
   if (!res.ok) throw new Error('Failed to get auth URL');
   return res.json() as Promise<{ authUrl: string }>;
