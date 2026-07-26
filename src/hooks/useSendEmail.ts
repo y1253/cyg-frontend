@@ -19,6 +19,9 @@ export function useSendEmail(companyId: number) {
     }) => sendEmail(token!, companyId, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
+      // Refresh the open conversation so a just-sent reply shows immediately
+      // (the 15s poll would otherwise be the only trigger).
+      void qc.invalidateQueries({ queryKey: ['gmail-email-thread', companyId] });
     },
   });
 }

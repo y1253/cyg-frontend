@@ -57,6 +57,9 @@ export interface GmailContact {
 
 export interface EmailSummary {
   id: string;
+  // Conversation id (Gmail threadId / Outlook conversationId). Used to open the
+  // whole conversation thread when the row is clicked.
+  threadId: string;
   subject: string;
   from: string;
   date: string;
@@ -95,6 +98,12 @@ export interface EmailDetail extends EmailSummary {
   // timestamp. Legacy forwards recorded before recipients were stored have an
   // empty `to`.
   forwards?: { to: string; at: string }[];
+}
+
+// A full email conversation, oldest → newest — one EmailDetail per message.
+export interface EmailThreadResult {
+  messages: EmailDetail[];
+  needsReconnect?: boolean;
 }
 
 export interface EmailListResult {
@@ -249,6 +258,20 @@ export async function fetchEmail(
   );
   if (!res.ok) throw new Error('Failed to fetch email');
   return res.json() as Promise<EmailDetail>;
+}
+
+export async function fetchEmailThread(
+  token: string,
+  companyId: number,
+  threadId: string,
+): Promise<EmailThreadResult> {
+  const params = new URLSearchParams({ threadId });
+  const res = await fetchWithAuth(
+    token,
+    `${base(companyId)}/companies/${companyId}/email-thread?${params.toString()}`,
+  );
+  if (!res.ok) throw new Error('Failed to fetch email thread');
+  return res.json() as Promise<EmailThreadResult>;
 }
 
 export async function fetchChats(

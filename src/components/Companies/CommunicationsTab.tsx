@@ -10,6 +10,7 @@ import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailEmail } from '@/hooks/useGmailEmail';
+import { useGmailEmailThread } from '@/hooks/useGmailEmailThread';
 import { useGmailChats } from '@/hooks/useGmailChats';
 import { useGmailChatThread } from '@/hooks/useGmailChatThread';
 import { useSendEmail } from '@/hooks/useSendEmail';
@@ -491,6 +492,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
 
   const [connecting, setConnecting] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(restored.selectedMsgId ?? null);
+  // Conversation id of the opened email, captured from the clicked list row so the
+  // whole thread loads in one request. Falls back to the opened message's own
+  // threadId when restored from storage (where only the message id is persisted).
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  // Ids of the thread messages currently expanded (Gmail-style: older replies
+  // collapsed, latest expanded). Click a message header to toggle.
+  const [expandedThreadIds, setExpandedThreadIds] = useState<Set<string>>(new Set());
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(restored.selectedSpaceId ?? null);
   // The clicked chat message — its createTime freezes the thread at that moment,
   // and its id is the per-message read/unread target for the open thread.
@@ -684,6 +692,157 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     isLoading: chatThreadLoading,
     isError: chatThreadError,
   } = useGmailChatThread(companyId, account ? selectedSpaceId : null, active);
+  // The conversation thread for the opened email. `selectedThreadId` is set from
+  // the clicked row; on a restored open (page reload) it's null, so fall back to
+  // the single message's own threadId once `emailDetail` loads.
+  const activeThreadId = selectedMsgId
+    ? (selectedThreadId ?? emailDetail?.threadId ?? null)
+    : null;
+  const { data: emailThread } = useGmailEmailThread(
+    companyId,
+    account ? activeThreadId : null,
+    active,
+  );
+  // Messages to show in the detail pane: the full thread when loaded, else the
+  // single opened message (so a still-loading or 1-message thread renders fine).
+  const threadEmails: EmailDetail[] =
+    emailThread?.messages && emailThread.messages.length > 0
+      ? emailThread.messages
+      : emailDetail
+        ? [emailDetail]
+        : [];
+  // Reply/Forward target = the newest message in the conversation (Gmail default).
+  const latestThreadEmail: EmailDetail | null =
+    threadEmails.length > 0 ? threadEmails[threadEmails.length - 1] : null;
+
+  // Expand the latest message + the message the user clicked, once per opened
+  // thread. Keyed so the 15s poll (a new array each time) doesn't collapse what
+  // the user manually expanded; a genuinely new message won't auto-expand.
+  const threadInitKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const msgs = emailThread?.messages;
+    if (!msgs || msgs.length === 0) return;
+    const key = `${activeThreadId}|${selectedMsgId}|${msgs.length}`;
+    if (threadInitKeyRef.current === key) return;
+    threadInitKeyRef.current = key;
+    const initial = new Set<string>();
+    initial.add(msgs[msgs.length - 1].id);
+    if (selectedMsgId && msgs.some((m) => m.id === selectedMsgId)) {
+      initial.add(selectedMsgId);
+    }
+    setExpandedThreadIds(initial);
+  }, [emailThread?.messages, activeThreadId, selectedMsgId]);
+
+  const toggleThreadMessage = (id: string) => {
+    setExpandedThreadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Render one message in the opened conversation, Gmail-style: a clickable
+  // header (sender · date, plus snippet when collapsed) that toggles the full
+  // body/attachments below.
+  const renderThreadMessage = (m: EmailDetail, isLast: boolean) => {
+    // Fall back to the latest message expanded before the init effect has run
+    // (thread still loading, or the single-message fallback), so the pane is
+    // never all-collapsed.
+    const expanded =
+      expandedThreadIds.has(m.id) || (expandedThreadIds.size === 0 && isLast);
+    const strip = (m.attachments ?? []).filter((a) => !a.isInline);
+    return (
+      <div key={m.id} className="border rounded-md overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleThreadMessage(m.id)}
+          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
+        >
+          <div className="h-8 w-8 shrink-0 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+            {senderInitial(m.from)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">{m.from}</span>
+              <span className="text-xs text-muted-foreground shrink-0">{formatEmailDate(m.date)}</span>
+            </div>
+            {expanded ? (
+              <div className="text-xs text-muted-foreground truncate">To: {m.to}</div>
+            ) : (
+              <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
+            )}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
+            {m.isForwarded && (
+              <div className="flex flex-col gap-1 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-teal-600">
+                  <Forward size={13} />
+                  {(m.forwards?.length ?? 0) > 1
+                    ? `You forwarded this message ${m.forwards!.length} times`
+                    : 'You forwarded this message'}
+                </div>
+                {m.forwards && m.forwards.length > 0 && (
+                  <div className="pl-[18px] flex flex-col gap-0.5 text-muted-foreground">
+                    {m.forwards.map((f, i) => (
+                      <div key={i}>
+                        to{' '}
+                        <span className="font-medium text-foreground">
+                          {f.to || 'unknown recipient'}
+                        </span>{' '}
+                        · {formatForwardTime(f.at)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {strip.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attachments ({strip.length})
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {strip.map((att) => (
+                    <AttachmentPreview
+                      key={att.attachmentId}
+                      url={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
+                      downloadUrl={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
+                      mimeType={att.mimeType}
+                      filename={att.filename}
+                      size={att.size}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="border rounded-md overflow-hidden">
+              {m.bodyHtml ? (
+                <EmailBodyFrame
+                  html={injectBaseTarget(
+                    rewriteInlineImages(
+                      m.bodyHtml,
+                      m.attachments ?? [],
+                      (att) =>
+                        emailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline'),
+                    ),
+                  )}
+                />
+              ) : (
+                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+                  {m.bodyText ?? '(empty)'}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
   const sendMutation = useSendEmail(companyId);
   const sendChatMutation = useSendChatMessage(companyId);
   const disconnectMutation = useDisconnectGmail(companyId);
@@ -1144,7 +1303,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   };
 
   const handleSendReply = () => {
-    if (!emailDetail) return;
+    // Reply to the newest message in the conversation (Gmail's default).
+    const target = latestThreadEmail;
+    if (!target) return;
     if (replyForm.to.length === 0) return;
     sendMutation.mutate(
       {
@@ -1153,8 +1314,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         body: htmlToText(replyForm.body),
         bodyHtml: replyForm.body,
         cc: replyForm.cc.length ? replyForm.cc.join(', ') : undefined,
-        inReplyTo: emailDetail.messageId || undefined,
-        threadId: emailDetail.threadId || undefined,
+        inReplyTo: target.messageId || undefined,
+        threadId: target.threadId || undefined,
         files: replyFiles,
       },
       {
@@ -1301,6 +1462,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const handleOpenEmail = (msg: EmailSummary) => {
     if (!msg.isRead) markReadMutation.mutate(msg.id);
     setSelectedMsgId(msg.id);
+    setSelectedThreadId(msg.threadId || null);
+    setExpandedThreadIds(new Set()); // re-initialised when the thread loads
+    threadInitKeyRef.current = null;
     setSelectedMsgIsRead(true); // always read after opening (auto-marked or was already read)
     setSelectedSpaceId(null);
     setReplyOpen(false);
@@ -1515,12 +1679,18 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const buildChatContext = (): string =>
     threadMessages.map((m) => `${m.isOwn ? 'You' : m.sender}: ${m.text}`).join('\n');
 
-  // Print / download-as-PDF (Gmail-style) for the opened email or chat.
-  const handlePrintEmail = (email: EmailDetail) => {
-    const html = buildEmailPrintHtml(email, (att) =>
-      emailAttachmentUrl(token ?? '', companyId, email.id, att, 'inline'),
-    );
-    openPrintWindow(email.subject || '(no subject)', html);
+  // Print / download-as-PDF (Gmail-style) for the whole opened conversation or chat.
+  const handlePrintEmail = (emails: EmailDetail[]) => {
+    if (emails.length === 0) return;
+    const html = emails
+      .map((email) =>
+        buildEmailPrintHtml(email, (att) =>
+          emailAttachmentUrl(token ?? '', companyId, email.id, att, 'inline'),
+        ),
+      )
+      .join('<hr style="margin:24px 0;border:none;border-top:1px solid #ddd;" />');
+    const title = emails[emails.length - 1].subject || '(no subject)';
+    openPrintWindow(title, html);
   };
 
   const handlePrintChat = () => {
@@ -2154,13 +2324,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           >
             <ArrowLeft size={14} /> Back
           </button>
-          {emailDetail && !replyOpen && !forwardOpen && (
+          {latestThreadEmail && !replyOpen && !forwardOpen && (
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => handleOpenReply(emailDetail)}
+                onClick={() => handleOpenReply(latestThreadEmail)}
               >
                 <Reply size={14} /> Reply
               </Button>
@@ -2168,7 +2338,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => handleOpenForward(emailDetail)}
+                onClick={() => handleOpenForward(latestThreadEmail)}
               >
                 <Forward size={14} /> Forward
               </Button>
@@ -2176,7 +2346,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => handlePrintEmail(emailDetail)}
+                onClick={() => handlePrintEmail(threadEmails)}
               >
                 <Printer size={14} /> Print
               </Button>
@@ -2187,7 +2357,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   className="gap-1 text-muted-foreground"
                   disabled={markUnreadMutation.isPending}
                   onClick={() => {
-                    markUnreadMutation.mutate(emailDetail.id, {
+                    markUnreadMutation.mutate(selectedMsgId, {
                       onSuccess: () => { setSelectedMsgId(null); setReplyOpen(false); },
                     });
                   }}
@@ -2195,12 +2365,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   <MailOpen size={14} /> Mark as unread
                 </Button>
               )}
-              {(emailItems.find((m) => m.id === emailDetail.id)?.isCompleted ?? false) ? (
+              {(emailItems.find((m) => m.id === selectedMsgId)?.isCompleted ?? false) ? (
                 <Button
                   size="sm"
                   variant="outline"
                   className="gap-1 text-blue-600 border-blue-200 hover:text-blue-700"
-                  onClick={() => uncomplete('email', emailDetail.id)}
+                  onClick={() => uncomplete('email', selectedMsgId)}
                 >
                   <CheckCircle2 size={14} className="fill-blue-100" /> Completed
                 </Button>
@@ -2209,7 +2379,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   size="sm"
                   variant="outline"
                   className="gap-1"
-                  onClick={() => setCompleteTarget({ kind: 'email', id: emailDetail.id, fromDetail: true })}
+                  onClick={() => setCompleteTarget({ kind: 'email', id: selectedMsgId, fromDetail: true })}
                 >
                   <CheckCircle2 size={14} /> Mark complete
                 </Button>
@@ -2223,13 +2393,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           onScroll={(e) => { detailScrollTop.current = e.currentTarget.scrollTop; }}
           className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6 pt-3 flex flex-col gap-3"
         >
-        {emailDetailLoading && (
+        {emailDetailLoading && threadEmails.length === 0 && (
           <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
         )}
 
         {/* A restored message may have been deleted or moved since it was opened.
             Say so rather than leaving an empty pane. */}
-        {emailDetailError && !emailDetail && (
+        {emailDetailError && threadEmails.length === 0 && (
           <div className="py-8 flex flex-col items-center gap-3 text-sm text-muted-foreground">
             This message is no longer available — it may have been deleted or moved.
             <Button
@@ -2242,79 +2412,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           </div>
         )}
 
-        {emailDetail && (
+        {threadEmails.length > 0 && (
           <div className="flex flex-col gap-3">
-            <h2 className="font-semibold text-base">{emailDetail.subject || '(no subject)'}</h2>
-            {emailDetail.isForwarded && (
-              <div className="flex flex-col gap-1 text-xs">
-                <div className="flex items-center gap-1.5 font-medium text-teal-600">
-                  <Forward size={13} />
-                  {(emailDetail.forwards?.length ?? 0) > 1
-                    ? `You forwarded this message ${emailDetail.forwards!.length} times`
-                    : 'You forwarded this message'}
-                </div>
-                {emailDetail.forwards && emailDetail.forwards.length > 0 && (
-                  <div className="pl-[18px] flex flex-col gap-0.5 text-muted-foreground">
-                    {emailDetail.forwards.map((f, i) => (
-                      <div key={i}>
-                        to{' '}
-                        <span className="font-medium text-foreground">
-                          {f.to || 'unknown recipient'}
-                        </span>{' '}
-                        · {formatForwardTime(f.at)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground space-y-0.5">
-              <div><span className="font-medium">From:</span> {emailDetail.from}</div>
-              <div><span className="font-medium">To:</span> {emailDetail.to}</div>
-              <div><span className="font-medium">Date:</span> {formatEmailDate(emailDetail.date)}</div>
-            </div>
-            {/* Attachment strip — inline images already show in the body below */}
-            {(() => {
-              const strip = (emailDetail.attachments ?? []).filter((a) => !a.isInline);
-              if (strip.length === 0) return null;
-              return (
-                <div className="mt-2 flex flex-col gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <Paperclip className="h-3.5 w-3.5" />
-                    Attachments ({strip.length})
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    {strip.map((att) => (
-                      <AttachmentPreview
-                        key={att.attachmentId}
-                        url={emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline')}
-                        downloadUrl={emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'attachment')}
-                        mimeType={att.mimeType}
-                        filename={att.filename}
-                        size={att.size}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="border rounded-md overflow-hidden mt-2">
-              {emailDetail.bodyHtml ? (
-                <EmailBodyFrame
-                  html={injectBaseTarget(
-                    rewriteInlineImages(
-                      emailDetail.bodyHtml,
-                      emailDetail.attachments ?? [],
-                      (att) =>
-                        emailAttachmentUrl(token ?? '', companyId, emailDetail.id, att, 'inline'),
-                    ),
-                  )}
-                />
-              ) : (
-                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-                  {emailDetail.bodyText ?? '(empty)'}
-                </pre>
+            <h2 className="font-semibold text-base">
+              {(latestThreadEmail?.subject || threadEmails[0]?.subject) || '(no subject)'}
+            </h2>
+            {/* Conversation thread — older replies collapsed, latest expanded */}
+            <div className="flex flex-col gap-2">
+              {threadEmails.map((m, i) =>
+                renderThreadMessage(m, i === threadEmails.length - 1),
               )}
             </div>
 
@@ -2407,7 +2513,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
                   </p>
                 )}
-                {renderPolishPreview('reply', buildEmailContext(emailDetail))}
+                {renderPolishPreview('reply', buildEmailContext(latestThreadEmail!))}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
@@ -2418,7 +2524,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext(emailDetail))}
+                  {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext(latestThreadEmail!))}
                   <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); resetPolish(); }}>
                     Cancel
                   </Button>
