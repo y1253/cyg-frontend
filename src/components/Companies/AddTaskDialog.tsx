@@ -134,7 +134,8 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                   placeholder="30"
                 />
                 <p className="text-xs text-muted-foreground">
-                  First todo due in {Number(cycleDays) || 30} days.
+                  First todo is due today, then every {Number(cycleDays) || 30}{" "}
+                  days.
                 </p>
               </div>
             )}
