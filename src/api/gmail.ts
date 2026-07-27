@@ -95,9 +95,10 @@ export interface EmailDetail extends EmailSummary {
   attachments: EmailAttachment[];
   // Full forward history, oldest first — one entry per time this message was
   // forwarded from within the app. `to` is the recipient(s); `at` is an ISO
-  // timestamp. Legacy forwards recorded before recipients were stored have an
-  // empty `to`.
-  forwards?: { to: string; at: string }[];
+  // timestamp. `messageId` is the id of the sent forward (null for legacy rows) —
+  // used to open the full forwarded message. Legacy forwards recorded before
+  // recipients were stored have an empty `to`.
+  forwards?: { to: string; at: string; messageId?: string | null }[];
 }
 
 // A full email conversation, oldest → newest — one EmailDetail per message.
@@ -251,10 +252,14 @@ export async function fetchEmail(
   token: string,
   companyId: number,
   messageId: string,
+  // Ask the provider to resolve an immutable id (Outlook sent-forward ids). Gmail
+  // ignores it. Needed so a stored sent-forward id resolves.
+  immutable = false,
 ): Promise<EmailDetail> {
+  const qs = immutable ? '?immutable=1' : '';
   const res = await fetchWithAuth(
     token,
-    `${base(companyId)}/companies/${companyId}/emails/${messageId}`,
+    `${base(companyId)}/companies/${companyId}/emails/${messageId}${qs}`,
   );
   if (!res.ok) throw new Error('Failed to fetch email');
   return res.json() as Promise<EmailDetail>;

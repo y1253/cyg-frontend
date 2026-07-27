@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Mail, Send, ArrowLeft, ArrowDown, ArrowUp, Plus, Trash2,
   Inbox, SendHorizonal, AlertOctagon, Trash, X, MessageSquare, Reply, MailOpen, Paperclip,
-  Sparkles, Check, CheckCircle2, ListChecks, Circle, Forward, Printer,
+  Sparkles, Check, CheckCircle2, ListChecks, Circle, Forward, Printer, ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
@@ -481,6 +481,81 @@ function formatBytes(bytes: number): string {
   return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
+// Inline preview of a sent forwarded message, shown under a forward banner entry.
+// Fetches the sent copy by its stored id (immutable=true so Outlook ids resolve)
+// and renders its header + body + attachments, reusing the email-body pipeline.
+function ForwardPreview({
+  companyId,
+  messageId,
+  token,
+}: {
+  companyId: number;
+  messageId: string;
+  token: string | null;
+}) {
+  const { data: fwd, isLoading, isError } = useGmailEmail(
+    companyId,
+    messageId,
+    true,
+  );
+
+  if (isLoading) {
+    return (
+      <div className="text-xs text-muted-foreground py-2">Loading forwarded message…</div>
+    );
+  }
+  if (isError || !fwd) {
+    return (
+      <div className="text-xs text-muted-foreground py-2">
+        This forwarded message is no longer available.
+      </div>
+    );
+  }
+
+  const strip = (fwd.attachments ?? []).filter((a) => !a.isInline);
+  return (
+    <div className="mt-1 border rounded-md bg-muted/10 p-3 flex flex-col gap-2">
+      <div className="text-xs text-muted-foreground space-y-0.5">
+        <div><span className="font-medium">From:</span> {fwd.from}</div>
+        <div><span className="font-medium">To:</span> {fwd.to}</div>
+        <div><span className="font-medium">Date:</span> {formatEmailDate(fwd.date)}</div>
+      </div>
+      {strip.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {strip.map((att) => (
+            <AttachmentPreview
+              key={att.attachmentId}
+              url={emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline')}
+              downloadUrl={emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'attachment')}
+              mimeType={att.mimeType}
+              filename={att.filename}
+              size={att.size}
+            />
+          ))}
+        </div>
+      )}
+      <div className="border rounded-md overflow-hidden bg-background">
+        {fwd.bodyHtml ? (
+          <EmailBodyFrame
+            html={injectBaseTarget(
+              rewriteInlineImages(
+                fwd.bodyHtml,
+                fwd.attachments ?? [],
+                (att) =>
+                  emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline'),
+              ),
+            )}
+          />
+        ) : (
+          <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+            {fwd.bodyText ?? '(empty)'}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
@@ -499,6 +574,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // Ids of the thread messages currently expanded (Gmail-style: older replies
   // collapsed, latest expanded). Click a message header to toggle.
   const [expandedThreadIds, setExpandedThreadIds] = useState<Set<string>>(new Set());
+  // Sent-forward message ids whose inline preview is expanded (clicked from a
+  // forwarded-banner entry).
+  const [expandedForwardIds, setExpandedForwardIds] = useState<Set<string>>(new Set());
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(restored.selectedSpaceId ?? null);
   // The clicked chat message — its createTime freezes the thread at that moment,
   // and its id is the per-message read/unread target for the open thread.
@@ -742,6 +820,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     });
   };
 
+  const toggleForwardPreview = (id: string) => {
+    setExpandedForwardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // Render one message in the opened conversation, Gmail-style: a clickable
   // header (sender · date, plus snippet when collapsed) that toggles the full
   // body/attachments below.
@@ -787,15 +874,45 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 </div>
                 {m.forwards && m.forwards.length > 0 && (
                   <div className="pl-[18px] flex flex-col gap-0.5 text-muted-foreground">
-                    {m.forwards.map((f, i) => (
-                      <div key={i}>
-                        to{' '}
-                        <span className="font-medium text-foreground">
-                          {f.to || 'unknown recipient'}
-                        </span>{' '}
-                        · {formatForwardTime(f.at)}
-                      </div>
-                    ))}
+                    {m.forwards.map((f, i) => {
+                      const entry = (
+                        <>
+                          to{' '}
+                          <span className="font-medium text-foreground">
+                            {f.to || 'unknown recipient'}
+                          </span>{' '}
+                          · {formatForwardTime(f.at)}
+                        </>
+                      );
+                      // Clickable → expands the full sent forward inline. Legacy
+                      // rows (no stored id) stay as plain, non-clickable text.
+                      if (!f.messageId) {
+                        return <div key={i}>{entry}</div>;
+                      }
+                      const open = expandedForwardIds.has(f.messageId);
+                      return (
+                        <div key={i} className="flex flex-col">
+                          <button
+                            type="button"
+                            onClick={() => toggleForwardPreview(f.messageId!)}
+                            className="flex items-center gap-1 text-left hover:text-foreground"
+                          >
+                            <ChevronRight
+                              size={12}
+                              className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+                            />
+                            <span>{entry}</span>
+                          </button>
+                          {open && (
+                            <ForwardPreview
+                              companyId={companyId}
+                              messageId={f.messageId}
+                              token={token}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
