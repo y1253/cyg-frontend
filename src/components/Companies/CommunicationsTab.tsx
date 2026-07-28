@@ -1307,6 +1307,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         cc: replyForm.cc.length ? replyForm.cc.join(', ') : undefined,
         inReplyTo: target.messageId || undefined,
         threadId: target.threadId || undefined,
+        // Gmail threads on the two fields above. Outlook can't set those headers
+        // at all, so it needs the resource id to build a createReply draft.
+        replyToMessageId: target.id || undefined,
         files: replyFiles,
       },
       {
@@ -1623,11 +1626,22 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setReplyOpen(false);
     setReplyFiles([]); setAttachmentNotice(null);
     const reqId = ++forwardReqRef.current;
+    // Outlook builds the quoted original server-side via Graph's createForward,
+    // which keeps the original's own formatting AND its inline `cid:` images —
+    // both of which sanitizeForwardHtml has to discard (it strips <style>, since
+    // that CSS would otherwise leak into this whole compose editor, and drops
+    // cid: images as unresolvable). Quoting here too would duplicate the whole
+    // message for the recipient.
+    const nativeQuote = provider === 'MICROSOFT';
     setForwardForm({
       to: [],
       cc: [],
       subject: prefixFwdSubject(detail.subject || ''),
-      body: buildForwardedBody(detail, account?.signatureHtml ?? ''),
+      body: nativeQuote
+        ? account?.signatureHtml
+          ? `${SIGNATURE_LEAD}${account.signatureHtml}`
+          : ''
+        : buildForwardedBody(detail, account?.signatureHtml ?? ''),
     });
     setForwardFiles([]); setAttachmentNotice(null);
     setForwardSkipped([]);
@@ -1635,8 +1649,10 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setForwardSource(detail);
     setForwardOpen(true);
     resetPolish();
-    // Non-blocking: the dialog is usable while attachments stream in.
-    void hydrateForwardAttachments(detail, reqId);
+    // Non-blocking: the dialog is usable while attachments stream in. Skipped for
+    // Outlook — createForward already carries the originals, so re-uploading them
+    // would attach every file twice.
+    if (!nativeQuote) void hydrateForwardAttachments(detail, reqId);
   };
 
   const handleSendForward = () => {

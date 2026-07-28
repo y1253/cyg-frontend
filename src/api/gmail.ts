@@ -459,6 +459,10 @@ export async function sendEmail(
     inReplyTo?: string;
     threadId?: string;
     forwardedFrom?: string;
+    // Provider resource id of the message being replied to. Gmail threads via
+    // inReplyTo/threadId and ignores this; Outlook needs it to call createReply,
+    // which is the only way Graph will emit In-Reply-To/References.
+    replyToMessageId?: string;
     files?: File[];
   },
 ): Promise<void> {
@@ -473,6 +477,7 @@ export async function sendEmail(
   if (data.inReplyTo) form.set('inReplyTo', data.inReplyTo);
   if (data.threadId) form.set('threadId', data.threadId);
   if (data.forwardedFrom) form.set('forwardedFrom', data.forwardedFrom);
+  if (data.replyToMessageId) form.set('replyToMessageId', data.replyToMessageId);
   for (const file of data.files ?? []) form.append('attachments', file);
 
   const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/send`, {

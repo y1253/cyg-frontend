@@ -7,6 +7,12 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
 import { UserAutocomplete } from './UserAutocomplete';
@@ -80,6 +86,11 @@ export function InternalMessagesTab({ active }: Props) {
   );
   const [composeOpen, setComposeOpen] = useState(false);
   const [banner, setBanner] = useState(false);
+  // The message awaiting "mark complete" confirmation, mirroring the Communications
+  // tab. `fromDetail` closes the thread afterwards. null = no confirm dialog open.
+  const [completeTarget, setCompleteTarget] = useState<
+    { id: number; fromDetail?: boolean } | null
+  >(null);
 
   // Reply / forward are inline forms below the thread, not dialogs.
   const [replyOpen, setReplyOpen] = useState(false);
@@ -190,6 +201,58 @@ export function InternalMessagesTab({ active }: Props) {
     replyPolish.reset();
     forwardPolish.reset();
   };
+
+  // ── Complete / uncomplete ─────────────────────────────────────────────────
+  // Completing asks first (a stray click shouldn't clear a message); undoing it
+  // applies straight away. Same asymmetry as the Communications tab.
+  const confirmComplete = () => {
+    if (!completeTarget) return;
+    const { id, fromDetail } = completeTarget;
+    stateMutation.mutate({ id, action: 'complete' });
+    setCompleteTarget(null);
+    if (fromDetail) closeThread();
+  };
+
+  const toggleComplete = (
+    message: { id: number; isCompleted: boolean },
+    fromDetail?: boolean,
+  ) => {
+    if (message.isCompleted) {
+      stateMutation.mutate({ id: message.id, action: 'uncomplete' });
+    } else {
+      setCompleteTarget({ id: message.id, fromDetail });
+    }
+  };
+
+  const completeConfirmDialog = (
+    <Dialog
+      open={completeTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) setCompleteTarget(null);
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Mark message complete?</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Confirm you've completed this message. It stays in your inbox with a blue
+          check.
+        </p>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => setCompleteTarget(null)}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
+            onClick={confirmComplete}
+          >
+            <CheckCircle2 size={14} /> Mark complete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 
   // ── Reply / forward ───────────────────────────────────────────────────────
   const startReply = () => {
@@ -342,12 +405,7 @@ export function InternalMessagesTab({ active }: Props) {
                 variant="outline"
                 size="sm"
                 className="gap-1"
-                onClick={() =>
-                  stateMutation.mutate({
-                    id: lastMessage.id,
-                    action: lastMessage.isCompleted ? 'uncomplete' : 'complete',
-                  })
-                }
+                onClick={() => toggleComplete(lastMessage, true)}
               >
                 {lastMessage.isCompleted ? (
                   <>
@@ -520,6 +578,7 @@ export function InternalMessagesTab({ active }: Props) {
             </div>
           )}
         </div>
+        {completeConfirmDialog}
       </div>
     );
   }
@@ -611,12 +670,7 @@ export function InternalMessagesTab({ active }: Props) {
                     action: m.isRead ? 'unread' : 'read',
                   })
                 }
-                onToggleComplete={() =>
-                  stateMutation.mutate({
-                    id: m.id,
-                    action: m.isCompleted ? 'uncomplete' : 'complete',
-                  })
-                }
+                onToggleComplete={() => toggleComplete(m)}
               />
             ))}
             <div ref={loadMoreRef} className="h-8" />
@@ -634,6 +688,7 @@ export function InternalMessagesTab({ active }: Props) {
         onOpenChange={setComposeOpen}
         onSent={() => setFolder('SENT')}
       />
+      {completeConfirmDialog}
     </div>
   );
 }

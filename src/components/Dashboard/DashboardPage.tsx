@@ -7,7 +7,8 @@ import { CompanyListSkeleton } from './CompanyListSkeleton';
 import { CompanyRow } from './CompanyRow';
 import { DashboardToolbar } from './DashboardToolbar';
 import { StatsStrip } from './StatsStrip';
-import type { StatusFilter } from './types';
+import type { AssigneeFilter, StatusFilter } from './types';
+import type { AssignedUser } from '@/api/companies';
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -28,12 +29,24 @@ export function DashboardPage() {
     [allCompanies],
   );
 
-  const [search,       setSearch]       = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search,         setSearch]         = useState('');
+  const [statusFilter,   setStatusFilter]   = useState<StatusFilter>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all');
 
-  const totalTodos     = companies.reduce((s, c) => s + c.totalTodos,     0);
-  const urgentTodos    = companies.reduce((s, c) => s + c.urgentTodos,    0);
-  const importantTodos = companies.reduce((s, c) => s + c.importantTodos, 0);
+  // Only users who actually hold a company — the list comes off the rows already
+  // on screen, so there is no second request and no option that returns nothing.
+  const assignees = useMemo(() => {
+    const byId = new Map<number, AssignedUser>();
+    for (const c of companies) {
+      if (c.assignedUser) byId.set(c.assignedUser.id, c.assignedUser);
+    }
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [companies]);
+
+  // Reassigning away the last company of the picked user would leave the filter
+  // pointing at an option that no longer exists; fall back rather than go blank.
+  const activeAssignee: AssigneeFilter =
+    assignees.some(u => u.id === assigneeFilter) ? assigneeFilter : 'all';
 
   const filteredCompanies = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -48,11 +61,21 @@ export function DashboardPage() {
         if (statusFilter === 'important'  && c.importantTodos === 0) return false;
         if (statusFilter === 'unassigned' && c.assignedUser !== null) return false;
       }
+      if (isAdmin && activeAssignee !== 'all' && c.assignedUser?.id !== activeAssignee) {
+        return false;
+      }
       return true;
     });
-  }, [companies, search, statusFilter, isAdmin]);
+  }, [companies, search, statusFilter, activeAssignee, isAdmin]);
 
-  const isFiltered = search.trim() !== '' || (isAdmin && statusFilter !== 'all');
+  // Stats follow the filters, so picking a user reads as that user's workload.
+  const totalTodos     = filteredCompanies.reduce((s, c) => s + c.totalTodos,     0);
+  const urgentTodos    = filteredCompanies.reduce((s, c) => s + c.urgentTodos,    0);
+  const importantTodos = filteredCompanies.reduce((s, c) => s + c.importantTodos, 0);
+
+  const isFiltered =
+    search.trim() !== '' ||
+    (isAdmin && (statusFilter !== 'all' || activeAssignee !== 'all'));
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -73,7 +96,7 @@ export function DashboardPage() {
         </div>
         {!isLoading && (
           <StatsStrip
-            count={companies.length}
+            count={filteredCompanies.length}
             total={totalTodos}
             urgent={urgentTodos}
             important={importantTodos}
@@ -86,6 +109,9 @@ export function DashboardPage() {
         onSearchChange={setSearch}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
+        assignees={assignees}
+        assigneeFilter={activeAssignee}
+        onAssigneeFilterChange={setAssigneeFilter}
         isAdmin={isAdmin}
         showCount={isFiltered && !isLoading}
         filteredCount={filteredCompanies.length}
@@ -107,7 +133,7 @@ export function DashboardPage() {
         <CompanyListSkeleton />
       ) : filteredCompanies.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
-          {isFiltered ? 'No companies match your search.' : 'No companies yet.'}
+          {isFiltered ? 'No companies match your filters.' : 'No companies yet.'}
         </p>
       ) : (
         <div className="flex flex-col gap-2">

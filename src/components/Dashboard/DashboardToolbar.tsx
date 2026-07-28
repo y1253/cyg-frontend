@@ -6,13 +6,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SearchInput } from '@/components/ui/SearchInput';
-import type { StatusFilter } from './types';
+import type { AssigneeFilter, StatusFilter } from './types';
+import type { AssignedUser } from '@/api/companies';
 
 export function DashboardToolbar({
   search,
   onSearchChange,
   statusFilter,
   onStatusFilterChange,
+  assignees,
+  assigneeFilter,
+  onAssigneeFilterChange,
   isAdmin,
   showCount,
   filteredCount,
@@ -22,6 +26,10 @@ export function DashboardToolbar({
   onSearchChange: (value: string) => void;
   statusFilter: StatusFilter;
   onStatusFilterChange: (value: StatusFilter) => void;
+  /** Users holding at least one company — the only ones worth offering. */
+  assignees: AssignedUser[];
+  assigneeFilter: AssigneeFilter;
+  onAssigneeFilterChange: (value: AssigneeFilter) => void;
   isAdmin: boolean;
   showCount: boolean;
   filteredCount: number;
@@ -52,6 +60,26 @@ export function DashboardToolbar({
             <SelectItem value="overdue25">Overdue 25d</SelectItem>
             <SelectItem value="important">Important</SelectItem>
             <SelectItem value="unassigned">Unassigned</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {isAdmin && assignees.length > 0 && (
+        <Select
+          value={assigneeFilter === 'all' ? 'all' : String(assigneeFilter)}
+          onValueChange={v =>
+            onAssigneeFilterChange(!v || v === 'all' ? 'all' : Number(v))
+          }
+        >
+          <SelectTrigger className="w-36 h-8 text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All users</SelectItem>
+            {assignees.map(u => (
+              <SelectItem key={u.id} value={String(u.id)}>
+                {u.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}

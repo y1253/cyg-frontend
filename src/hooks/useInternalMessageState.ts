@@ -5,6 +5,7 @@ import { setInternalMessageState } from '@/api/internalMessages';
 import type {
   InternalListResult,
   InternalStateAction,
+  InternalThreadResult,
 } from '@/api/internalMessages';
 
 /** What each action changes on the cached row, applied optimistically. */
@@ -23,6 +24,10 @@ const PATCH: Record<InternalStateAction, { isRead?: boolean; isCompleted?: boole
  * instantly, roll back by invalidating on error, and refresh the badge counts once
  * the request settles. The un-keyed `['internal-messages']` prefix matches all
  * folders at once, so a message marked read in INBOX also leaves the UNREAD list.
+ *
+ * The open thread is patched too — its header button reads the message off
+ * `['internal-message-thread']`, so without this it would keep the old label until
+ * the 15s poll landed.
  */
 export function useInternalMessageState() {
   const { token } = useAuth();
@@ -48,9 +53,22 @@ export function useInternalMessageState() {
           };
         },
       );
+      qc.setQueriesData<InternalThreadResult>(
+        { queryKey: ['internal-message-thread'] },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            messages: old.messages.map((m) =>
+              m.id === id ? { ...m, ...patch } : m,
+            ),
+          };
+        },
+      );
     },
     onError: () => {
       void qc.invalidateQueries({ queryKey: ['internal-messages'] });
+      void qc.invalidateQueries({ queryKey: ['internal-message-thread'] });
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['internal-uncompleted-count'] });
