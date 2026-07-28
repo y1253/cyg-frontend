@@ -172,6 +172,8 @@ export interface CompanySummary {
   country: string | null;
   status: boolean;
   createdAt: string;
+  /** True for the caller's own internal "Cyg Finance" workspace, never a client company. */
+  isInternal: boolean;
   assignedUser: AssignedUser | null;
   totalTodos: number;
   urgentTodos: number;
@@ -200,6 +202,8 @@ export interface TodoItem {
 export interface CompanyDetail {
   id: number;
   businessName: string;
+  /** True for the caller's own internal "Cyg Finance" workspace, never a client company. */
+  isInternal: boolean;
   supportNumber: string | null;
   country: string | null;
   qbPlan: string | null;

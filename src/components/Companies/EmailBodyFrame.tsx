@@ -23,7 +23,12 @@ export function EmailBodyFrame({ html, title = 'Email body' }: { html: string; t
     const measure = () => {
       const doc = frame.contentDocument;
       if (!doc?.body) return;
-      const content = Math.max(doc.body.scrollHeight, doc.documentElement?.scrollHeight ?? 0);
+      // Measure the BODY only. documentElement.scrollHeight stretches to the
+      // iframe's own height, so folding it into a max() made the frame able to
+      // grow but never shrink — every short message stayed stuck at
+      // INITIAL_HEIGHT. body.scrollHeight still reports the full height when the
+      // content overflows, so tall emails are unaffected.
+      const content = Math.max(doc.body.scrollHeight, doc.body.offsetHeight);
       if (content <= 0) return;
       const next = content + HEIGHT_BUFFER;
       // Resizing the frame reflows the document, which re-fires the observer — only

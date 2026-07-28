@@ -310,16 +310,52 @@ export async function fetchChatThread(
   return res.json() as Promise<ChatThreadResult>;
 }
 
+/**
+ * Fire a state-changing PATCH and surface failures.
+ *
+ * These calls used to `await fetchWithAuth(...)` and ignore the result, so a 4xx or
+ * 5xx resolved as success: the optimistic cache update in the calling hook stood,
+ * `onError` never fired, and the change silently reverted on the next refetch. That
+ * is what made "mark complete, refresh, it's uncompleted again" look like a
+ * persistence bug rather than a failed request.
+ */
+async function patchState(
+  token: string,
+  url: string,
+  body?: Record<string, unknown>,
+): Promise<void> {
+  const res = await fetchWithAuth(token, url, {
+    method: 'PATCH',
+    ...(body && {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  });
+  if (res.ok) return;
+  let detail = '';
+  try {
+    const parsed = (await res.json()) as { message?: string | string[] };
+    detail = Array.isArray(parsed.message)
+      ? parsed.message.join(', ')
+      : (parsed.message ?? '');
+  } catch {
+    // non-JSON error body — fall back to the status code
+  }
+  throw new Error(detail || `Request failed (${res.status})`);
+}
+
+// Outlook message ids are long and, unlike Gmail's hex ids, can carry characters
+// that are not safe raw in a path segment — encode before interpolating. (Chat ids
+// contain "/" outright, which is why those take the id in the body instead.)
+const emailStateUrl = (companyId: number, messageId: string, action: string) =>
+  `${base(companyId)}/companies/${companyId}/emails/${encodeURIComponent(messageId)}/${action}`;
+
 export async function markChatRead(
   token: string,
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/read`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageId }),
-  });
+  await patchState(token, `${base(companyId)}/companies/${companyId}/chats/read`, { messageId });
 }
 
 export async function markChatUnread(
@@ -327,11 +363,7 @@ export async function markChatUnread(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/unread`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageId }),
-  });
+  await patchState(token, `${base(companyId)}/companies/${companyId}/chats/unread`, { messageId });
 }
 
 export async function markEmailRead(
@@ -339,9 +371,7 @@ export async function markEmailRead(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/read`, {
-    method: 'PATCH',
-  });
+  await patchState(token, emailStateUrl(companyId, messageId, 'read'));
 }
 
 export async function markEmailUnread(
@@ -349,9 +379,7 @@ export async function markEmailUnread(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/unread`, {
-    method: 'PATCH',
-  });
+  await patchState(token, emailStateUrl(companyId, messageId, 'unread'));
 }
 
 // Mark complete / uncomplete — shared per-message state for the Communications
@@ -362,11 +390,7 @@ export async function markChatComplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/complete`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageId }),
-  });
+  await patchState(token, `${base(companyId)}/companies/${companyId}/chats/complete`, { messageId });
 }
 
 export async function markChatUncomplete(
@@ -374,11 +398,7 @@ export async function markChatUncomplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/chats/uncomplete`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageId }),
-  });
+  await patchState(token, `${base(companyId)}/companies/${companyId}/chats/uncomplete`, { messageId });
 }
 
 export async function markEmailComplete(
@@ -386,9 +406,7 @@ export async function markEmailComplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/complete`, {
-    method: 'PATCH',
-  });
+  await patchState(token, emailStateUrl(companyId, messageId, 'complete'));
 }
 
 export async function markEmailUncomplete(
@@ -396,9 +414,7 @@ export async function markEmailUncomplete(
   companyId: number,
   messageId: string,
 ): Promise<void> {
-  await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/emails/${messageId}/uncomplete`, {
-    method: 'PATCH',
-  });
+  await patchState(token, emailStateUrl(companyId, messageId, 'uncomplete'));
 }
 
 export async function fetchUnreadCount(

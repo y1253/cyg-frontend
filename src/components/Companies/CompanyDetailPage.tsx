@@ -46,6 +46,7 @@ import { fetchAuthUrl } from '@/api/gmail';
 import type { EmailProvider } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
 import { CommunicationsTab } from './CommunicationsTab';
+import { InternalMessagesTab } from './InternalMessagesTab';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
@@ -818,7 +819,7 @@ function FiscalYearPicker({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules' | 'communications';
+type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules' | 'communications' | 'messages';
 
 // ─── Company Notes section ────────────────────────────────────────────────────
 
@@ -1034,13 +1035,22 @@ function TabBar({
   onChange,
   openCount,
   resolvedCount,
+  isInternal = false,
 }: {
   active: Tab;
   onChange: (t: Tab) => void;
   openCount: number;
   resolvedCount: number;
+  isInternal?: boolean;
 }) {
-  const tabs: { key: Tab; label: string }[] = [
+  // The internal "Cyg Finance" workspace has no client-company data — no details,
+  // todos, schedules or external mailbox. Just messages and the user's own links.
+  const tabs: { key: Tab; label: string }[] = isInternal
+    ? [
+        { key: 'messages' as Tab, label: 'Messages' },
+        { key: 'links', label: 'Links' },
+      ]
+    : [
     { key: 'details', label: 'Details' },
     { key: 'tasks',   label: `Tasks (${openCount})` },
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
@@ -2249,6 +2259,46 @@ export function CompanyDetailPage() {
   }
 
   const isArchived = !!company.deletedAt;
+  const isInternal = !!company.isInternal;
+  // The workspace only has two tabs, but `tab` is restored from localStorage and
+  // may hold a client-company tab ('tasks', 'details', …). Coerce instead of
+  // syncing state, so there is no flash of an invalid tab on first render.
+  const internalTab: Tab = tab === 'links' ? 'links' : 'messages';
+
+  // ── Internal "Cyg Finance" workspace ──────────────────────────────────────
+  // A per-user container for internal messaging + that user's private links, not
+  // a client company: no stats, notes, todos, schedules or external mailbox. It
+  // returns early rather than threading `isInternal` through the whole page body.
+  if (isInternal) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="px-6 pt-6 pb-0">
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-bold text-teal-800">{company.businessName}</h1>
+            <Badge className="bg-teal-100 text-teal-800 hover:bg-teal-100">Internal</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Your private workspace — message colleagues and keep your own links.
+          </p>
+          <TabBar
+            active={internalTab}
+            onChange={handleTabChange}
+            openCount={0}
+            resolvedCount={0}
+            isInternal
+          />
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+          {/* Messages stays mounted while Links is showing so an open thread and a
+              half-typed reply survive the tab switch (same contract as Communications). */}
+          <div className={internalTab === 'messages' ? 'contents' : 'hidden'}>
+            <InternalMessagesTab active={internalTab === 'messages'} />
+          </div>
+          {internalTab === 'links' && <LinksSection companyId={companyId} />}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

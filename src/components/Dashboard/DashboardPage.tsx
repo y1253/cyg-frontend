@@ -14,9 +14,19 @@ export function DashboardPage() {
   const navigate  = useNavigate();
   const isAdmin   = user?.role === 'ADMIN';
 
-  const { data: companies = [], isLoading } = useCompanies();
+  const { data: allCompanies = [], isLoading } = useCompanies();
   // Resolves after the company list — badges fill in once it lands.
   const { data: uncompletedCounts } = useGmailUncompletedCounts();
+
+  // The internal "Cyg Finance" workspace is pinned to the top and excluded from
+  // search, filters and the stats strip — it is not a client company. The server
+  // only ever returns the CALLER's own workspace (admins included), so `find` is
+  // unambiguous here.
+  const internalCompany = allCompanies.find(c => c.isInternal);
+  const companies = useMemo(
+    () => allCompanies.filter(c => !c.isInternal),
+    [allCompanies],
+  );
 
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -81,6 +91,16 @@ export function DashboardPage() {
         filteredCount={filteredCompanies.length}
         totalCount={companies.length}
       />
+
+      {/* Internal workspace — always first, never filtered out */}
+      {!isLoading && internalCompany && (
+        <CompanyRow
+          company={internalCompany}
+          internal
+          uncompleted={uncompletedCounts?.[internalCompany.id]}
+          onClick={() => navigate(`/companies/${internalCompany.id}`)}
+        />
+      )}
 
       {/* Company list */}
       {isLoading ? (
