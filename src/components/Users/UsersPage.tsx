@@ -25,6 +25,13 @@ import {
 
 type RoleFilter = 'ALL' | 'ADMIN' | 'USER';
 
+/** Also the Select's `items`, so the trigger reads "Admin" not `ADMIN`. */
+const ROLE_FILTER_LABELS: Record<RoleFilter, string> = {
+  ALL: 'All roles',
+  ADMIN: 'Admin',
+  USER: 'User',
+};
+
 export function UsersPage() {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
@@ -84,6 +91,7 @@ export function UsersPage() {
             />
           </div>
           <Select
+            items={ROLE_FILTER_LABELS}
             value={roleFilter}
             onValueChange={v => setRoleFilter((v ?? 'ALL') as RoleFilter)}
           >
@@ -91,9 +99,9 @@ export function UsersPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">All roles</SelectItem>
-              <SelectItem value="ADMIN">Admin</SelectItem>
-              <SelectItem value="USER">User</SelectItem>
+              {Object.entries(ROLE_FILTER_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { FormData } from "../RegisterPage";
+import { selectItems } from '@/lib/select-items';
 
 interface Props {
   data: FormData;
@@ -61,6 +62,7 @@ export function Step1QuickBooks({ data, onChange }: Props) {
         <div className="flex flex-col gap-2">
           <Label>Which plan would you like?</Label>
           <Select
+            items={selectItems(QB_PLANS, p => p.value, p => p.label)}
             value={data.qbPlan}
             onValueChange={(val) => onChange({ qbPlan: val })}
           >

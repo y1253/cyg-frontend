@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { FormData } from '../RegisterPage';
+import { selectItems } from '@/lib/select-items';
 
 interface Props {
   data: FormData;
@@ -55,6 +56,7 @@ export function Step3BusinessInfo({ data, onChange }: Props) {
             Business Type <span className="text-destructive">*</span>
           </Label>
           <Select
+            items={selectItems(BUSINESS_TYPES, t => t.value, t => t.label)}
             value={data.businessType}
             onValueChange={val => onChange({ businessType: val })}
           >
@@ -76,6 +78,7 @@ export function Step3BusinessInfo({ data, onChange }: Props) {
             Company Structure <span className="text-destructive">*</span>
           </Label>
           <Select
+            items={selectItems(COMPANY_TYPES, t => t.value, t => t.label)}
             value={data.companyType}
             onValueChange={val => onChange({ companyType: val })}
           >

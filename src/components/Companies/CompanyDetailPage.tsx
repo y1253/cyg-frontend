@@ -51,6 +51,8 @@ import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
 import type { CompanyNote } from '@/api/notes';
+import { CYCLE_TYPE_LABELS } from '@/lib/cycle';
+import { indexedSelectItems, selectItems } from '@/lib/select-items';
 
 // ─── Global localStorage helpers ─────────────────────────────────────────────
 
@@ -160,6 +162,17 @@ function formatDate(iso: string | null) {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
+
+/** Select option maps — also passed as `items` so triggers show labels, not values. */
+const COUNTRY_LABELS: Record<string, string> = { USA: 'USA', CANADA: 'Canada' };
+const TASK_SORT_LABELS: Record<string, string> = {
+  priority: 'Priority',
+  az: 'Name A → Z',
+  za: 'Name Z → A',
+  overdue: 'Most Overdue',
+  number_asc: 'Number 1 → 9',
+  number_desc: 'Number 9 → 1',
+};
 
 function ordinal(n: number): string {
   return ORDINALS[n] ?? `${n}th`;
@@ -779,6 +792,12 @@ function FiscalYearPicker({
   const selectedMonth = parts.length >= 2 ? parts[1] : null;
   const selectedDay   = parts.length >= 3 ? parts[2] : null;
   const maxDays = selectedMonth ? (MONTHS.find(m => m.value === selectedMonth)?.maxDay ?? 31) : 31;
+  // Values are zero-padded ('01') but labelled bare ('1'), so the trigger needs the map.
+  const dayItems = selectItems(
+    Array.from({ length: maxDays }, (_, i) => i + 1),
+    d => String(d).padStart(2, '0'),
+    d => String(d),
+  );
 
   function handleMonth(m: string | null) {
     if (!m) { onChange(''); return; }
@@ -794,7 +813,7 @@ function FiscalYearPicker({
 
   return (
     <div className="flex gap-2">
-      <Select value={selectedMonth} onValueChange={handleMonth}>
+      <Select items={selectItems(MONTHS, m => m.value, m => m.label)} value={selectedMonth} onValueChange={handleMonth}>
         <SelectTrigger className="flex-1 h-8 text-sm">
           <SelectValue placeholder="Month" />
         </SelectTrigger>
@@ -802,7 +821,7 @@ function FiscalYearPicker({
           {MONTHS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Select value={selectedDay} onValueChange={handleDay}>
+      <Select items={dayItems} value={selectedDay} onValueChange={handleDay}>
         <SelectTrigger className="w-20 h-8 text-sm">
           <SelectValue placeholder="Day" />
         </SelectTrigger>
@@ -1528,17 +1547,14 @@ function SchedulesSection({
           {editId === s.id ? (
             <div className="flex flex-col gap-2 mt-1.5">
               {/* Cycle type selector */}
-              <Select value={editCycleType} onValueChange={v => setEditCycleType(v as CycleTypeLocal)}>
+              <Select items={CYCLE_TYPE_LABELS} value={editCycleType} onValueChange={v => setEditCycleType(v as CycleTypeLocal)}>
                 <SelectTrigger className="h-7 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="DAYS">Every N days</SelectItem>
-                  <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
-                  <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
-                  <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
-                  <SelectItem value="QUARTERLY">Quarterly — specific date</SelectItem>
-                  <SelectItem value="YEARLY">Yearly — specific date</SelectItem>
+                  {Object.entries(CYCLE_TYPE_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
@@ -1571,7 +1587,7 @@ function SchedulesSection({
               {editCycleType === 'WEEKLY_DAY' && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Every</span>
-                  <Select value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
+                  <Select items={indexedSelectItems(WEEKDAYS)} value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
                     <SelectTrigger className="h-7 text-xs w-32">
                       <SelectValue />
                     </SelectTrigger>
@@ -1586,7 +1602,7 @@ function SchedulesSection({
               {editCycleType === 'MONTHLY_WEEKDAY' && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-muted-foreground">Every</span>
-                  <Select value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
+                  <Select items={selectItems([1, 2, 3, 4], n => n, n => ordinal(n))} value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
                     <SelectTrigger className="h-7 text-xs w-20">
                       <SelectValue />
                     </SelectTrigger>
@@ -1596,7 +1612,7 @@ function SchedulesSection({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
+                  <Select items={indexedSelectItems(WEEKDAYS)} value={String(editCycleDay)} onValueChange={v => setEditCycleDay(Number(v))}>
                     <SelectTrigger className="h-7 text-xs w-32">
                       <SelectValue />
                     </SelectTrigger>
@@ -1621,7 +1637,7 @@ function SchedulesSection({
               )}
               {editCycleType === 'YEARLY' && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Select value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
+                  <Select items={selectItems(MONTHS, (_, i) => i + 1, m => m.label)} value={String(editCycleNth)} onValueChange={v => setEditCycleNth(Number(v))}>
                     <SelectTrigger className="h-7 text-xs w-32">
                       <SelectValue />
                     </SelectTrigger>
@@ -2473,18 +2489,19 @@ export function CompanyDetailPage() {
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label className="text-xs">Country</Label>
-                      <Select value={infoForm.country || null}
+                      <Select items={COUNTRY_LABELS} value={infoForm.country || null}
                         onValueChange={v => setInfoForm(f => ({ ...f, country: v ?? '' }))}>
                         <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="USA">USA</SelectItem>
-                          <SelectItem value="CANADA">Canada</SelectItem>
+                          {Object.entries(COUNTRY_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label className="text-xs">Business Type</Label>
-                      <Select value={infoForm.businessType || null}
+                      <Select items={selectItems(BUSINESS_TYPES, t => t.value, t => t.label)} value={infoForm.businessType || null}
                         onValueChange={v => setInfoForm(f => ({ ...f, businessType: v ?? '' }))}>
                         <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                         <SelectContent>
@@ -2494,7 +2511,7 @@ export function CompanyDetailPage() {
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label className="text-xs">Company Type</Label>
-                      <Select value={infoForm.companyType || null}
+                      <Select items={selectItems(COMPANY_TYPES, t => t.value, t => t.label)} value={infoForm.companyType || null}
                         onValueChange={v => setInfoForm(f => ({ ...f, companyType: v ?? '' }))}>
                         <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                         <SelectContent>
@@ -2840,17 +2857,14 @@ export function CompanyDetailPage() {
                   : <><ChevronDown size={13} /> Expand All</>
                 }
               </button>
-              <Select value={taskSort} onValueChange={v => setTaskSort(v as TaskSort)}>
+              <Select items={TASK_SORT_LABELS} value={taskSort} onValueChange={v => setTaskSort(v as TaskSort)}>
                 <SelectTrigger className="h-7 w-40 text-[11px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="priority">Priority</SelectItem>
-                  <SelectItem value="az">Name A → Z</SelectItem>
-                  <SelectItem value="za">Name Z → A</SelectItem>
-                  <SelectItem value="overdue">Most Overdue</SelectItem>
-                  <SelectItem value="number_asc">Number 1 → 9</SelectItem>
-                  <SelectItem value="number_desc">Number 9 → 1</SelectItem>
+                  {Object.entries(TASK_SORT_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { FormData } from '../RegisterPage';
+import { selectItems } from '@/lib/select-items';
 
 interface Props {
   data: FormData;
@@ -38,6 +39,13 @@ export function Step5LegalInfo({ data, onChange }: Props) {
   const maxDays = selectedMonth
     ? (MONTHS.find(m => m.value === selectedMonth)?.maxDay ?? 31)
     : 31;
+
+  // Values are zero-padded ('01') but labelled bare ('1'), so the trigger needs the map.
+  const dayItems = selectItems(
+    Array.from({ length: maxDays }, (_, i) => i + 1),
+    d => String(d).padStart(2, '0'),
+    d => String(d),
+  );
 
   function handleMonthChange(m: string | null) {
     if (!m) { onChange({ fiscalYear: '' }); return; }
@@ -102,7 +110,7 @@ export function Step5LegalInfo({ data, onChange }: Props) {
             Fiscal Year End <span className="text-destructive">*</span>
           </Label>
           <div className="flex gap-2">
-            <Select value={selectedMonth} onValueChange={handleMonthChange}>
+            <Select items={selectItems(MONTHS, m => m.value, m => m.label)} value={selectedMonth} onValueChange={handleMonthChange}>
               <SelectTrigger className="flex-1">
                 <SelectValue placeholder="Month" />
               </SelectTrigger>
@@ -116,6 +124,7 @@ export function Step5LegalInfo({ data, onChange }: Props) {
             </Select>
 
             <Select
+              items={dayItems}
               value={selectedDay}
               onValueChange={handleDayChange}
             >

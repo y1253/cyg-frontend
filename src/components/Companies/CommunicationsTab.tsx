@@ -85,6 +85,13 @@ const FOLDERS = [
 // fetch the same INBOX data and apply a forced completion/read filter on top.
 const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];
 
+/** Also the Select's `items` — base-ui shows the raw value in the trigger without it. */
+const KIND_FILTER_LABELS: Record<string, string> = {
+  all: 'All',
+  email: 'Email',
+  chat: 'Chat',
+};
+
 // Must match the server cap: FilesInterceptor('attachments', 10, { fileSize: 15MB })
 // in gmail.controller.ts and microsoft.controller.ts. Exceeding it made multer throw
 // LIMIT_UNEXPECTED_FILE, which surfaced only as a generic "Failed to send".
@@ -2903,14 +2910,14 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         </div>
         {isInboxLike && (
           <>
-            <Select value={filter} onValueChange={(v) => setFilter((v as typeof filter) ?? 'all')}>
+            <Select items={KIND_FILTER_LABELS} value={filter} onValueChange={(v) => setFilter((v as typeof filter) ?? 'all')}>
               <SelectTrigger size="sm" className="w-[140px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="email">Email</SelectItem>
-                <SelectItem value="chat">Chat</SelectItem>
+                {Object.entries(KIND_FILTER_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             {/* Multi-select toggle (admin only) */}

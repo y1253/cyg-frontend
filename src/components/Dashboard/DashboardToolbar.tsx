@@ -6,6 +6,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { selectItems } from '@/lib/select-items';
+import { STATUS_LABELS } from './types';
 import type { AssigneeFilter, StatusFilter } from './types';
 import type { AssignedUser } from '@/api/companies';
 
@@ -49,6 +51,7 @@ export function DashboardToolbar({
       </div>
       {isAdmin && (
         <Select
+          items={STATUS_LABELS}
           value={statusFilter}
           onValueChange={v => onStatusFilterChange((v ?? 'all') as StatusFilter)}
         >
@@ -56,15 +59,15 @@ export function DashboardToolbar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="overdue25">Overdue 25d</SelectItem>
-            <SelectItem value="important">Important</SelectItem>
-            <SelectItem value="unassigned">Unassigned</SelectItem>
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>{label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
       {isAdmin && assignees.length > 0 && (
         <Select
+          items={{ all: 'All users', ...selectItems(assignees, u => u.id, u => u.name) }}
           value={assigneeFilter === 'all' ? 'all' : String(assigneeFilter)}
           onValueChange={v =>
             onAssigneeFilterChange(!v || v === 'all' ? 'all' : Number(v))

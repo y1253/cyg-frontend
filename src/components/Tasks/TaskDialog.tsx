@@ -18,6 +18,8 @@ import {
 import { useCreateTask, useUpdateTask } from '@/hooks/useTasks';
 import type { AppTask, TaskCycleType } from '@/api/tasks';
 import { MonthDaySelect } from '@/components/ui/MonthDaySelect';
+import { CYCLE_TYPE_LABELS } from '@/lib/cycle';
+import { indexedSelectItems } from '@/lib/select-items';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ORDINALS = ['', '1st', '2nd', '3rd', '4th'];
@@ -126,17 +128,14 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
           {/* Default recurrence */}
           <div className="flex flex-col gap-2">
             <Label>Default recurrence</Label>
-            <Select value={defaultCycleType} onValueChange={v => setDefaultCycleType(v as TaskCycleType)}>
+            <Select items={CYCLE_TYPE_LABELS} value={defaultCycleType} onValueChange={v => setDefaultCycleType(v as TaskCycleType)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="DAYS">Every N days</SelectItem>
-                <SelectItem value="MONTHLY_DATE">Day of month</SelectItem>
-                <SelectItem value="WEEKLY_DAY">Day of week</SelectItem>
-                <SelectItem value="MONTHLY_WEEKDAY">Nth weekday of month</SelectItem>
-                <SelectItem value="QUARTERLY">Quarterly — specific date</SelectItem>
-                <SelectItem value="YEARLY">Yearly — specific date</SelectItem>
+                {Object.entries(CYCLE_TYPE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -169,7 +168,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             {defaultCycleType === 'WEEKLY_DAY' && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Every</span>
-                <Select value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
+                <Select items={indexedSelectItems(WEEKDAYS)} value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
                   <SelectTrigger className="w-36">
                     <SelectValue />
                   </SelectTrigger>
@@ -185,7 +184,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
             {defaultCycleType === 'MONTHLY_WEEKDAY' && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-muted-foreground">Every</span>
-                <Select value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
+                <Select items={indexedSelectItems(ORDINALS)} value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
                   <SelectTrigger className="w-24">
                     <SelectValue />
                   </SelectTrigger>
@@ -195,7 +194,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
+                <Select items={indexedSelectItems(WEEKDAYS)} value={String(defaultCycleDay)} onValueChange={v => setDefaultCycleDay(Number(v))}>
                   <SelectTrigger className="w-36">
                     <SelectValue />
                   </SelectTrigger>
@@ -222,7 +221,7 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
 
             {defaultCycleType === 'YEARLY' && (
               <div className="flex items-center gap-2 flex-wrap">
-                <Select value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
+                <Select items={indexedSelectItems(MONTHS, 1)} value={String(defaultCycleNth)} onValueChange={v => setDefaultCycleNth(Number(v))}>
                   <SelectTrigger className="w-36">
                     <SelectValue />
                   </SelectTrigger>

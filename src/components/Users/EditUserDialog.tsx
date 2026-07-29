@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { AppUser } from '../../api/users';
+import { roleLabel, type AppUser } from '../../api/users';
+import { selectItems } from '@/lib/select-items';
 import { useRoles } from '../../hooks/useRoles';
 import { useUpdateUser } from '../../hooks/useUpdateUser';
 import { Button } from '@/components/ui/button';
@@ -87,6 +88,7 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
           <div className="flex flex-col gap-1.5">
             <Label>Role</Label>
             <Select
+              items={selectItems(roles, r => r, roleLabel)}
               value={form.role}
               onValueChange={val => setForm(f => ({ ...f, role: val }))}
             >
@@ -96,7 +98,7 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
               <SelectContent>
                 {roles.map(r => (
                   <SelectItem key={r} value={r}>
-                    {r.charAt(0) + r.slice(1).toLowerCase()}
+                    {roleLabel(r)}
                   </SelectItem>
                 ))}
               </SelectContent>

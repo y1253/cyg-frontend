@@ -19,6 +19,11 @@ export interface CreateUserData {
   role: string;
 }
 
+/** `ADMIN` → `Admin`. Roles come from the Prisma enum, so they arrive SHOUTING. */
+export function roleLabel(role: string): string {
+  return role.charAt(0) + role.slice(1).toLowerCase();
+}
+
 export async function fetchRoles(token: string): Promise<string[]> {
   const res = await fetchWithAuth(token, `${API}/users/roles`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch roles');

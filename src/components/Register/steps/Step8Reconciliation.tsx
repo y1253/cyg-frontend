@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { FormData, ReconciliationAccount } from '../RegisterPage';
+import { selectItems } from '@/lib/select-items';
 
 const ACCOUNT_TYPES = ['Checking', 'Savings', 'Credit Card', 'Line of Credit', 'Other'];
 
@@ -93,6 +94,7 @@ export function Step8Reconciliation({ data, onChange }: Props) {
                     Account Type <span className="text-destructive">*</span>
                   </Label>
                   <Select
+                    items={selectItems(ACCOUNT_TYPES, t => t, t => t)}
                     value={account.type || null}
                     onValueChange={val => updateAccount(index, { type: val ?? '' })}
                   >

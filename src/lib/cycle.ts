@@ -30,6 +30,20 @@ export const MONTHS = [
 ];
 
 /**
+ * Labels for the `CycleType` enum, in the order the pickers list them. Render the
+ * options from this map (and pass it as the Select's `items`) so the trigger shows
+ * "Day of month" rather than the raw `MONTHLY_DATE`.
+ */
+export const CYCLE_TYPE_LABELS: Record<string, string> = {
+  DAYS: "Every N days",
+  MONTHLY_DATE: "Day of month",
+  WEEKLY_DAY: "Day of week",
+  MONTHLY_WEEKDAY: "Nth weekday of month",
+  QUARTERLY: "Quarterly — specific date",
+  YEARLY: "Yearly — specific date",
+};
+
+/**
  * Sentinel stored in `cycleDay` meaning "the last day of the month", regardless
  * of how many days the month has. Used by the date-based cycle types
  * (MONTHLY_DATE / QUARTERLY / YEARLY). The day picker lists 1–28 then this value.
