@@ -6,6 +6,7 @@ import {
   Sparkles, Check, CheckCircle2, ListChecks, Circle, Forward, Printer, ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useNotifications } from '@/context/NotificationContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
@@ -373,6 +374,7 @@ function ForwardPreview({
 export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
+  const { notifyPush } = useNotifications();
 
   // Where the user left off last time (see CommUI). The component is keyed by
   // companyId in CompanyDetailPage, so this re-reads per company — no cross-company
@@ -1122,15 +1124,27 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         if (data.type === 'new-email') {
           void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
           void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
+          // The dashboard badge reads this map, and it wasn't being refreshed here —
+          // so a pushed email only showed up on the badge a poll cycle later.
+          void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
           setNewEmailBanner(true);
           setTimeout(() => setNewEmailBanner(false), 5000);
+          // Sound/desktop alert (no-op while the tab is focused). Stamping the
+          // company as the source also stops the slower count poll from announcing
+          // this same email a second time.
+          notifyPush({
+            source: `company:${companyId}`,
+            title: 'New email',
+            body: account?.emailAddress ?? account?.gmailAddress ?? 'New message',
+            tag: `cyg-company-${companyId}`,
+          });
         }
       } catch {
         // ignore parse errors
       }
     };
     return () => es.close();
-  }, [active, account, companyId, token, qc, provider]);
+  }, [active, account, companyId, token, qc, provider, notifyPush]);
 
   const handleConnect = useCallback(
     async (prov: EmailProvider = 'GOOGLE', kind: 'work' | 'personal' = 'work') => {

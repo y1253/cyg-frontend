@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
   MailOpen, Paperclip, Pencil, Printer, Reply, Send, SendHorizonal, X,
@@ -39,7 +38,8 @@ import {
   useInternalUncompletedCount,
   useInternalUnreadCount,
 } from '@/hooks/useInternalUncompletedCount';
-import { internalAttachmentUrl, internalEventsUrl } from '@/api/internalMessages';
+import { internalAttachmentUrl } from '@/api/internalMessages';
+import { useNotifications } from '@/context/NotificationContext';
 import type {
   InternalFolder,
   InternalForward,
@@ -50,8 +50,8 @@ import type {
 interface Props {
   /**
    * Messages is the visible tab. The component stays MOUNTED while hidden so an
-   * open thread and a half-typed reply survive a tab switch — polling and the SSE
-   * subscription are gated on this, not on mount.
+   * open thread and a half-typed reply survive a tab switch — polling is gated on
+   * this, not on mount.
    */
   active: boolean;
 }
@@ -155,7 +155,6 @@ function getStoredUI(): StoredUI {
 
 export function InternalMessagesTab({ active }: Props) {
   const { token, user } = useAuth();
-  const qc = useQueryClient();
   const stored = useRef(getStoredUI()).current;
 
   const [folder, setFolder] = useState<InternalFolder>(stored.folder ?? 'INBOX');
@@ -216,6 +215,7 @@ export function InternalMessagesTab({ active }: Props) {
   );
   const { data: uncompleted } = useInternalUncompletedCount();
   const { data: unread } = useInternalUnreadCount();
+  const { lastInternalEventAt } = useNotifications();
 
   const messages = useMemo(
     () => dedupeById(listQuery.data?.pages.flatMap((p) => p.messages) ?? []),
@@ -272,32 +272,14 @@ export function InternalMessagesTab({ active }: Props) {
   }, [folder, openThreadId, search]);
 
   // ── SSE: instant delivery ─────────────────────────────────────────────────
+  // The connection itself is owned by NotificationProvider (one per tab, alive on
+  // every page) — it does the invalidating. All that's left here is the banner.
   useEffect(() => {
-    if (!active || !token) return;
-    const es = new EventSource(internalEventsUrl(token));
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data as string) as { type?: string };
-        if (payload.type !== 'new-message') return;
-      } catch {
-        return;
-      }
-      void qc.invalidateQueries({ queryKey: ['internal-messages'] });
-      void qc.invalidateQueries({ queryKey: ['internal-uncompleted-count'] });
-      void qc.invalidateQueries({ queryKey: ['internal-unread-count'] });
-      void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
-      if (openThreadId) {
-        void qc.invalidateQueries({
-          queryKey: ['internal-message-thread', openThreadId],
-        });
-      }
-      setBanner(true);
-      setTimeout(() => setBanner(false), 5000);
-    };
-    // The 15s poll on the list query is the fallback if the stream drops.
-    es.onerror = () => es.close();
-    return () => es.close();
-  }, [active, token, qc, openThreadId]);
+    if (!lastInternalEventAt) return;
+    setBanner(true);
+    const t = setTimeout(() => setBanner(false), 5000);
+    return () => clearTimeout(t);
+  }, [lastInternalEventAt]);
 
   // ── Infinite scroll ───────────────────────────────────────────────────────
   useEffect(() => {

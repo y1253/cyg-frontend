@@ -3,6 +3,8 @@ import { Archive, ClipboardList, LayoutDashboard, LogOut, Users2 } from 'lucide-
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
+import { NotificationProvider } from '@/context/NotificationContext';
+import { NotificationBell } from '@/components/Layout/NotificationBell';
 
 function SideNavLink({
   to,
@@ -31,6 +33,18 @@ function SideNavLink({
 }
 
 export function AppLayout() {
+  // The notification provider lives here rather than in App.tsx: it needs the router
+  // for notification click-through, it should only run for authenticated routes, and
+  // unmounting on logout is what closes its message stream. The shell is a child so
+  // it (and the bell) can consume the context.
+  return (
+    <NotificationProvider>
+      <AppShell />
+    </NotificationProvider>
+  );
+}
+
+function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'ADMIN';
@@ -48,6 +62,7 @@ export function AppLayout() {
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium">{user?.name}</span>
           <Badge variant="secondary" className="text-xs">{user?.role}</Badge>
+          <NotificationBell />
           <Button
             variant="ghost"
             size="sm"
