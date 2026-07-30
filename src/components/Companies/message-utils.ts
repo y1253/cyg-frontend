@@ -123,6 +123,87 @@ export function sanitizeForwardHtml(html: string): string {
   return doc.body.innerHTML;
 }
 
+/** The fields a forward quote needs, shared by real emails and internal messages. */
+export interface ForwardSource {
+  /** Display string, e.g. `"Ada" <ada@x.com>` or an internal user's name. */
+  from: string;
+  to: string;
+  /** ISO timestamp. */
+  date: string;
+  subject: string;
+  bodyHtml: string | null;
+  bodyText: string | null;
+}
+
+/**
+ * The Gmail-style quoted block seeded into a forward editor. Order matters:
+ * caret space → signature → quote, so `splitSignature` still cuts at the
+ * signature and AI polish only ever touches the user's own text above it.
+ *
+ * `signatureHtml` is '' where the provider has no signature (internal messages).
+ */
+export function buildForwardedBody(
+  src: ForwardSource,
+  signatureHtml: string,
+): string {
+  const quoted = src.bodyHtml
+    ? sanitizeForwardHtml(src.bodyHtml)
+    : `<div>${escapeHtml(src.bodyText ?? '').replace(/\n/g, '<br>')}</div>`;
+  const dateLabel = new Date(src.date).toLocaleString();
+  return (
+    SIGNATURE_LEAD +
+    signatureHtml +
+    '<div><br></div>' +
+    // data-cyg-forward marks the quote as untouchable — see splitSignature.
+    '<div data-cyg-forward>' +
+    '<div>---------- Forwarded message ----------</div>' +
+    `<div>From: ${escapeHtml(src.from)}</div>` +
+    `<div>Date: ${escapeHtml(dateLabel)}</div>` +
+    `<div>Subject: ${escapeHtml(src.subject || '(no subject)')}</div>` +
+    `<div>To: ${escapeHtml(src.to)}</div>` +
+    '<div><br></div>' +
+    quoted +
+    '</div>'
+  );
+}
+
+/**
+ * Merge newly picked files into a composer's attachment list, enforcing the same
+ * limits the server does. De-dupes on `name:size` (re-picking the same file is a
+ * slip, not an intent to attach it twice) and caps the total, returning a notice
+ * to show the user rather than silently dropping anything.
+ */
+export function mergeAttachments(
+  existing: File[],
+  incoming: File[],
+  max: number,
+): { files: File[]; notice: string | null } {
+  const seen = new Set(existing.map((f) => `${f.name}:${f.size}`));
+  const added: File[] = [];
+  let duplicates = 0;
+  for (const file of incoming) {
+    const key = `${file.name}:${file.size}`;
+    if (seen.has(key)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(key);
+    added.push(file);
+  }
+  const room = Math.max(0, max - existing.length);
+  const overflow = added.length - room;
+  const files = [...existing, ...added.slice(0, room)];
+
+  const parts: string[] = [];
+  if (duplicates > 0) {
+    parts.push(`${duplicates} file${duplicates > 1 ? 's were' : ' was'} already attached`);
+  }
+  if (overflow > 0) {
+    parts.push(`only ${max} files can be attached`);
+  }
+  return { files, notice: parts.length ? `${parts.join('; ')}.` : null };
+}
+
 /** Human-readable byte size, e.g. 1536 → "1.5 KB". */
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '';

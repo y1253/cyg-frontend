@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, CheckCircle2, Circle, Forward, Inbox, ListChecks, MailOpen,
-  Paperclip, Pencil, Printer, Reply, Send, SendHorizonal, X,
+  ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
+  MailOpen, Paperclip, Pencil, Printer, Reply, Send, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -20,11 +22,14 @@ import { InternalMessageRow } from './InternalMessageRow';
 import { InternalComposeDialog } from './InternalComposeDialog';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { EmailBodyFrame } from './EmailBodyFrame';
+import { AttachmentPreview } from './AttachmentPreview';
 import {
-  dedupeById, escapeHtml, formatBytes, formatEmailDate, htmlToText,
-  openPrintWindow, prefixFwdSubject, prefixReSubject, senderInitial, textToHtml,
+  buildForwardedBody, dedupeById, escapeHtml, formatBytes, formatEmailDate,
+  htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
+  prefixReSubject, senderInitial, splitSignature, textToHtml,
 } from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { useInternalMessage } from '@/hooks/useInternalMessage';
 import { useInternalMessages } from '@/hooks/useInternalMessages';
 import { useInternalMessageThread } from '@/hooks/useInternalMessageThread';
 import { useInternalMessageState } from '@/hooks/useInternalMessageState';
@@ -37,6 +42,7 @@ import {
 import { internalAttachmentUrl, internalEventsUrl } from '@/api/internalMessages';
 import type {
   InternalFolder,
+  InternalForward,
   InternalMessageDetail,
   InternalMessageSummary,
 } from '@/api/internalMessages';
@@ -59,6 +65,79 @@ const FOLDERS: { id: InternalFolder; label: string; icon: typeof Inbox }[] = [
 
 const UI_KEY = 'internal-msgs-ui';
 const POLISH_CONTEXT = 'An internal message between colleagues at a bookkeeping firm.';
+
+/** Mirrors the server's multer limits (internal-messages/uploads.ts). */
+const MAX_ATTACHMENTS = 10;
+const MAX_FORWARD_FILE_BYTES = 15 * 1024 * 1024;
+
+/** Forward rows use a full timestamp — "2:14 PM" alone reads as today. */
+function formatForwardTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * What was actually sent on a forward, expanded under the banner. Mirrors
+ * `ForwardPreview` in CommunicationsTab — same card, different data source (the
+ * internal store rather than Gmail, so the attachment URLs differ too).
+ */
+function InternalForwardPreview({ messageId }: { messageId: number }) {
+  const { token } = useAuth();
+  const { data: fwd, isLoading, isError } = useInternalMessage(messageId);
+
+  if (isLoading) {
+    return (
+      <p className="text-xs text-muted-foreground py-2">Loading forwarded message…</p>
+    );
+  }
+  if (isError || !fwd) {
+    return (
+      <p className="text-xs text-muted-foreground py-2">
+        This forwarded message is no longer available.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1 border rounded-md bg-muted/10 p-3 flex flex-col gap-2">
+      <div className="text-xs text-muted-foreground space-y-0.5">
+        <div>
+          <span className="font-medium">From:</span> {fwd.from.name}
+        </div>
+        <div>
+          <span className="font-medium">To:</span>{' '}
+          {fwd.to.map((u) => u.name).join(', ') || '—'}
+        </div>
+        <div>
+          <span className="font-medium">Date:</span> {formatEmailDate(fwd.date)}
+        </div>
+      </div>
+      {fwd.attachments.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {fwd.attachments.map((att) => (
+            <AttachmentPreview
+              key={att.id}
+              url={internalAttachmentUrl(token ?? '', att.id, 'inline')}
+              downloadUrl={internalAttachmentUrl(token ?? '', att.id, 'attachment')}
+              mimeType={att.mimeType}
+              filename={att.filename}
+              size={att.size}
+            />
+          ))}
+        </div>
+      )}
+      <div className="border rounded-md overflow-hidden bg-background">
+        {fwd.bodyHtml ? (
+          <EmailBodyFrame html={fwd.bodyHtml} />
+        ) : (
+          <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+            {fwd.bodyText ?? '(empty)'}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface StoredUI {
   folder?: InternalFolder;
@@ -92,12 +171,28 @@ export function InternalMessagesTab({ active }: Props) {
     { id: number; fromDetail?: boolean } | null
   >(null);
 
+  // The message the user clicked to open the thread — expanded on arrival
+  // alongside the newest one, like the Communications tab.
+  const [openMsgId, setOpenMsgId] = useState<number | null>(null);
+  const [expandedThreadIds, setExpandedThreadIds] = useState<Set<number>>(new Set());
+  const [expandedForwardIds, setExpandedForwardIds] = useState<Set<number>>(new Set());
+
   // Reply / forward are inline forms below the thread, not dialogs.
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState('');
+  const [replyTo, setReplyTo] = useState<number[]>([]);
+  const [replyCc, setReplyCc] = useState<number[]>([]);
+  const [replySubject, setReplySubject] = useState('');
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [forwardOpen, setForwardOpen] = useState(false);
   const [forwardBody, setForwardBody] = useState('');
   const [forwardTo, setForwardTo] = useState<number[]>([]);
+  const [forwardCc, setForwardCc] = useState<number[]>([]);
+  const [forwardSubject, setForwardSubject] = useState('');
+  const [forwardFiles, setForwardFiles] = useState<File[]>([]);
+  const [forwardAttLoading, setForwardAttLoading] = useState(false);
+  const [forwardSkipped, setForwardSkipped] = useState<string[]>([]);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
   const replyPolish = useDraftPolish();
@@ -105,12 +200,20 @@ export function InternalMessagesTab({ active }: Props) {
   const replyRef = useRef<HTMLDivElement>(null);
   const forwardRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const replyFileInputRef = useRef<HTMLInputElement>(null);
+  const forwardFileInputRef = useRef<HTMLInputElement>(null);
+  // Bumped on every new forward so a slow attachment download from a previous
+  // one can't land in the form the user is looking at now.
+  const forwardReqRef = useRef(0);
+  const threadInitKeyRef = useRef<string | null>(null);
 
   const listQuery = useInternalMessages(folder, search || undefined, active);
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
-  const { data: directory = [] } = useUserDirectory(forwardOpen || composeOpen);
+  const { data: directory = [] } = useUserDirectory(
+    forwardOpen || replyOpen || composeOpen,
+  );
   const { data: uncompleted } = useInternalUncompletedCount();
   const { data: unread } = useInternalUnreadCount();
 
@@ -118,9 +221,47 @@ export function InternalMessagesTab({ active }: Props) {
     () => dedupeById(listQuery.data?.pages.flatMap((p) => p.messages) ?? []),
     [listQuery.data],
   );
-  const threadMessages = threadQuery.data?.messages ?? [];
+  // Memoised so the `?? []` fallback doesn't hand the expand-init effect a fresh
+  // array on every render.
+  const threadMessages = useMemo(
+    () => threadQuery.data?.messages ?? [],
+    [threadQuery.data],
+  );
   const lastMessage: InternalMessageDetail | undefined =
     threadMessages[threadMessages.length - 1];
+
+  // Expand the newest message plus the one the user clicked, once per opened
+  // thread. Keyed so the 15s poll (a new array each time) doesn't collapse what
+  // the user manually expanded; a genuinely new message won't auto-expand.
+  useEffect(() => {
+    if (threadMessages.length === 0) return;
+    const key = `${openThreadId}|${openMsgId}|${threadMessages.length}`;
+    if (threadInitKeyRef.current === key) return;
+    threadInitKeyRef.current = key;
+    const initial = new Set<number>([threadMessages[threadMessages.length - 1].id]);
+    if (openMsgId && threadMessages.some((m) => m.id === openMsgId)) {
+      initial.add(openMsgId);
+    }
+    setExpandedThreadIds(initial);
+  }, [threadMessages, openThreadId, openMsgId]);
+
+  const toggleThreadMessage = (id: number) => {
+    setExpandedThreadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleForwardPreview = (id: number) => {
+    setExpandedForwardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Persist view state (never drafts — a half-typed reply shouldn't outlive the session).
   useEffect(() => {
@@ -179,6 +320,11 @@ export function InternalMessagesTab({ active }: Props) {
   const openMessage = useCallback(
     (message: InternalMessageSummary) => {
       setOpenThreadId(message.threadId);
+      setOpenMsgId(message.id);
+      // Let the init effect re-run for the newly opened thread.
+      threadInitKeyRef.current = null;
+      setExpandedThreadIds(new Set());
+      setExpandedForwardIds(new Set());
       setReplyOpen(false);
       setForwardOpen(false);
       setSendError(null);
@@ -196,10 +342,12 @@ export function InternalMessagesTab({ active }: Props) {
 
   const closeThread = () => {
     setOpenThreadId(null);
-    setReplyOpen(false);
-    setForwardOpen(false);
-    replyPolish.reset();
-    forwardPolish.reset();
+    setOpenMsgId(null);
+    threadInitKeyRef.current = null;
+    setExpandedThreadIds(new Set());
+    setExpandedForwardIds(new Set());
+    closeReply();
+    closeForward();
   };
 
   // ── Complete / uncomplete ─────────────────────────────────────────────────
@@ -255,10 +403,46 @@ export function InternalMessagesTab({ active }: Props) {
   );
 
   // ── Reply / forward ───────────────────────────────────────────────────────
+  const closeReply = () => {
+    setReplyOpen(false);
+    setReplyBody('');
+    setReplyTo([]);
+    setReplyCc([]);
+    setReplySubject('');
+    setReplyFiles([]);
+    setAttachmentNotice(null);
+    replyPolish.reset();
+  };
+
+  const closeForward = () => {
+    // Supersede any attachment download still in flight for this form.
+    forwardReqRef.current++;
+    setForwardOpen(false);
+    setForwardBody('');
+    setForwardTo([]);
+    setForwardCc([]);
+    setForwardSubject('');
+    setForwardFiles([]);
+    setForwardSkipped([]);
+    setForwardAttLoading(false);
+    setAttachmentNotice(null);
+    forwardPolish.reset();
+  };
+
   const startReply = () => {
     if (!lastMessage) return;
-    setForwardOpen(false);
+    closeForward();
+    // Reply-all minus me: everyone who was on the thread stays on it.
+    const recipients = [
+      lastMessage.from.id,
+      ...lastMessage.to.map((u) => u.id),
+    ].filter((id) => id !== user?.id);
+    setReplyTo([...new Set(recipients)]);
+    setReplyCc(lastMessage.cc.map((u) => u.id).filter((id) => id !== user?.id));
+    setReplySubject(prefixReSubject(lastMessage.subject));
     setReplyBody('');
+    setReplyFiles([]);
+    setAttachmentNotice(null);
     setSendError(null);
     replyPolish.reset();
     setReplyOpen(true);
@@ -270,54 +454,128 @@ export function InternalMessagesTab({ active }: Props) {
 
   const startForward = () => {
     if (!lastMessage) return;
-    setReplyOpen(false);
+    closeReply();
+    const reqId = ++forwardReqRef.current;
     setForwardTo([]);
+    setForwardCc([]);
+    setForwardSubject(prefixFwdSubject(lastMessage.subject));
+    setForwardFiles([]);
+    setForwardSkipped([]);
+    // The superseded hydrate above skips its own cleanup, so clear the flag here
+    // or a forward of an attachment-free message inherits a stuck "Loading…".
+    setForwardAttLoading(false);
+    setAttachmentNotice(null);
     setSendError(null);
     forwardPolish.reset();
-    // Quote the original below a marked block so AI polish leaves it alone.
+    // Quote the original below a `data-cyg-forward` block so AI polish leaves it
+    // alone. There is no signature for internal messages, hence the ''.
     setForwardBody(
-      '<div><br></div><div data-cyg-forward>' +
-        '<div>---------- Forwarded message ----------</div>' +
-        `<div>From: ${escapeHtml(lastMessage.from.name)} &lt;${escapeHtml(lastMessage.from.email)}&gt;</div>` +
-        `<div>Date: ${escapeHtml(new Date(lastMessage.date).toLocaleString())}</div>` +
-        `<div>Subject: ${escapeHtml(lastMessage.subject || '(no subject)')}</div>` +
-        '<div><br></div>' +
-        (lastMessage.bodyHtml ??
-          `<div>${escapeHtml(lastMessage.bodyText ?? '').replace(/\n/g, '<br>')}</div>`) +
-        '</div>',
+      buildForwardedBody(
+        {
+          from: `${lastMessage.from.name} <${lastMessage.from.email}>`,
+          to: lastMessage.to.map((u) => u.name).join(', '),
+          date: lastMessage.date,
+          subject: lastMessage.subject,
+          bodyHtml: lastMessage.bodyHtml,
+          bodyText: lastMessage.bodyText,
+        },
+        '',
+      ),
     );
     setForwardOpen(true);
     setTimeout(
       () => forwardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
       50,
     );
+    void hydrateForwardAttachments(lastMessage, reqId);
+  };
+
+  /**
+   * Re-download the original's attachments so the forward carries them, the way
+   * a mail client does. Anything too large or past the file cap is reported
+   * rather than silently dropped.
+   */
+  const hydrateForwardAttachments = async (
+    source: InternalMessageDetail,
+    reqId: number,
+  ) => {
+    if (!token || source.attachments.length === 0) return;
+    const skipped: string[] = [];
+    const wanted: typeof source.attachments = [];
+    for (const att of source.attachments) {
+      if (att.size > MAX_FORWARD_FILE_BYTES || wanted.length >= MAX_ATTACHMENTS) {
+        skipped.push(att.filename);
+      } else {
+        wanted.push(att);
+      }
+    }
+    if (skipped.length) setForwardSkipped(skipped);
+    if (wanted.length === 0) return;
+
+    setForwardAttLoading(true);
+    try {
+      const files = await Promise.all(
+        wanted.map(async (att) => {
+          const res = await fetch(
+            internalAttachmentUrl(token, att.id, 'attachment'),
+          );
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          return new File([blob], att.filename, { type: att.mimeType });
+        }),
+      );
+      // A newer forward was started while this was in flight — drop the result.
+      if (reqId !== forwardReqRef.current) return;
+      // Originals first, then anything attached manually while downloading.
+      setForwardFiles((manual) =>
+        [...files, ...manual].slice(0, MAX_ATTACHMENTS),
+      );
+    } catch {
+      if (reqId !== forwardReqRef.current) return;
+      setSendError(
+        "Couldn't load the original attachments. You can attach files manually.",
+      );
+    } finally {
+      if (reqId === forwardReqRef.current) setForwardAttLoading(false);
+    }
+  };
+
+  const pickFiles = (
+    incoming: FileList | null,
+    current: File[],
+    set: (files: File[]) => void,
+  ) => {
+    if (!incoming?.length) return;
+    const { files, notice } = mergeAttachments(
+      current,
+      Array.from(incoming),
+      MAX_ATTACHMENTS,
+    );
+    set(files);
+    setAttachmentNotice(notice);
   };
 
   const submitReply = () => {
     if (!lastMessage) return;
     const text = htmlToText(replyBody);
-    if (!text.trim()) return;
+    if (!text.trim() && replyFiles.length === 0) return;
+    if (replyTo.length === 0) {
+      setSendError('Add at least one recipient.');
+      return;
+    }
     setSendError(null);
-    // Reply-all minus me: everyone who was on the thread stays on it.
-    const recipients = [
-      lastMessage.from.id,
-      ...lastMessage.to.map((u) => u.id),
-    ].filter((id) => id !== user?.id);
     sendMutation.mutate(
       {
-        to: [...new Set(recipients)],
-        cc: lastMessage.cc.map((u) => u.id).filter((id) => id !== user?.id),
-        subject: prefixReSubject(lastMessage.subject),
+        to: replyTo,
+        cc: replyCc,
+        subject: replySubject,
         body: text,
         bodyHtml: replyBody,
         parentId: lastMessage.id,
+        files: replyFiles,
       },
       {
-        onSuccess: () => {
-          setReplyOpen(false);
-          setReplyBody('');
-          replyPolish.reset();
-        },
+        onSuccess: closeReply,
         onError: (e: unknown) =>
           setSendError((e as Error)?.message ?? 'Failed to send reply'),
       },
@@ -335,22 +593,210 @@ export function InternalMessagesTab({ active }: Props) {
     sendMutation.mutate(
       {
         to: forwardTo,
-        subject: prefixFwdSubject(lastMessage.subject),
+        cc: forwardCc,
+        subject: forwardSubject,
         body: text,
         bodyHtml: forwardBody,
+        // parentId still links back to the original (it drives the "You forwarded
+        // this message" banner) even though the server roots the forward as its
+        // own conversation, exactly like email.
         parentId: lastMessage.id,
         isForward: true,
+        files: forwardFiles,
       },
       {
-        onSuccess: () => {
-          setForwardOpen(false);
-          setForwardBody('');
-          setForwardTo([]);
-          forwardPolish.reset();
-        },
+        onSuccess: closeForward,
         onError: (e: unknown) =>
           setSendError((e as Error)?.message ?? 'Failed to forward message'),
       },
+    );
+  };
+
+  // The Attach button + picked-file list, shared by the reply and forward forms.
+  const renderAttachRow = (
+    files: File[],
+    setFiles: (files: File[]) => void,
+    inputRef: React.RefObject<HTMLInputElement | null>,
+  ) => (
+    <div className="flex flex-col gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          pickFiles(e.target.files, files, setFiles);
+          // Reset so picking the same file again still fires onChange.
+          e.target.value = '';
+        }}
+      />
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => inputRef.current?.click()}
+        >
+          <Paperclip size={14} /> Attach
+        </Button>
+      </div>
+      {attachmentNotice && (
+        <p className="text-xs text-amber-600">{attachmentNotice}</p>
+      )}
+      {files.map((f, i) => (
+        <div
+          key={`${f.name}:${f.size}:${i}`}
+          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+        >
+          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{f.name}</span>
+          <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+          <button
+            type="button"
+            aria-label={`Remove ${f.name}`}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  // The teal "You forwarded this message" block, shown on a message that has been
+  // forwarded on. Only forwards the viewer is party to reach the client, so the
+  // wording names the forwarder whenever it wasn't the viewer themselves.
+  const renderForwardBanner = (forwards: InternalForward[]) => {
+    const allMine = forwards.every((f) => f.by.id === user?.id);
+    const heading = allMine
+      ? forwards.length > 1
+        ? `You forwarded this message ${forwards.length} times`
+        : 'You forwarded this message'
+      : forwards.length > 1
+        ? `This message was forwarded ${forwards.length} times`
+        : `${forwards[0].by.name} forwarded this message`;
+    return (
+      <div className="flex flex-col gap-1 text-xs">
+        <div className="flex items-center gap-1.5 font-medium text-teal-600">
+          <Forward size={13} />
+          {heading}
+        </div>
+        <div className="pl-[18px] flex flex-col gap-0.5 text-muted-foreground">
+          {forwards.map((f) => {
+            const open = expandedForwardIds.has(f.messageId);
+            return (
+              <div key={f.messageId} className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => toggleForwardPreview(f.messageId)}
+                  className="flex items-center gap-1 text-left hover:text-foreground"
+                >
+                  <ChevronRight
+                    size={12}
+                    className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+                  />
+                  <span>
+                    {f.by.id !== user?.id && (
+                      <>
+                        by <span className="font-medium text-foreground">{f.by.name}</span>{' '}
+                      </>
+                    )}
+                    to{' '}
+                    <span className="font-medium text-foreground">
+                      {f.to || 'unknown recipient'}
+                    </span>{' '}
+                    · {formatForwardTime(f.at)}
+                  </span>
+                </button>
+                {open && <InternalForwardPreview messageId={f.messageId} />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // One message in the opened conversation, Gmail-style: a clickable header
+  // (sender · date, plus the snippet when collapsed) that toggles the full
+  // body/attachments below.
+  const renderThreadMessage = (m: InternalMessageDetail, isLast: boolean) => {
+    // Fall back to the latest message expanded before the init effect has run,
+    // so the pane is never all-collapsed.
+    const expanded =
+      expandedThreadIds.has(m.id) || (expandedThreadIds.size === 0 && isLast);
+    return (
+      <div key={m.id} className="border rounded-md overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleThreadMessage(m.id)}
+          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
+        >
+          <div className="h-8 w-8 shrink-0 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-semibold">
+            {senderInitial(m.from.name)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">
+                {m.from.name}
+                {m.isOwn && (
+                  <span className="text-xs text-muted-foreground font-normal"> (you)</span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground shrink-0">
+                {formatEmailDate(m.date)}
+              </span>
+            </div>
+            {expanded ? (
+              <div className="text-xs text-muted-foreground truncate">
+                To: {m.to.map((u) => u.name).join(', ') || '—'}
+                {m.cc.length > 0 && ` · Cc: ${m.cc.map((u) => u.name).join(', ')}`}
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
+            )}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
+            {m.isForwarded && renderForwardBanner(m.forwards)}
+            {m.attachments.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attachments ({m.attachments.length})
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {m.attachments.map((att) => (
+                    <AttachmentPreview
+                      key={att.id}
+                      url={internalAttachmentUrl(token ?? '', att.id, 'inline')}
+                      downloadUrl={internalAttachmentUrl(token ?? '', att.id, 'attachment')}
+                      mimeType={att.mimeType}
+                      filename={att.filename}
+                      size={att.size}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="border rounded-md overflow-hidden">
+              {/* Bodies are user-authored HTML — render in the sandboxed iframe,
+                  never into this document. */}
+              {m.bodyHtml ? (
+                <EmailBodyFrame html={m.bodyHtml} />
+              ) : (
+                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+                  {m.bodyText ?? '(empty)'}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -425,66 +871,50 @@ export function InternalMessagesTab({ active }: Props) {
           {threadQuery.isLoading && (
             <p className="text-sm text-muted-foreground px-1">Loading…</p>
           )}
-          {threadMessages.map((m) => (
-            <div key={m.id} className="rounded-lg border bg-background">
-              <div className="flex items-start gap-3 px-4 py-3 border-b bg-muted/20">
-                <div className="shrink-0 w-8 h-8 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-semibold">
-                  {senderInitial(m.from.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium truncate">
-                      {m.from.name}
-                      {m.isOwn && (
-                        <span className="text-xs text-muted-foreground font-normal"> (you)</span>
-                      )}
-                    </span>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {formatEmailDate(m.date)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">
-                    To: {m.to.map((u) => u.name).join(', ') || '—'}
-                    {m.cc.length > 0 && ` · Cc: ${m.cc.map((u) => u.name).join(', ')}`}
-                  </p>
-                </div>
-              </div>
-              <div className="px-4 py-3">
-                {/* Bodies are user-authored HTML — render in the sandboxed iframe,
-                    never into this document. */}
-                {m.bodyHtml ? (
-                  <EmailBodyFrame html={m.bodyHtml} />
-                ) : (
-                  <pre className="whitespace-pre-wrap font-sans text-sm">
-                    {m.bodyText}
-                  </pre>
-                )}
-                {m.attachments.length > 0 && (
-                  <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                    {m.attachments.map((att) => (
-                      <a
-                        key={att.id}
-                        href={internalAttachmentUrl(token!, att.id, 'attachment')}
-                        className="flex items-center gap-2 text-xs text-teal-700 hover:underline"
-                      >
-                        <Paperclip size={12} />
-                        <span className="truncate">{att.filename}</span>
-                        <span className="text-muted-foreground">
-                          {formatBytes(att.size)}
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+          {threadMessages.length > 0 && (
+            <h2 className="font-semibold text-base px-1">
+              {(lastMessage?.subject || threadMessages[0]?.subject) || '(no subject)'}
+            </h2>
+          )}
+
+          {/* Conversation thread — older messages collapsed, latest expanded */}
+          {threadMessages.map((m, i) =>
+            renderThreadMessage(m, i === threadMessages.length - 1),
+          )}
 
           {replyOpen && (
-            <div ref={replyRef} className="rounded-lg border p-3 flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">
-                Replying to {lastMessage?.from.name}
+            <div
+              ref={replyRef}
+              className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Reply
               </p>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">To</Label>
+                <UserAutocomplete
+                  value={replyTo}
+                  onChange={setReplyTo}
+                  users={directory}
+                  placeholder="Start typing a name…"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">CC</Label>
+                <UserAutocomplete
+                  value={replyCc}
+                  onChange={setReplyCc}
+                  users={directory}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Subject</Label>
+                <Input
+                  value={replySubject}
+                  onChange={(e) => setReplySubject(e.target.value)}
+                />
+              </div>
               <RichTextEditor
                 html={replyBody}
                 onChange={setReplyBody}
@@ -492,6 +922,11 @@ export function InternalMessagesTab({ active }: Props) {
                 minHeight={140}
                 maxHeight={320}
               />
+              {renderAttachRow(
+                replyFiles,
+                setReplyFiles,
+                replyFileInputRef,
+              )}
               <PolishPanel
                 polish={replyPolish}
                 context={POLISH_CONTEXT}
@@ -502,18 +937,21 @@ export function InternalMessagesTab({ active }: Props) {
                 <Button
                   size="sm"
                   className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-                  disabled={sendMutation.isPending || !htmlToText(replyBody).trim()}
+                  disabled={
+                    sendMutation.isPending ||
+                    (!htmlToText(replyBody).trim() && replyFiles.length === 0)
+                  }
                   onClick={submitReply}
                 >
                   <Send size={14} />
-                  {sendMutation.isPending ? 'Sending…' : 'Send'}
+                  {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                 </Button>
                 <PolishButton
                   polish={replyPolish}
                   draftPlain={htmlToText(replyBody)}
                   context={POLISH_CONTEXT}
                 />
-                <Button size="sm" variant="outline" onClick={() => setReplyOpen(false)}>
+                <Button size="sm" variant="outline" onClick={closeReply}>
                   Cancel
                 </Button>
               </div>
@@ -521,30 +959,67 @@ export function InternalMessagesTab({ active }: Props) {
           )}
 
           {forwardOpen && (
-            <div ref={forwardRef} className="rounded-lg border p-3 flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">Forward to</p>
-              <UserAutocomplete
-                value={forwardTo}
-                onChange={setForwardTo}
-                users={directory}
-                placeholder="Start typing a name…"
-              />
+            <div
+              ref={forwardRef}
+              className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
+            >
+              <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <Forward size={13} /> Forward
+              </p>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">To</Label>
+                <UserAutocomplete
+                  value={forwardTo}
+                  onChange={setForwardTo}
+                  users={directory}
+                  placeholder="Start typing a name…"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">CC</Label>
+                <UserAutocomplete
+                  value={forwardCc}
+                  onChange={setForwardCc}
+                  users={directory}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Subject</Label>
+                <Input
+                  value={forwardSubject}
+                  onChange={(e) => setForwardSubject(e.target.value)}
+                />
+              </div>
               <RichTextEditor
                 html={forwardBody}
                 onChange={setForwardBody}
                 placeholder="Add a note…"
-                minHeight={140}
-                maxHeight={320}
+                minHeight={200}
+                maxHeight={360}
               />
+              {forwardAttLoading && (
+                <p className="text-xs text-muted-foreground">Loading attachments…</p>
+              )}
+              {forwardSkipped.length > 0 && (
+                <p className="text-xs text-amber-600">
+                  Not forwarded (too large or over the {MAX_ATTACHMENTS}-file limit):{' '}
+                  {forwardSkipped.join(', ')}
+                </p>
+              )}
+              {renderAttachRow(
+                forwardFiles,
+                setForwardFiles,
+                forwardFileInputRef,
+              )}
               <PolishPanel
                 polish={forwardPolish}
                 context={POLISH_CONTEXT}
                 onAccept={(t) => {
                   // Keep the quoted block; polish only rewrites the note above it.
-                  const idx = forwardBody.search(/<div[^>]*data-cyg-forward/i);
-                  const quote = idx === -1 ? '' : forwardBody.slice(idx);
+                  const { sig } = splitSignature(forwardBody);
                   setForwardBody(
-                    quote ? `${textToHtml(t)}<div><br></div>${quote}` : textToHtml(t),
+                    sig ? `${textToHtml(t)}<div><br></div>${sig}` : textToHtml(t),
                   );
                 }}
               />
@@ -553,25 +1028,22 @@ export function InternalMessagesTab({ active }: Props) {
                 <Button
                   size="sm"
                   className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-                  disabled={sendMutation.isPending || forwardTo.length === 0}
+                  disabled={
+                    sendMutation.isPending ||
+                    forwardTo.length === 0 ||
+                    forwardAttLoading
+                  }
                   onClick={submitForward}
                 >
                   <Send size={14} />
-                  {sendMutation.isPending ? 'Sending…' : 'Forward'}
+                  {sendMutation.isPending ? 'Sending…' : 'Send'}
                 </Button>
                 <PolishButton
                   polish={forwardPolish}
-                  draftPlain={htmlToText(
-                    forwardBody.slice(
-                      0,
-                      forwardBody.search(/<div[^>]*data-cyg-forward/i) === -1
-                        ? undefined
-                        : forwardBody.search(/<div[^>]*data-cyg-forward/i),
-                    ),
-                  )}
+                  draftPlain={htmlToText(splitSignature(forwardBody).body)}
                   context={POLISH_CONTEXT}
                 />
-                <Button size="sm" variant="outline" onClick={() => setForwardOpen(false)}>
+                <Button size="sm" variant="outline" onClick={closeForward}>
                   Cancel
                 </Button>
               </div>

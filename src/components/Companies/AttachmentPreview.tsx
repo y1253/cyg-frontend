@@ -3,13 +3,13 @@ import {
   Download,
   FileText,
   ExternalLink,
-  X,
   Image as ImageIcon,
   Music,
   Video as VideoIcon,
   File as FileIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAttachmentViewer } from './AttachmentViewerContext';
 
 // Human-readable byte size, e.g. 1536 → "1.5 KB".
 function formatBytes(bytes?: number): string {
@@ -110,7 +110,10 @@ export function AttachmentPreview({
   // Set once the transcoded source has been rejected by the decoder, so the effect
   // re-runs and retries with the original (untranscoded) bytes.
   const [rawFallback, setRawFallback] = useState(false);
-  const [lightbox, setLightbox] = useState(false);
+  // The enlarged view lives in an app-level provider, not here: this component is
+  // keyed off data that a background refetch replaces, so local open/closed state
+  // would be wiped out mid-preview.
+  const { open: openViewer } = useAttachmentViewer();
 
   const kind = resolveKind(mimeType, filename);
 
@@ -168,16 +171,6 @@ export function AttachmentPreview({
     setMediaError(true);
   };
 
-  // Close the lightbox on Escape.
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLightbox(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightbox]);
-
   // Explicit download control, revealed on hover over the attachment. Stops
   // propagation so it never triggers the preview/lightbox.
   const downloadButton = (
@@ -226,36 +219,12 @@ export function AttachmentPreview({
     );
   }
 
-  const lightboxOverlay = lightbox ? (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-      onClick={() => setLightbox(false)}
-    >
-      <button
-        type="button"
-        onClick={() => setLightbox(false)}
-        aria-label="Close preview"
-        className="absolute right-4 top-4 inline-flex items-center justify-center rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-      >
-        <X className="h-5 w-5" />
-      </button>
-      {kind === 'pdf' ? (
-        <iframe
-          src={url}
-          title={filename}
-          onClick={(e) => e.stopPropagation()}
-          className="h-[90vh] w-full max-w-5xl rounded-md bg-white"
-        />
-      ) : (
-        <img
-          src={url}
-          alt={filename}
-          onClick={(e) => e.stopPropagation()}
-          className="max-h-[90vh] max-w-full rounded-md object-contain"
-        />
-      )}
-    </div>
-  ) : null;
+  // Hand the current URL to the app-level viewer. `url` is captured there, so the
+  // preview keeps rendering even once this component has been handed a new one.
+  const enlarge = (viewerKind: 'image' | 'pdf') => {
+    if (!url) return;
+    openViewer({ url, mimeType, filename, kind: viewerKind });
+  };
 
   if (url && !failed) {
     if (kind === 'image') {
@@ -267,10 +236,9 @@ export function AttachmentPreview({
             alt={filename}
             loading="lazy"
             onError={() => setFailed(true)}
-            onClick={() => setLightbox(true)}
+            onClick={() => enlarge('image')}
             className="max-h-72 max-w-xs cursor-zoom-in rounded-md border object-contain"
           />
-          {lightboxOverlay}
         </div>
       );
     }
@@ -320,7 +288,7 @@ export function AttachmentPreview({
           {downloadButton}
           <button
             type="button"
-            onClick={() => setLightbox(true)}
+            onClick={() => enlarge('pdf')}
             className="inline-flex max-w-xs items-center gap-3 rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
           >
             <FileText className="h-5 w-5 shrink-0 text-red-500" />
@@ -331,7 +299,6 @@ export function AttachmentPreview({
               </span>
             </span>
           </button>
-          {lightboxOverlay}
         </div>
       );
     }

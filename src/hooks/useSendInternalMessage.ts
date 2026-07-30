@@ -10,13 +10,16 @@ export function useSendInternalMessage() {
 
   return useMutation({
     mutationFn: (data: SendInput) => sendInternalMessage(token!, data),
-    onSuccess: (message) => {
+    onSuccess: () => {
       // The sender's own SENT list and any open thread need the new message; the
       // recipient learns about it over SSE rather than from here.
+      //
+      // Invalidate every thread rather than the sent message's own: a forward
+      // roots a NEW conversation, so its threadId is not the thread the user is
+      // looking at — but that thread now has to show the "You forwarded this
+      // message" banner. At most one thread is open, so this costs one refetch.
       void qc.invalidateQueries({ queryKey: ['internal-messages'] });
-      void qc.invalidateQueries({
-        queryKey: ['internal-message-thread', message.threadId],
-      });
+      void qc.invalidateQueries({ queryKey: ['internal-message-thread'] });
     },
   });
 }

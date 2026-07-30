@@ -43,9 +43,26 @@ export interface InternalMessageSummary {
   attachments: InternalAttachment[];
 }
 
+/** One forward of a message — mirrors EmailDetail.forwards in api/gmail.ts. */
+export interface InternalForward {
+  /** Id of the forward itself, so the UI can preview what was actually sent. */
+  messageId: number;
+  /** ISO timestamp. */
+  at: string;
+  /** TO recipients of the forward, comma-joined. */
+  to: string;
+  by: { id: number; name: string };
+}
+
 export interface InternalMessageDetail extends InternalMessageSummary {
   bodyHtml: string | null;
   bodyText: string | null;
+  /**
+   * True when this message HAS BEEN forwarded — the inverse of `isForward`, which
+   * marks a message that IS a forward. Only forwards the viewer is party to count.
+   */
+  isForwarded: boolean;
+  forwards: InternalForward[];
 }
 
 export interface InternalListResult {

@@ -31,6 +31,7 @@ import { fetchAuthUrl, emailAttachmentUrl, chatAttachmentUrl } from '@/api/gmail
 import type { EmailProvider } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
+import { useAttachmentViewer } from './AttachmentViewerContext';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
@@ -38,7 +39,7 @@ import { RecipientAutocomplete } from './RecipientAutocomplete';
 import {
   escapeHtml, formatEmailDate, prefixReSubject, prefixFwdSubject, senderInitial,
   dedupeById, htmlToText, SIGNATURE_LEAD, splitSignature, textToHtml,
-  sanitizeForwardHtml, formatBytes, openPrintWindow,
+  formatBytes, openPrintWindow, buildForwardedBody,
 } from './message-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -240,31 +241,6 @@ function buildChatPrintHtml(spaceName: string, messages: ChatMessage[]): string 
     })
     .join('');
   return `<div class="print-header"><h1>${escapeHtml(spaceName)}</h1></div>${rows}`;
-}
-
-// The Gmail-style quoted block seeded into the forward editor. Order matters:
-// caret space → signature → quote, so `splitSignature` still cuts at the
-// signature and AI polish only ever touches the user's own text above it.
-function buildForwardedBody(detail: EmailDetail, signatureHtml: string): string {
-  const quoted = detail.bodyHtml
-    ? sanitizeForwardHtml(detail.bodyHtml)
-    : `<div>${escapeHtml(detail.bodyText ?? '').replace(/\n/g, '<br>')}</div>`;
-  const dateLabel = new Date(detail.date).toLocaleString();
-  return (
-    SIGNATURE_LEAD +
-    signatureHtml +
-    '<div><br></div>' +
-    // data-cyg-forward marks the quote as untouchable — see splitSignature.
-    '<div data-cyg-forward>' +
-    '<div>---------- Forwarded message ----------</div>' +
-    `<div>From: ${escapeHtml(detail.from)}</div>` +
-    `<div>Date: ${escapeHtml(dateLabel)}</div>` +
-    `<div>Subject: ${escapeHtml(detail.subject || '(no subject)')}</div>` +
-    `<div>To: ${escapeHtml(detail.to)}</div>` +
-    '<div><br></div>' +
-    quoted +
-    '</div>'
-  );
 }
 
 // Convert the chat editor's HTML into Google Chat's formatting tokens
@@ -522,6 +498,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setSelectedIds(new Set());
   }, [selectedLabel]);
 
+  // An open attachment preview pauses the thread polls below. The overlay itself is
+  // immune to refetches (it lives in the app-level provider), but a poll hands the
+  // strip new Gmail attachment ids — which would re-fetch a playing audio/video.
+  const { item: viewerItem } = useAttachmentViewer();
+
   const { data: account, isLoading: accountLoading } = useGmailAccount(companyId);
   // Which provider is connected (drives the API base — via the registry in
   // api/gmail.ts — plus all user-facing labels). Defaults to Google when unknown
@@ -610,7 +591,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     data: chatThread,
     isLoading: chatThreadLoading,
     isError: chatThreadError,
-  } = useGmailChatThread(companyId, account ? selectedSpaceId : null, active);
+  } = useGmailChatThread(companyId, account ? selectedSpaceId : null, active && !viewerItem);
   // The conversation thread for the opened email. `selectedThreadId` is set from
   // the clicked row; on a restored open (page reload) it's null, so fall back to
   // the single message's own threadId once `emailDetail` loads.
@@ -620,7 +601,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { data: emailThread } = useGmailEmailThread(
     companyId,
     account ? activeThreadId : null,
-    active,
+    active && !viewerItem,
   );
   // Messages to show in the detail pane: the full thread when loaded, else the
   // single opened message (so a still-loading or 1-message thread renders fine).
@@ -766,8 +747,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 </div>
                 <div className="flex flex-wrap gap-3">
                   {strip.map((att) => (
+                    // Keyed on the file's own identity, NOT `att.attachmentId` —
+                    // Gmail regenerates that id on every threads.get, so keying on
+                    // it remounted (and reset) every attachment on each 15s poll.
                     <AttachmentPreview
-                      key={att.attachmentId}
+                      key={`${m.id}:${att.filename}:${att.size ?? 0}`}
                       url={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
                       downloadUrl={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
                       mimeType={att.mimeType}
