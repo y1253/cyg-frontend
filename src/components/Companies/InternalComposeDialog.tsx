@@ -13,11 +13,21 @@ import {
 import { RichTextEditor } from './RichTextEditor';
 import { UserAutocomplete } from './UserAutocomplete';
 import { PolishButton, PolishPanel } from './PolishPanel';
-import { formatBytes, htmlToText, textToHtml } from './message-utils';
+import {
+  formatBytes,
+  htmlToText,
+  mergeAttachments,
+  textToHtml,
+} from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useUserDirectory } from '@/hooks/useUserDirectory';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
 import type { DirectoryUser } from '@/api/internalMessages';
+
+// Matches internal-messages/uploads.ts on the server. Unlike outbound email,
+// these files are stored and served by us, so the cap stays at 15 MB.
+const MAX_ATTACHMENTS = 10;
+const MAX_INTERNAL_FILE_BYTES = 15 * 1024 * 1024;
 
 interface InternalComposeDialogProps {
   open: boolean;
@@ -38,6 +48,7 @@ export function InternalComposeDialog({
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -55,6 +66,7 @@ export function InternalComposeDialog({
     setSubject('');
     setBody('');
     setFiles([]);
+    setAttachmentNotice(null);
     setError(null);
     polish.reset();
     // `polish` and `initialTo` are stable enough per-open; re-running on every
@@ -144,6 +156,10 @@ export function InternalComposeDialog({
             />
           </div>
 
+          {attachmentNotice && (
+            <p className="text-xs text-amber-600">{attachmentNotice}</p>
+          )}
+
           {files.length > 0 && (
             <div className="flex flex-col gap-1">
               {files.map((f, i) => (
@@ -183,7 +199,16 @@ export function InternalComposeDialog({
             multiple
             className="hidden"
             onChange={(e) => {
-              setFiles([...files, ...Array.from(e.target.files ?? [])]);
+              // Same limits the server enforces (10 files, 15 MB each — internal
+              // attachments live on our own disk, so they keep the smaller cap).
+              const merged = mergeAttachments(
+                files,
+                Array.from(e.target.files ?? []),
+                MAX_ATTACHMENTS,
+                MAX_INTERNAL_FILE_BYTES,
+              );
+              setFiles(merged.files);
+              setAttachmentNotice(merged.notice);
               // Clear so picking the same file twice still fires onChange.
               e.target.value = '';
             }}

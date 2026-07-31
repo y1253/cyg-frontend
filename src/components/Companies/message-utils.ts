@@ -168,23 +168,61 @@ export function buildForwardedBody(
 }
 
 /**
+ * Per-file ceiling, matching MAX_OUTBOUND_FILE_BYTES on the server. Anything
+ * bigger is rejected in the browser rather than uploaded and 413'd.
+ */
+export const MAX_FILE_BYTES = 250 * 1024 * 1024;
+
+/**
+ * How many raw bytes ride inside the message itself. Must match
+ * INLINE_BUDGET_BYTES in server/src/communications/outbound-uploads.ts — the
+ * server does the real split; this only drives the "will be sent as a link"
+ * badge, so the two must agree or the badge lies.
+ */
+export const INLINE_BUDGET_BYTES = 18 * 1024 * 1024;
+
+/**
+ * Which of these files will travel inside the message and which the server will
+ * upload to Drive/OneDrive and link. Mirrors `splitBySizeBudget` on the server:
+ * spill the largest files until the rest fits the budget.
+ */
+export function attachmentsToLink(files: File[]): Set<File> {
+  const biggestFirst = [...files].sort((a, b) => b.size - a.size);
+  const linked = new Set<File>();
+  let total = files.reduce((sum, f) => sum + f.size, 0);
+  for (const f of biggestFirst) {
+    if (total <= INLINE_BUDGET_BYTES) break;
+    linked.add(f);
+    total -= f.size;
+  }
+  return linked;
+}
+
+/**
  * Merge newly picked files into a composer's attachment list, enforcing the same
  * limits the server does. De-dupes on `name:size` (re-picking the same file is a
- * slip, not an intent to attach it twice) and caps the total, returning a notice
- * to show the user rather than silently dropping anything.
+ * slip, not an intent to attach it twice), rejects anything over the per-file
+ * ceiling, and caps the total — returning a notice to show the user rather than
+ * silently dropping anything.
  */
 export function mergeAttachments(
   existing: File[],
   incoming: File[],
   max: number,
+  maxBytes: number = MAX_FILE_BYTES,
 ): { files: File[]; notice: string | null } {
   const seen = new Set(existing.map((f) => `${f.name}:${f.size}`));
   const added: File[] = [];
   let duplicates = 0;
+  let tooBig = 0;
   for (const file of incoming) {
     const key = `${file.name}:${file.size}`;
     if (seen.has(key)) {
       duplicates++;
+      continue;
+    }
+    if (file.size > maxBytes) {
+      tooBig++;
       continue;
     }
     seen.add(key);
@@ -197,6 +235,11 @@ export function mergeAttachments(
   const parts: string[] = [];
   if (duplicates > 0) {
     parts.push(`${duplicates} file${duplicates > 1 ? 's were' : ' was'} already attached`);
+  }
+  if (tooBig > 0) {
+    parts.push(
+      `${tooBig} file${tooBig > 1 ? 's are' : ' is'} over the ${formatBytes(maxBytes)} limit`,
+    );
   }
   if (overflow > 0) {
     parts.push(`only ${max} files can be attached`);

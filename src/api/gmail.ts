@@ -464,6 +464,8 @@ export async function sendEmail(
     // which is the only way Graph will emit In-Reply-To/References.
     replyToMessageId?: string;
     files?: File[];
+    /** Fraction 0–1 of the attachment bytes uploaded so far. */
+    onProgress?: (fraction: number) => void;
   },
 ): Promise<void> {
   // Sent as multipart/form-data so file attachments ride along. No explicit
@@ -480,14 +482,46 @@ export async function sendEmail(
   if (data.replyToMessageId) form.set('replyToMessageId', data.replyToMessageId);
   for (const file of data.files ?? []) form.append('attachments', file);
 
-  const res = await fetchWithAuth(token, `${base(companyId)}/companies/${companyId}/send`, {
-    method: 'POST',
-    body: form,
+  const url = `${base(companyId)}/companies/${companyId}/send`;
+
+  // XHR rather than fetch: attachments run to 250 MB each, and fetch still has no
+  // upload-progress event. Everything else (auth header, JSON error shape) is
+  // kept identical to `fetchWithAuth` so callers can't tell the difference.
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    if (data.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          data.onProgress?.(e.loaded / e.total);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      let message = 'Failed to send email';
+      try {
+        const body = JSON.parse(xhr.responseText) as { message?: string };
+        if (body.message) message = body.message;
+      } catch {
+        // non-JSON error body (e.g. a proxy's 413 page)
+      }
+      if (xhr.status === 413) {
+        message = 'The attachments were too large for the server to accept.';
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('Network error while sending'));
+    xhr.onabort = () => reject(new Error('Sending was cancelled'));
+
+    xhr.send(form);
   });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message ?? 'Failed to send email');
-  }
 }
 
 export async function sendChatMessage(

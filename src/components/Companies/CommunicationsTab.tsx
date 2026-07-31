@@ -40,7 +40,8 @@ import { RecipientAutocomplete } from './RecipientAutocomplete';
 import {
   escapeHtml, formatEmailDate, prefixReSubject, prefixFwdSubject, senderInitial,
   dedupeById, htmlToText, SIGNATURE_LEAD, splitSignature, textToHtml,
-  formatBytes, openPrintWindow, buildForwardedBody,
+  formatBytes, openPrintWindow, buildForwardedBody, mergeAttachments,
+  attachmentsToLink, MAX_FILE_BYTES,
 } from './message-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -94,9 +95,10 @@ const KIND_FILTER_LABELS: Record<string, string> = {
   chat: 'Chat',
 };
 
-// Must match the server cap: FilesInterceptor('attachments', 10, { fileSize: 15MB })
-// in gmail.controller.ts and microsoft.controller.ts. Exceeding it made multer throw
+// Must match the server cap: FilesInterceptor('attachments', MAX_ATTACHMENTS) in
+// gmail.controller.ts and microsoft.controller.ts. Exceeding it made multer throw
 // LIMIT_UNEXPECTED_FILE, which surfaced only as a generic "Failed to send".
+// (The per-file byte cap lives in message-utils as MAX_FILE_BYTES.)
 const MAX_ATTACHMENTS = 10;
 
 // ── Persisted view state ──────────────────────────────────────────────────────
@@ -1246,33 +1248,77 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     const incoming = Array.from(picked ?? []);
     if (incoming.length === 0) return;
 
-    const seen = new Set(current.map((f) => `${f.name}:${f.size}`));
-    const next = [...current];
-    let overflow = 0;
-    let duplicates = 0;
-    for (const f of incoming) {
-      const key = `${f.name}:${f.size}`;
-      if (seen.has(key)) {
-        duplicates++;
-        continue;
-      }
-      // The server accepts at most MAX_ATTACHMENTS; going over made multer throw
-      // LIMIT_UNEXPECTED_FILE and surfaced only a generic "Failed to send".
-      if (next.length >= MAX_ATTACHMENTS) {
-        overflow++;
-        continue;
-      }
-      seen.add(key);
-      next.push(f);
-    }
-    setter(next);
+    // Shared with InternalMessagesTab: enforces the file count, the per-file byte
+    // ceiling, and de-dupes — the server rejects the same three things.
+    const { files, notice } = mergeAttachments(current, incoming, MAX_ATTACHMENTS);
+    setter(files);
+    setAttachmentNotice(notice);
+  };
 
-    setAttachmentNotice(
-      overflow > 0
-        ? `You can attach up to ${MAX_ATTACHMENTS} files — ${overflow} not added.`
-        : duplicates > 0
-          ? `${duplicates === 1 ? 'That file is' : 'Those files are'} already attached.`
-          : null,
+  const cloudLabel = provider === 'MICROSOFT' ? 'OneDrive' : 'Drive';
+
+  // Upload progress, shared by all three composers (only one is ever open).
+  // Attachments run to 250 MB, so a bare "Sending…" leaves the user guessing.
+  const uploadPercent =
+    sendMutation.uploadProgress === null
+      ? null
+      : Math.round(sendMutation.uploadProgress * 100);
+  const uploadBar =
+    uploadPercent === null ? null : (
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-teal-500 transition-all duration-150"
+            style={{ width: `${uploadPercent}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {uploadPercent}%
+        </span>
+      </div>
+    );
+
+  // The picked-file list, shared by reply / forward / compose. Files the server
+  // will host on Drive/OneDrive instead of attaching are flagged here, so the
+  // user knows before sending — `attachmentsToLink` mirrors the server's split.
+  const renderAttachedFiles = (
+    files: File[],
+    setFiles: React.Dispatch<React.SetStateAction<File[]>>,
+  ) => {
+    if (files.length === 0) return null;
+    const linked = attachmentsToLink(files);
+    const total = files.reduce((sum, f) => sum + f.size, 0);
+    return (
+      <div className="flex flex-col gap-1.5">
+        {files.map((f, i) => (
+          <div
+            key={`${f.name}:${f.size}:${i}`}
+            className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+          >
+            <Paperclip size={12} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+            {linked.has(f) && (
+              <span className="shrink-0 rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-teal-200">
+                sent as {cloudLabel} link
+              </span>
+            )}
+            {f.size > 0 && (
+              <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
+            )}
+            <button
+              type="button"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              title="Remove attachment"
+              onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+        {files.length > 1 && (
+          <p className="text-xs text-muted-foreground">{formatBytes(total)} total</p>
+        )}
+      </div>
     );
   };
 
@@ -1567,7 +1613,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
 
   // ── Forward ────────────────────────────────────────────────────────────────
 
-  const MAX_FORWARD_FILE_BYTES = 15 * 1024 * 1024;
+  // Same ceiling as a manually picked file — a large original is re-uploaded and
+  // linked from Drive/OneDrive rather than dropped from the forward.
+  const MAX_FORWARD_FILE_BYTES = MAX_FILE_BYTES;
 
   const closeForward = () => {
     forwardReqRef.current++;
@@ -2503,31 +2551,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   {attachmentNotice && (
                     <p className="text-xs text-amber-600">{attachmentNotice}</p>
                   )}
-                  {replyFiles.length > 0 && (
-                    <div className="flex flex-col gap-1.5">
-                      {replyFiles.map((f, i) => (
-                        <div
-                          key={`${f.name}:${f.size}:${i}`}
-                          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                        >
-                          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                          {f.size > 0 && (
-                            <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-                          )}
-                          <button
-                            type="button"
-                            className="shrink-0 text-muted-foreground hover:text-foreground"
-                            title="Remove attachment"
-                            onClick={() => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {renderAttachedFiles(replyFiles, setReplyFiles)}
                 </div>
+                {uploadBar}
                 {sendMutation.isError && (
                   <p className="text-xs text-destructive">
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
@@ -2629,34 +2655,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   )}
                   {forwardSkipped.length > 0 && (
                     <p className="text-xs text-amber-600">
-                      Not forwarded (too large or over the 10-file limit): {forwardSkipped.join(', ')}
+                      Not forwarded (too large or over the {MAX_ATTACHMENTS}-file limit): {forwardSkipped.join(', ')}
                     </p>
                   )}
-                  {forwardFiles.length > 0 && (
-                    <div className="flex flex-col gap-1.5">
-                      {forwardFiles.map((f, i) => (
-                        <div
-                          key={`${f.name}:${f.size}:${i}`}
-                          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                        >
-                          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                          {f.size > 0 && (
-                            <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-                          )}
-                          <button
-                            type="button"
-                            className="shrink-0 text-muted-foreground hover:text-foreground"
-                            title="Remove attachment"
-                            onClick={() => setForwardFiles((prev) => prev.filter((_, j) => j !== i))}
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {renderAttachedFiles(forwardFiles, setForwardFiles)}
                 </div>
+                {uploadBar}
                 {sendMutation.isError && (
                   <p className="text-xs text-destructive">
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
@@ -3306,31 +3310,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
               {attachmentNotice && (
                 <p className="text-xs text-amber-600">{attachmentNotice}</p>
               )}
-              {composeFiles.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {composeFiles.map((f, i) => (
-                    <div
-                      key={`${f.name}:${f.size}:${i}`}
-                      className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                    >
-                      <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                      {f.size > 0 && (
-                        <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-                      )}
-                      <button
-                        type="button"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        title="Remove attachment"
-                        onClick={() => setComposeFiles((prev) => prev.filter((_, j) => j !== i))}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {renderAttachedFiles(composeFiles, setComposeFiles)}
             </div>
+            {uploadBar}
             {sendMutation.isError && (
               <p className="text-xs text-destructive">
                 {(sendMutation.error as Error)?.message ?? 'Failed to send'}
