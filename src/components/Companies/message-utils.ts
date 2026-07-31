@@ -9,7 +9,11 @@ export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Relative-ish date for a message row: time today, weekday this week, else date. */
+/**
+ * Relative-ish date for a message row. The date part collapses with age (today →
+ * weekday → date → date + year) but the clock time is always appended, so a
+ * message from yesterday still shows when it arrived, not just "Wed".
+ */
 export function formatEmailDate(dateStr: string): string {
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
@@ -17,10 +21,11 @@ export function formatEmailDate(dateStr: string): string {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86400000);
-  if (diffDays === 0) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
-  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (diffDays === 0) return time;
+  if (diffDays < 7) return `${date.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  if (date.getFullYear() === now.getFullYear()) return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`;
 }
 
 export function prefixReSubject(subject: string): string {

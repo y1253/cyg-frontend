@@ -727,7 +727,7 @@ export function InternalMessagesTab({ active }: Props) {
                   <span className="text-xs text-muted-foreground font-normal"> (you)</span>
                 )}
               </span>
-              <span className="text-xs text-muted-foreground shrink-0">
+              <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
                 {formatEmailDate(m.date)}
               </span>
             </div>

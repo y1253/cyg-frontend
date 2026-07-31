@@ -678,7 +678,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{m.from}</span>
-              <span className="text-xs text-muted-foreground shrink-0">{formatEmailDate(m.date)}</span>
+              <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{formatEmailDate(m.date)}</span>
             </div>
             {expanded ? (
               <div className="text-xs text-muted-foreground truncate">To: {m.to}</div>
@@ -3068,7 +3068,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 font-medium">
                           Email
                         </Badge>
-                        <span className={['text-xs', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                        <span className={['text-xs whitespace-nowrap', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
                           {formatEmailDate(item.data.date)}
                         </span>
                       </div>
@@ -3143,7 +3143,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-medium">
                           Chat
                         </Badge>
-                        <span className={['text-xs', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                        <span className={['text-xs whitespace-nowrap', !item.data.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
                           {formatEmailDate(item.data.createTime)}
                         </span>
                       </div>
@@ -3205,7 +3205,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {renderCompleteToggle('email', msg.id, !!msg.isCompleted)}
-                        <span className={['text-xs', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
+                        <span className={['text-xs whitespace-nowrap', !msg.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>
                           {formatEmailDate(msg.date)}
                         </span>
                       </div>

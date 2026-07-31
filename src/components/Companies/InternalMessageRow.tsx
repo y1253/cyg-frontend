@@ -115,7 +115,7 @@ export function InternalMessageRow({
             </Badge>
             <span
               className={[
-                'text-xs',
+                'text-xs whitespace-nowrap',
                 unread ? 'font-semibold text-foreground' : 'text-muted-foreground',
               ].join(' ')}
             >
