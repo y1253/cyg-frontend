@@ -619,9 +619,25 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const latestThreadEmail: EmailDetail | null =
     threadEmails.length > 0 ? threadEmails[threadEmails.length - 1] : null;
 
-  // Expand the latest message + the message the user clicked, once per opened
-  // thread. Keyed so the 15s poll (a new array each time) doesn't collapse what
-  // the user manually expanded; a genuinely new message won't auto-expand.
+  // Index of the message the user actually clicked. Everything after it is the
+  // "future" of that moment — dimmed, mirroring the chat thread view. -1 when the
+  // opened id isn't in the loaded thread (still loading, or a provider quirk):
+  // then nothing dims and the plain newest-expanded behaviour stands.
+  const anchorIdx = selectedMsgId
+    ? threadEmails.findIndex((m) => m.id === selectedMsgId)
+    : -1;
+  // Which message to expand before the init effect below has run, so the pane is
+  // never all-collapsed — the anchor when we have one, else the newest.
+  const fallbackExpandId =
+    anchorIdx >= 0
+      ? threadEmails[anchorIdx].id
+      : (threadEmails[threadEmails.length - 1]?.id ?? null);
+
+  // Expand the message the user clicked, once per opened thread. Keyed so the 15s
+  // poll (a new array each time) doesn't collapse what the user manually expanded;
+  // a genuinely new message won't auto-expand. Messages newer than the clicked one
+  // are the dimmed "future" and stay collapsed — auto-expanding them would defeat
+  // the point of freezing the thread at that moment.
   const threadInitKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const msgs = emailThread?.messages;
@@ -629,11 +645,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     const key = `${activeThreadId}|${selectedMsgId}|${msgs.length}`;
     if (threadInitKeyRef.current === key) return;
     threadInitKeyRef.current = key;
+    const idx = selectedMsgId ? msgs.findIndex((m) => m.id === selectedMsgId) : -1;
     const initial = new Set<string>();
-    initial.add(msgs[msgs.length - 1].id);
-    if (selectedMsgId && msgs.some((m) => m.id === selectedMsgId)) {
-      initial.add(selectedMsgId);
-    }
+    if (idx >= 0) initial.add(msgs[idx].id);
+    // No anchor in the thread (or the anchor *is* the newest) — expand the newest.
+    if (idx === -1 || idx === msgs.length - 1) initial.add(msgs[msgs.length - 1].id);
     setExpandedThreadIds(initial);
   }, [emailThread?.messages, activeThreadId, selectedMsgId]);
 
@@ -657,16 +673,23 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
 
   // Render one message in the opened conversation, Gmail-style: a clickable
   // header (sender · date, plus snippet when collapsed) that toggles the full
-  // body/attachments below.
-  const renderThreadMessage = (m: EmailDetail, isLast: boolean) => {
-    // Fall back to the latest message expanded before the init effect has run
-    // (thread still loading, or the single-message fallback), so the pane is
-    // never all-collapsed.
+  // body/attachments below. `isFuture` = newer than the message the user opened:
+  // dimmed like the chat thread, and it stays dimmed while expanded.
+  const renderThreadMessage = (m: EmailDetail, isFuture: boolean) => {
+    // Fall back to one message expanded before the init effect has run (thread
+    // still loading, or the single-message fallback), so the pane is never
+    // all-collapsed — and never auto-opens a dimmed message.
     const expanded =
-      expandedThreadIds.has(m.id) || (expandedThreadIds.size === 0 && isLast);
+      expandedThreadIds.has(m.id) ||
+      (expandedThreadIds.size === 0 && m.id === fallbackExpandId);
     const strip = (m.attachments ?? []).filter((a) => !a.isInline);
     return (
-      <div key={m.id} className="border rounded-md overflow-hidden">
+      <div
+        key={m.id}
+        className={`border rounded-md overflow-hidden transition-opacity ${
+          isFuture ? 'opacity-50' : ''
+        }`}
+      >
         <button
           type="button"
           onClick={() => toggleThreadMessage(m.id)}
@@ -2482,10 +2505,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
             <h2 className="font-semibold text-base">
               {(latestThreadEmail?.subject || threadEmails[0]?.subject) || '(no subject)'}
             </h2>
-            {/* Conversation thread — older replies collapsed, latest expanded */}
+            {/* Conversation thread — the opened message expanded, anything newer
+                than it collapsed and dimmed (still clickable to read). */}
             <div className="flex flex-col gap-2">
               {threadEmails.map((m, i) =>
-                renderThreadMessage(m, i === threadEmails.length - 1),
+                renderThreadMessage(m, anchorIdx >= 0 && i > anchorIdx),
               )}
             </div>
 

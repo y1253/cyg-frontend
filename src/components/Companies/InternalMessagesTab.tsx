@@ -230,17 +230,33 @@ export function InternalMessagesTab({ active }: Props) {
   const lastMessage: InternalMessageDetail | undefined =
     threadMessages[threadMessages.length - 1];
 
-  // Expand the newest message plus the one the user clicked, once per opened
-  // thread. Keyed so the 15s poll (a new array each time) doesn't collapse what
-  // the user manually expanded; a genuinely new message won't auto-expand.
+  // Index of the message the user actually clicked. Everything after it is the
+  // "future" of that moment — dimmed, mirroring the chat thread view. -1 when the
+  // opened id isn't in the loaded thread: then nothing dims and the plain
+  // newest-expanded behaviour stands.
+  const anchorIdx = openMsgId
+    ? threadMessages.findIndex((m) => m.id === openMsgId)
+    : -1;
+  // Which message to expand before the init effect below has run, so the pane is
+  // never all-collapsed — the anchor when we have one, else the newest.
+  const fallbackExpandId =
+    anchorIdx >= 0 ? threadMessages[anchorIdx].id : (lastMessage?.id ?? null);
+
+  // Expand the message the user clicked, once per opened thread. Keyed so the 15s
+  // poll (a new array each time) doesn't collapse what the user manually expanded;
+  // a genuinely new message won't auto-expand. Messages newer than the clicked one
+  // are the dimmed "future" and stay collapsed.
   useEffect(() => {
     if (threadMessages.length === 0) return;
     const key = `${openThreadId}|${openMsgId}|${threadMessages.length}`;
     if (threadInitKeyRef.current === key) return;
     threadInitKeyRef.current = key;
-    const initial = new Set<number>([threadMessages[threadMessages.length - 1].id]);
-    if (openMsgId && threadMessages.some((m) => m.id === openMsgId)) {
-      initial.add(openMsgId);
+    const idx = openMsgId ? threadMessages.findIndex((m) => m.id === openMsgId) : -1;
+    const initial = new Set<number>();
+    if (idx >= 0) initial.add(threadMessages[idx].id);
+    // No anchor in the thread (or the anchor *is* the newest) — expand the newest.
+    if (idx === -1 || idx === threadMessages.length - 1) {
+      initial.add(threadMessages[threadMessages.length - 1].id);
     }
     setExpandedThreadIds(initial);
   }, [threadMessages, openThreadId, openMsgId]);
@@ -703,14 +719,21 @@ export function InternalMessagesTab({ active }: Props) {
 
   // One message in the opened conversation, Gmail-style: a clickable header
   // (sender · date, plus the snippet when collapsed) that toggles the full
-  // body/attachments below.
-  const renderThreadMessage = (m: InternalMessageDetail, isLast: boolean) => {
-    // Fall back to the latest message expanded before the init effect has run,
-    // so the pane is never all-collapsed.
+  // body/attachments below. `isFuture` = newer than the message the user opened:
+  // dimmed like the chat thread, and it stays dimmed while expanded.
+  const renderThreadMessage = (m: InternalMessageDetail, isFuture: boolean) => {
+    // Fall back to one message expanded before the init effect has run, so the
+    // pane is never all-collapsed — and never auto-opens a dimmed message.
     const expanded =
-      expandedThreadIds.has(m.id) || (expandedThreadIds.size === 0 && isLast);
+      expandedThreadIds.has(m.id) ||
+      (expandedThreadIds.size === 0 && m.id === fallbackExpandId);
     return (
-      <div key={m.id} className="border rounded-md overflow-hidden">
+      <div
+        key={m.id}
+        className={`border rounded-md overflow-hidden transition-opacity ${
+          isFuture ? 'opacity-50' : ''
+        }`}
+      >
         <button
           type="button"
           onClick={() => toggleThreadMessage(m.id)}
@@ -859,9 +882,10 @@ export function InternalMessagesTab({ active }: Props) {
             </h2>
           )}
 
-          {/* Conversation thread — older messages collapsed, latest expanded */}
+          {/* Conversation thread — the opened message expanded, anything newer
+              than it collapsed and dimmed (still clickable to read). */}
           {threadMessages.map((m, i) =>
-            renderThreadMessage(m, i === threadMessages.length - 1),
+            renderThreadMessage(m, anchorIdx >= 0 && i > anchorIdx),
           )}
 
           {replyOpen && (
