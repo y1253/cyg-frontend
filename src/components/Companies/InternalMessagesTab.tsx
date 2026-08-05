@@ -178,12 +178,18 @@ export function InternalMessagesTab({ active }: Props) {
 
   // Reply / forward are inline forms below the thread, not dialogs.
   const [replyOpen, setReplyOpen] = useState(false);
+  // The message the open reply answers, captured when the form opened — the
+  // thread refetches while composing and must not move the target.
+  const [replyTarget, setReplyTarget] = useState<InternalMessageDetail | null>(null);
   const [replyBody, setReplyBody] = useState('');
   const [replyTo, setReplyTo] = useState<number[]>([]);
   const [replyCc, setReplyCc] = useState<number[]>([]);
   const [replySubject, setReplySubject] = useState('');
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [forwardOpen, setForwardOpen] = useState(false);
+  // The message being forwarded, captured when the form opened (same reason as
+  // `replyTarget`) — it's what `parentId` links the forward back to.
+  const [forwardSource, setForwardSource] = useState<InternalMessageDetail | null>(null);
   const [forwardBody, setForwardBody] = useState('');
   const [forwardTo, setForwardTo] = useState<number[]>([]);
   const [forwardCc, setForwardCc] = useState<number[]>([]);
@@ -241,6 +247,10 @@ export function InternalMessagesTab({ active }: Props) {
   // never all-collapsed — the anchor when we have one, else the newest.
   const fallbackExpandId =
     anchorIdx >= 0 ? threadMessages[anchorIdx].id : (lastMessage?.id ?? null);
+  // Reply/Forward act on the message the user opened, not on whatever has
+  // arrived since — mirrors the company mailbox and the chat thread.
+  const anchorMessage: InternalMessageDetail | undefined =
+    anchorIdx >= 0 ? threadMessages[anchorIdx] : lastMessage;
 
   // Expand the message the user clicked, once per opened thread. Keyed so the 15s
   // poll (a new array each time) doesn't collapse what the user manually expanded;
@@ -403,6 +413,7 @@ export function InternalMessagesTab({ active }: Props) {
   // ── Reply / forward ───────────────────────────────────────────────────────
   const closeReply = () => {
     setReplyOpen(false);
+    setReplyTarget(null);
     setReplyBody('');
     setReplyTo([]);
     setReplyCc([]);
@@ -416,6 +427,7 @@ export function InternalMessagesTab({ active }: Props) {
     // Supersede any attachment download still in flight for this form.
     forwardReqRef.current++;
     setForwardOpen(false);
+    setForwardSource(null);
     setForwardBody('');
     setForwardTo([]);
     setForwardCc([]);
@@ -428,16 +440,18 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const startReply = () => {
-    if (!lastMessage) return;
+    const target = anchorMessage;
+    if (!target) return;
     closeForward();
+    setReplyTarget(target);
     // Reply-all minus me: everyone who was on the thread stays on it.
     const recipients = [
-      lastMessage.from.id,
-      ...lastMessage.to.map((u) => u.id),
+      target.from.id,
+      ...target.to.map((u) => u.id),
     ].filter((id) => id !== user?.id);
     setReplyTo([...new Set(recipients)]);
-    setReplyCc(lastMessage.cc.map((u) => u.id).filter((id) => id !== user?.id));
-    setReplySubject(prefixReSubject(lastMessage.subject));
+    setReplyCc(target.cc.map((u) => u.id).filter((id) => id !== user?.id));
+    setReplySubject(prefixReSubject(target.subject));
     setReplyBody('');
     setReplyFiles([]);
     setAttachmentNotice(null);
@@ -451,12 +465,13 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const startForward = () => {
-    if (!lastMessage) return;
+    const target = anchorMessage;
+    if (!target) return;
     closeReply();
     const reqId = ++forwardReqRef.current;
     setForwardTo([]);
     setForwardCc([]);
-    setForwardSubject(prefixFwdSubject(lastMessage.subject));
+    setForwardSubject(prefixFwdSubject(target.subject));
     setForwardFiles([]);
     setForwardSkipped([]);
     // The superseded hydrate above skips its own cleanup, so clear the flag here
@@ -470,22 +485,23 @@ export function InternalMessagesTab({ active }: Props) {
     setForwardBody(
       buildForwardedBody(
         {
-          from: `${lastMessage.from.name} <${lastMessage.from.email}>`,
-          to: lastMessage.to.map((u) => u.name).join(', '),
-          date: lastMessage.date,
-          subject: lastMessage.subject,
-          bodyHtml: lastMessage.bodyHtml,
-          bodyText: lastMessage.bodyText,
+          from: `${target.from.name} <${target.from.email}>`,
+          to: target.to.map((u) => u.name).join(', '),
+          date: target.date,
+          subject: target.subject,
+          bodyHtml: target.bodyHtml,
+          bodyText: target.bodyText,
         },
         '',
       ),
     );
+    setForwardSource(target);
     setForwardOpen(true);
     setTimeout(
       () => forwardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
       50,
     );
-    void hydrateForwardAttachments(lastMessage, reqId);
+    void hydrateForwardAttachments(target, reqId);
   };
 
   /**
@@ -554,7 +570,8 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const submitReply = () => {
-    if (!lastMessage) return;
+    const target = replyTarget ?? anchorMessage;
+    if (!target) return;
     const text = htmlToText(replyBody);
     if (!text.trim() && replyFiles.length === 0) return;
     if (replyTo.length === 0) {
@@ -569,7 +586,7 @@ export function InternalMessagesTab({ active }: Props) {
         subject: replySubject,
         body: text,
         bodyHtml: replyBody,
-        parentId: lastMessage.id,
+        parentId: target.id,
         files: replyFiles,
       },
       {
@@ -581,7 +598,8 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const submitForward = () => {
-    if (!lastMessage) return;
+    const target = forwardSource ?? anchorMessage;
+    if (!target) return;
     const text = htmlToText(forwardBody);
     if (forwardTo.length === 0) {
       setSendError('Add at least one recipient.');
@@ -598,7 +616,7 @@ export function InternalMessagesTab({ active }: Props) {
         // parentId still links back to the original (it drives the "You forwarded
         // this message" banner) even though the server roots the forward as its
         // own conversation, exactly like email.
-        parentId: lastMessage.id,
+        parentId: target.id,
         isForward: true,
         files: forwardFiles,
       },
@@ -893,9 +911,18 @@ export function InternalMessagesTab({ active }: Props) {
               ref={replyRef}
               className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
             >
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Reply
-              </p>
+              <div className="flex flex-col gap-0.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Reply
+                </p>
+                {/* The form sits below the dimmed later messages — name the one
+                    being answered rather than leaving it implied. */}
+                {replyTarget && (
+                  <p className="text-xs text-muted-foreground">
+                    Replying to {replyTarget.from.name} · {formatEmailDate(replyTarget.date)}
+                  </p>
+                )}
+              </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">To</Label>
                 <UserAutocomplete

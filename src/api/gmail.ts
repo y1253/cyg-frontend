@@ -90,6 +90,9 @@ export interface EmailDetail extends EmailSummary {
   to: string;
   threadId: string;
   messageId: string;
+  // RFC 5322 References chain. Sent back with a reply so the recipient's client
+  // keeps it in the same conversation. Google only — Graph writes its own.
+  references?: string;
   bodyHtml: string | null;
   bodyText: string | null;
   attachments: EmailAttachment[];
@@ -457,6 +460,9 @@ export async function sendEmail(
     bodyHtml?: string;
     cc?: string;
     inReplyTo?: string;
+    // References chain of the message being replied to — echoed back so long
+    // conversations don't fragment at the recipient's end.
+    references?: string;
     threadId?: string;
     forwardedFrom?: string;
     // Provider resource id of the message being replied to. Gmail threads via
@@ -477,6 +483,7 @@ export async function sendEmail(
   if (data.bodyHtml) form.set('bodyHtml', data.bodyHtml);
   if (data.cc) form.set('cc', data.cc);
   if (data.inReplyTo) form.set('inReplyTo', data.inReplyTo);
+  if (data.references) form.set('references', data.references);
   if (data.threadId) form.set('threadId', data.threadId);
   if (data.forwardedFrom) form.set('forwardedFrom', data.forwardedFrom);
   if (data.replyToMessageId) form.set('replyToMessageId', data.replyToMessageId);

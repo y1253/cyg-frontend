@@ -431,6 +431,10 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const forwardReqRef = useRef(0);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
+  // The message this reply answers, captured when the form opened. Held rather
+  // than recomputed at send time: the thread polls every 15s, and a message
+  // arriving mid-compose must not move the target out from under the user.
+  const [replyTarget, setReplyTarget] = useState<EmailDetail | null>(null);
   const [replyForm, setReplyForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const replyFileRef = useRef<HTMLInputElement>(null);
@@ -632,6 +636,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     anchorIdx >= 0
       ? threadEmails[anchorIdx].id
       : (threadEmails[threadEmails.length - 1]?.id ?? null);
+  // Reply/Forward act on the message the user opened — the state of the
+  // conversation they're looking at — not on whatever arrived since (same idea as
+  // the chat thread, where the composer answers the anchored message).
+  const anchorEmail: EmailDetail | null =
+    anchorIdx >= 0 ? threadEmails[anchorIdx] : latestThreadEmail;
 
   // Expand the message the user clicked, once per opened thread. Keyed so the 15s
   // poll (a new array each time) doesn't collapse what the user manually expanded;
@@ -1368,8 +1377,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   };
 
   const handleSendReply = () => {
-    // Reply to the newest message in the conversation (Gmail's default).
-    const target = latestThreadEmail;
+    // Reply to the message the user opened, even when newer ones exist below it.
+    const target = replyTarget ?? anchorEmail;
     if (!target) return;
     if (replyForm.to.length === 0) return;
     sendMutation.mutate(
@@ -1380,6 +1389,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         bodyHtml: replyForm.body,
         cc: replyForm.cc.length ? replyForm.cc.join(', ') : undefined,
         inReplyTo: target.messageId || undefined,
+        references: target.references || undefined,
         threadId: target.threadId || undefined,
         // Gmail threads on the two fields above. Outlook can't set those headers
         // at all, so it needs the resource id to build a createReply draft.
@@ -1389,6 +1399,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       {
         onSuccess: () => {
           setReplyOpen(false);
+          setReplyTarget(null);
           setReplyForm({ to: [], subject: '', body: '', cc: [] });
           setReplyFiles([]); setAttachmentNotice(null);
         },
@@ -1536,6 +1547,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setSelectedMsgIsRead(true); // always read after opening (auto-marked or was already read)
     setSelectedSpaceId(null);
     setReplyOpen(false);
+    setReplyTarget(null);
   };
 
   const handleOpenChat = (msg: ChatInboxMessage) => {
@@ -1545,6 +1557,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setOpenedChatMsgTime(msg.createTime); // anchor: messages after this are dimmed
     setSelectedMsgId(null);
     setReplyOpen(false);
+    setReplyTarget(null);
     setChatReplyOpen(false);
     setChatReplyHtml('');
     setQuoteTarget(null);
@@ -1620,7 +1633,17 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const handleOpenReply = (detail: EmailDetail) => {
     // Reply and forward share the same inline slot below the message.
     closeForward();
-    const replyTo = extractEmail(detail.from);
+    // Replying to a message WE sent (common now that Reply targets the opened
+    // message, which may be one of ours) has to go to its recipients — addressing
+    // it back to ourselves is what Gmail avoids here too.
+    const own = account?.emailAddress ?? account?.gmailAddress ?? '';
+    const isOwn =
+      !!own && extractEmail(detail.from).toLowerCase() === own.toLowerCase();
+    // `to` can be a comma-joined list — the first recipient is the one to answer.
+    const replyTo = extractEmail(
+      isOwn ? (detail.to.split(',')[0] ?? '') : detail.from,
+    );
+    setReplyTarget(detail);
     setReplyForm({
       to: replyTo ? [replyTo] : [],
       subject: prefixReSubject(detail.subject || ''),
@@ -1700,6 +1723,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const handleOpenForward = (detail: EmailDetail) => {
     // Reply and forward share the same inline slot below the message.
     setReplyOpen(false);
+    setReplyTarget(null);
     setReplyFiles([]); setAttachmentNotice(null);
     const reqId = ++forwardReqRef.current;
     // Outlook builds the quoted original server-side via Graph's createForward,
@@ -2412,13 +2436,13 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           >
             <ArrowLeft size={14} /> Back
           </button>
-          {latestThreadEmail && !replyOpen && !forwardOpen && (
+          {anchorEmail && !replyOpen && !forwardOpen && (
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => handleOpenReply(latestThreadEmail)}
+                onClick={() => handleOpenReply(anchorEmail)}
               >
                 <Reply size={14} /> Reply
               </Button>
@@ -2426,7 +2450,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => handleOpenForward(latestThreadEmail)}
+                onClick={() => handleOpenForward(anchorEmail)}
               >
                 <Forward size={14} /> Forward
               </Button>
@@ -2516,7 +2540,16 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
             {/* Inline reply form */}
             {replyOpen && (
               <div ref={replyFormRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reply</p>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reply</p>
+                  {/* The form sits below the dimmed later messages, so name the
+                      message being answered rather than leaving it implied. */}
+                  {replyTarget && (
+                    <p className="text-xs text-muted-foreground">
+                      Replying to {replyTarget.from} · {formatEmailDate(replyTarget.date)}
+                    </p>
+                  )}
+                </div>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">To</Label>
                   <RecipientAutocomplete
@@ -2583,7 +2616,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                     {(sendMutation.error as Error)?.message ?? 'Failed to send'}
                   </p>
                 )}
-                {renderPolishPreview('reply', buildEmailContext(latestThreadEmail!))}
+                {renderPolishPreview('reply', buildEmailContext((replyTarget ?? anchorEmail)!))}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
@@ -2594,8 +2627,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                     <Send size={13} />
                     {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
                   </Button>
-                  {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext(latestThreadEmail!))}
-                  <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyFiles([]); setAttachmentNotice(null); resetPolish(); }}>
+                  {renderPolishButton('reply', htmlToText(splitSignature(replyForm.body).body), buildEmailContext((replyTarget ?? anchorEmail)!))}
+                  <Button size="sm" variant="outline" onClick={() => { setReplyOpen(false); setReplyTarget(null); setReplyFiles([]); setAttachmentNotice(null); resetPolish(); }}>
                     Cancel
                   </Button>
                 </div>
