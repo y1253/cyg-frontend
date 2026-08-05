@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { useNotifications } from '@/context/NotificationContext';
 import { setInternalMessageState } from '@/api/internalMessages';
 import type {
   InternalListResult,
@@ -32,11 +33,18 @@ const PATCH: Record<InternalStateAction, { isRead?: boolean; isCompleted?: boole
 export function useInternalMessageState() {
   const { token } = useAuth();
   const qc = useQueryClient();
+  const { suppressSource } = useNotifications();
 
   return useMutation({
     mutationFn: ({ id, action }: { id: number; action: InternalStateAction }) =>
       setInternalMessageState(token!, id, action),
     onMutate: ({ id, action }) => {
+      // Marking unread raises the very count the notifier watches for new mail, and
+      // `onSettled` below force-refetches it — so without this the user's own click
+      // chimes at them. Stamped before the request, not after, because the refetch
+      // can land first.
+      if (action === 'unread') suppressSource('internal');
+
       const patch = PATCH[action];
       qc.setQueriesData<InfiniteData<InternalListResult>>(
         { queryKey: ['internal-messages'] },

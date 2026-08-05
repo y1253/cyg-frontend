@@ -9,12 +9,12 @@ import {
 import { useNotifications } from '@/context/NotificationContext';
 
 /**
- * Sound/notification controls for new messages. Both alerts deliberately only fire
- * while the tab is unfocused, which the popover states outright — otherwise the
- * first thing a user does is sit on this page, hear nothing, and assume it's broken.
+ * Sound/notification controls for new messages. Alerts fire while you're using the
+ * app as well as when the tab is unfocused; "Alert me while I'm using the app" turns
+ * the focused half off for anyone who finds it noisy.
  */
 export function NotificationBell() {
-  const { prefs, setSound, setDesktop, permission, testSound } =
+  const { prefs, setSound, setDesktop, setWhileActive, permission, testSound } =
     useNotifications();
 
   const anyOn = prefs.sound || prefs.desktop;
@@ -34,8 +34,8 @@ export function NotificationBell() {
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-medium">New message alerts</span>
           <span className="text-xs text-muted-foreground">
-            Only while this tab isn't focused, so you're never chimed at while
-            reading.
+            Alerts you whenever a message arrives, even while you're using the
+            app.
           </span>
         </div>
 
@@ -64,6 +64,19 @@ export function NotificationBell() {
             )}
           </div>
         )}
+
+        <div className="flex flex-col gap-1">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
+            <Checkbox
+              checked={prefs.whileActive}
+              onCheckedChange={(checked) => setWhileActive(checked === true)}
+            />
+            Alert me while I'm using the app
+          </label>
+          <span className="pl-6 text-xs text-muted-foreground">
+            Off = only when this tab isn't focused.
+          </span>
+        </div>
 
         <Button
           variant="ghost"

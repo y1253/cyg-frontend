@@ -25,8 +25,8 @@ export function useInternalUnreadCount() {
     enabled: !!token,
     refetchInterval: 30000,
     // Also the new-message notifier's fallback for internal mail when the SSE
-    // stream is down — and it only notifies while the tab isn't focused, which is
-    // exactly when React Query would otherwise stop polling.
+    // stream is down. A backgrounded tab still has to alert, which is exactly when
+    // React Query would otherwise stop polling.
     refetchIntervalInBackground: true,
   });
 }

@@ -42,6 +42,8 @@ const SUPPRESS_MS: Record<string, number> = {
 interface Prefs {
   sound: boolean;
   desktop: boolean;
+  /** Alert even while the tab has focus. Off returns to unfocused-only alerts. */
+  whileActive: boolean;
 }
 
 function readPrefs(): Prefs {
@@ -52,14 +54,17 @@ function readPrefs(): Prefs {
   const granted = notificationPermission() === 'granted';
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return { sound: true, desktop: false };
+    if (!raw) return { sound: true, desktop: false, whileActive: true };
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       sound: parsed.sound !== false,
       desktop: parsed.desktop === true && granted,
+      // Absent in blobs written before this pref existed — those users get the new
+      // behavior, which is the point of the change.
+      whileActive: parsed.whileActive !== false,
     };
   } catch {
-    return { sound: true, desktop: false };
+    return { sound: true, desktop: false, whileActive: true };
   }
 }
 
@@ -68,6 +73,7 @@ interface NotificationValue {
   setSound: (on: boolean) => void;
   /** Requests browser permission when turning on; resolves to the granted state. */
   setDesktop: (on: boolean) => Promise<boolean>;
+  setWhileActive: (on: boolean) => void;
   permission: NotificationPermission | 'unsupported';
   /** Plays the chime regardless of focus — for the "Test sound" button. */
   testSound: () => void;
@@ -84,6 +90,15 @@ interface NotificationValue {
     tag: string;
     onClick?: () => void;
   }) => void;
+  /**
+   * Mute a source for its suppression window without announcing anything.
+   *
+   * For actions the user just took that raise one of the counts the poll watches —
+   * marking a message unread or uncompleted. Those look exactly like a new message
+   * arriving, and now that alerts fire while the tab is focused, the user would be
+   * chimed at by their own click.
+   */
+  suppressSource: (source: string) => void;
 }
 
 const NotificationCtx = createContext<NotificationValue | null>(null);
@@ -149,9 +164,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   /**
    * The single funnel for every alert.
    *
-   * Silent while the tab has focus: the user is already looking at the app, and the
-   * in-page banners cover that case. `hasFocus()` (rather than `visibilityState`)
-   * also catches a visible window sitting behind another app.
+   * Fires whether or not the tab has focus. The in-page banners that used to cover
+   * the focused case are tab-local — they only render on the one company tab the
+   * message belongs to, so a user working anywhere else in the app got nothing.
+   *
+   * `whileActive` off restores the old unfocused-only behavior. `hasFocus()` rather
+   * than `visibilityState` is what defines "active": it also catches a visible
+   * window sitting behind another app.
    */
   const notify = useCallback(
     (input: {
@@ -160,7 +179,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       tag: string;
       onClick?: () => void;
     }) => {
-      if (document.hasFocus()) return;
+      if (document.hasFocus() && !prefsRef.current.whileActive) return;
 
       const now = Date.now();
       let chimed = false;
@@ -183,6 +202,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const suppressSource = useCallback((source: string) => {
+    suppressRef.current.set(source, Date.now());
+  }, []);
 
   const notifyPush = useCallback(
     (input: {
@@ -315,6 +338,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setPrefs((p) => ({ ...p, sound: on }));
   }, []);
 
+  const setWhileActive = useCallback((on: boolean) => {
+    setPrefs((p) => ({ ...p, whileActive: on }));
+  }, []);
+
   const setDesktop = useCallback(async (on: boolean) => {
     if (!on) {
       setPrefs((p) => ({ ...p, desktop: false }));
@@ -339,19 +366,23 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       prefs,
       setSound,
       setDesktop,
+      setWhileActive,
       permission,
       testSound,
       lastInternalEventAt,
       notifyPush,
+      suppressSource,
     }),
     [
       prefs,
       setSound,
       setDesktop,
+      setWhileActive,
       permission,
       testSound,
       lastInternalEventAt,
       notifyPush,
+      suppressSource,
     ],
   );
 

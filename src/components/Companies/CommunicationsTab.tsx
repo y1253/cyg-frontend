@@ -1163,9 +1163,10 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
           setNewEmailBanner(true);
           setTimeout(() => setNewEmailBanner(false), 5000);
-          // Sound/desktop alert (no-op while the tab is focused). Stamping the
-          // company as the source also stops the slower count poll from announcing
-          // this same email a second time.
+          // Sound/desktop alert. Fires even though this tab is what's on screen —
+          // the banner above and the alert are deliberately not exclusive. Stamping
+          // the company as the source also stops the slower count poll from
+          // announcing this same email a second time.
           notifyPush({
             source: `company:${companyId}`,
             title: 'New email',
