@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
+import { useComposer } from '@/context/ComposerContext';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
@@ -33,6 +34,7 @@ import type { EmailProvider } from '@/api/gmail';
 import type { EmailSummary, ChatInboxMessage, EmailDetail, EmailAttachment, ChatMessage } from '@/api/gmail';
 import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { useAttachmentViewer } from './AttachmentViewerContext';
+import { AttachmentChips, UploadProgressBar } from './ComposerBits';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
@@ -40,8 +42,7 @@ import { RecipientAutocomplete } from './RecipientAutocomplete';
 import {
   escapeHtml, formatEmailDate, prefixReSubject, prefixFwdSubject, senderInitial,
   dedupeById, htmlToText, SIGNATURE_LEAD, splitSignature, textToHtml,
-  formatBytes, openPrintWindow, buildForwardedBody, mergeAttachments,
-  attachmentsToLink, MAX_FILE_BYTES,
+  openPrintWindow, buildForwardedBody, mergeAttachments, MAX_FILE_BYTES,
 } from './message-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -377,6 +378,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
   const { notifyPush } = useNotifications();
+  const { openEmail } = useComposer();
 
   // Where the user left off last time (see CommUI). The component is keyed by
   // companyId in CompanyDetailPage, so this re-reads per company — no cross-company
@@ -403,14 +405,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const [selectedLabel, setSelectedLabel] = useState<string>(
     ALL_LABELS.includes(restored.selectedLabel ?? '') ? restored.selectedLabel! : 'INBOX',
   );
-  const [composeOpen, setComposeOpen] = useState(false);
+  // Compose lives in the app-level docked window now (ComposerContext) — only
+  // reply/forward keep local draft state here.
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<{ kind: 'email' | 'chat'; id: string; fromDetail?: boolean } | null>(null);
-  const [composeForm, setComposeForm] = useState<{ to: string[]; subject: string; body: string; cc: string[] }>({ to: [], subject: '', body: '', cc: [] });
-  const [composeFiles, setComposeFiles] = useState<File[]>([]);
-  const composeFileRef = useRef<HTMLInputElement>(null);
   // Forward: a compose-style dialog seeded from an existing email. `forwardSource`
   // is held here (not read off `emailDetail`) so the dialog is independent of the
   // detail view's lifecycle. `forwardSkipped` names attachments dropped because
@@ -553,7 +553,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // the user is actually composing/replying/forwarding — the endpoint scans many messages.
   const { data: contacts } = useGmailContacts(
     companyId,
-    !!account && (composeOpen || replyOpen || forwardOpen),
+    !!account && (replyOpen || forwardOpen),
   );
 
   // Search is server-side (Gmail `q`), so it covers the whole folder, not just
@@ -619,14 +619,15 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       : emailDetail
         ? [emailDetail]
         : [];
-  // Reply/Forward target = the newest message in the conversation (Gmail default).
+  // The newest message in the conversation. Only a target when nothing is open.
   const latestThreadEmail: EmailDetail | null =
     threadEmails.length > 0 ? threadEmails[threadEmails.length - 1] : null;
 
   // Index of the message the user actually clicked. Everything after it is the
   // "future" of that moment — dimmed, mirroring the chat thread view. -1 when the
   // opened id isn't in the loaded thread (still loading, or a provider quirk):
-  // then nothing dims and the plain newest-expanded behaviour stands.
+  // then nothing dims, but the reply target still resolves to the opened message
+  // via `emailDetail` below — it must never drift to a newer one.
   const anchorIdx = selectedMsgId
     ? threadEmails.findIndex((m) => m.id === selectedMsgId)
     : -1;
@@ -637,10 +638,16 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
       ? threadEmails[anchorIdx].id
       : (threadEmails[threadEmails.length - 1]?.id ?? null);
   // Reply/Forward act on the message the user opened — the state of the
-  // conversation they're looking at — not on whatever arrived since (same idea as
-  // the chat thread, where the composer answers the anchored message).
+  // conversation they're looking at — never on whatever arrived after it.
+  //
+  // The miss case matters: when the opened id isn't in `threadEmails` (thread still
+  // loading or refetching, a restored selection whose thread hasn't arrived, a
+  // provider id mismatch) this used to fall through to the NEWEST message, so a
+  // reply silently jumped forward in the conversation. `emailDetail` is that opened
+  // message — useGmailEmail is keyed on `selectedMsgId` — so it is the correct
+  // stand-in. `latestThreadEmail` is only reached with nothing open at all.
   const anchorEmail: EmailDetail | null =
-    anchorIdx >= 0 ? threadEmails[anchorIdx] : latestThreadEmail;
+    anchorIdx >= 0 ? threadEmails[anchorIdx] : (emailDetail ?? latestThreadEmail);
 
   // Expand the message the user clicked, once per opened thread. Keyed so the 15s
   // poll (a new array each time) doesn't collapse what the user manually expanded;
@@ -695,30 +702,46 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     return (
       <div
         key={m.id}
-        className={`border rounded-md overflow-hidden transition-opacity ${
+        className={`group/msg border rounded-md overflow-hidden transition-opacity ${
           isFuture ? 'opacity-50' : ''
         }`}
       >
-        <button
-          type="button"
-          onClick={() => toggleThreadMessage(m.id)}
-          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
-        >
-          <div className="h-8 w-8 shrink-0 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
-            {senderInitial(m.from)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium truncate">{m.from}</span>
-              <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{formatEmailDate(m.date)}</span>
+        {/* The arrow is a sibling of the header, not a child — the header is itself
+            a <button> and nesting one inside it is invalid HTML. */}
+        <div className="flex items-start">
+          <button
+            type="button"
+            onClick={() => toggleThreadMessage(m.id)}
+            className="min-w-0 flex-1 flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
+          >
+            <div className="h-8 w-8 shrink-0 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+              {senderInitial(m.from)}
             </div>
-            {expanded ? (
-              <div className="text-xs text-muted-foreground truncate">To: {m.to}</div>
-            ) : (
-              <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
-            )}
-          </div>
-        </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium truncate">{m.from}</span>
+                <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{formatEmailDate(m.date)}</span>
+              </div>
+              {expanded ? (
+                <div className="text-xs text-muted-foreground truncate">To: {m.to}</div>
+              ) : (
+                <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
+              )}
+            </div>
+          </button>
+          {/* Reply to THIS message even though newer ones follow it. Hidden on the
+              message that is already the target, where it would do nothing. */}
+          {m.id !== selectedMsgId && (
+            <button
+              type="button"
+              title="Reply to this message"
+              onClick={() => handleNavigateToEmailMessage(m)}
+              className="shrink-0 self-center mr-2 p-1.5 rounded-md text-muted-foreground opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 hover:bg-muted hover:text-foreground transition-opacity"
+            >
+              <Reply size={14} />
+            </button>
+          )}
+        </div>
 
         {expanded && (
           <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
@@ -1290,92 +1313,16 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
 
   const cloudLabel = provider === 'MICROSOFT' ? 'OneDrive' : 'Drive';
 
-  // Upload progress, shared by all three composers (only one is ever open).
-  // Attachments run to 250 MB, so a bare "Sending…" leaves the user guessing.
-  const uploadPercent =
-    sendMutation.uploadProgress === null
-      ? null
-      : Math.round(sendMutation.uploadProgress * 100);
-  const uploadBar =
-    uploadPercent === null ? null : (
-      <div className="flex items-center gap-2">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-teal-500 transition-all duration-150"
-            style={{ width: `${uploadPercent}%` }}
-          />
-        </div>
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {uploadPercent}%
-        </span>
-      </div>
-    );
+  // Upload progress + the picked-file list, shared with the docked composer.
+  // These used to be closures here, which was fine while compose/reply/forward all
+  // lived in this component; compose now lives above the router (ComposerContext),
+  // so they are real components in ComposerBits.
+  const uploadBar = <UploadProgressBar progress={sendMutation.uploadProgress} />;
 
-  // The picked-file list, shared by reply / forward / compose. Files the server
-  // will host on Drive/OneDrive instead of attaching are flagged here, so the
-  // user knows before sending — `attachmentsToLink` mirrors the server's split.
   const renderAttachedFiles = (
     files: File[],
     setFiles: React.Dispatch<React.SetStateAction<File[]>>,
-  ) => {
-    if (files.length === 0) return null;
-    const linked = attachmentsToLink(files);
-    const total = files.reduce((sum, f) => sum + f.size, 0);
-    return (
-      <div className="flex flex-col gap-1.5">
-        {files.map((f, i) => (
-          <div
-            key={`${f.name}:${f.size}:${i}`}
-            className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-          >
-            <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-            {linked.has(f) && (
-              <span className="shrink-0 rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-teal-200">
-                sent as {cloudLabel} link
-              </span>
-            )}
-            {f.size > 0 && (
-              <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-            )}
-            <button
-              type="button"
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-              title="Remove attachment"
-              onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-            >
-              <X size={13} />
-            </button>
-          </div>
-        ))}
-        {files.length > 1 && (
-          <p className="text-xs text-muted-foreground">{formatBytes(total)} total</p>
-        )}
-      </div>
-    );
-  };
-
-  const handleSend = () => {
-    if (composeForm.to.length === 0) return;
-    // composeForm.body holds rich-text HTML; send it plus a plain-text fallback.
-    sendMutation.mutate(
-      {
-        to: composeForm.to.join(', '),
-        subject: composeForm.subject,
-        body: htmlToText(composeForm.body),
-        bodyHtml: composeForm.body,
-        cc: composeForm.cc.length ? composeForm.cc.join(', ') : undefined,
-        files: composeFiles,
-      },
-      {
-        onSuccess: () => {
-          setComposeOpen(false);
-          setComposeForm({ to: [], subject: '', body: '', cc: [] });
-          setComposeFiles([]); setAttachmentNotice(null);
-        },
-      },
-    );
-  };
+  ) => <AttachmentChips files={files} setFiles={setFiles} cloudLabel={cloudLabel} />;
 
   const handleSendReply = () => {
     // Reply to the message the user opened, even when newer ones exist below it.
@@ -1658,6 +1605,28 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     resetPolish();
   };
 
+  /**
+   * Re-anchor the open conversation to an earlier message and reply there — the
+   * email counterpart of `handleNavigateToMessage` in the chat view.
+   *
+   * Moving `selectedMsgId` is what re-points everything derived from it: the
+   * toolbar Reply/Forward, and the dimming that marks every later message as the
+   * "future" of this moment. `handleOpenReply` still gets `m` directly, because
+   * `anchorEmail` won't reflect the new id until the next render.
+   */
+  const handleNavigateToEmailMessage = (m: EmailDetail) => {
+    // The init effect keys on selectedMsgId and would collapse everything the user
+    // has expanded. Claim its key first and fold the new anchor into the current
+    // set, the same trick handleOpenEmail uses to hand the effect a clean slate.
+    const msgs = emailThread?.messages;
+    if (msgs && msgs.length > 0) {
+      threadInitKeyRef.current = `${activeThreadId}|${m.id}|${msgs.length}`;
+      setExpandedThreadIds((prev) => new Set(prev).add(m.id));
+    }
+    setSelectedMsgId(m.id);
+    handleOpenReply(m);
+  };
+
   // ── Forward ────────────────────────────────────────────────────────────────
 
   // Same ceiling as a manually picked file — a large original is re-uploaded and
@@ -1811,19 +1780,17 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     openPrintWindow(name, buildChatPrintHtml(name, threadMessages));
   };
 
-  // Context for a brand-new compose (no prior thread). Kept non-empty so it
+  // A forward polishes against the email being forwarded. Kept non-empty so it
   // satisfies the polish endpoint's required `context` field.
-  const buildComposeContext = (): string =>
-    `Subject: ${composeForm.subject || '(no subject)'}\n` +
-    `To: ${composeForm.to.join(', ') || '(unspecified)'}\n\n(New email — no prior conversation.)`;
-
-  // A forward polishes against the email being forwarded.
   const forwardPolishContext = (): string =>
-    forwardSource ? buildEmailContext(forwardSource) : buildComposeContext();
+    forwardSource
+      ? buildEmailContext(forwardSource)
+      : '(Forwarded email — no prior conversation.)';
 
-  // Where a polished draft is written back. Reply and compose both use the
-  // email polish tone; chat uses the chat tone.
-  type PolishTarget = 'reply' | 'compose' | 'chat' | 'forward';
+  // Where a polished draft is written back. Reply and forward both use the
+  // email polish tone; chat uses the chat tone. (Compose has its own per-instance
+  // polish state in the docked composer.)
+  type PolishTarget = 'reply' | 'chat' | 'forward';
 
   // Run the AI polish for a draft, stashing the source so "Re-polish" reuses it.
   const runPolish = (target: PolishTarget, draftPlain: string, context: string) => {
@@ -1844,9 +1811,6 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     if (target === 'reply') {
       const { sig } = splitSignature(replyForm.body);
       setReplyForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
-    } else if (target === 'compose') {
-      const { sig } = splitSignature(composeForm.body);
-      setComposeForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
     } else if (target === 'forward') {
       // `sig` carries the signature AND the quoted forwarded block below it —
       // polish only ever rewrites the user's own text above the signature.
@@ -2767,7 +2731,14 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            onClick={() => { setComposeForm({ to: [], subject: '', body: account?.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '', cc: [] }); setComposeFiles([]); setAttachmentNotice(null); resetPolish(); setComposeOpen(true); }}
+            onClick={() =>
+              openEmail({
+                companyId,
+                fromAddress: account?.emailAddress ?? account?.gmailAddress ?? '',
+                cloudLabel,
+                signatureHtml: account?.signatureHtml,
+              })
+            }
             className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
           >
             <Plus size={14} /> Compose
@@ -3298,102 +3269,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         </div>
       )}
 
-      {/* Compose dialog */}
-      <Dialog open={composeOpen} onOpenChange={(open) => { setComposeOpen(open); if (!open) { setComposeFiles([]); setAttachmentNotice(null); resetPolish(); } }}>
-        {/* Bounded flex column: the body scrolls, the footer stays pinned, so a
-            long message can never push Send off the viewport. */}
-        <DialogContent className="sm:max-w-lg flex flex-col max-h-[85vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Send size={16} /> New Email
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">To</Label>
-              <RecipientAutocomplete
-                value={composeForm.to}
-                onChange={(v) => setComposeForm((f) => ({ ...f, to: v }))}
-                contacts={contacts ?? []}
-                placeholder="recipient@example.com"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">CC</Label>
-              <RecipientAutocomplete
-                value={composeForm.cc}
-                onChange={(v) => setComposeForm((f) => ({ ...f, cc: v }))}
-                contacts={contacts ?? []}
-                placeholder="Optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Subject (optional)</Label>
-              <Input
-                value={composeForm.subject}
-                onChange={(e) => setComposeForm((f) => ({ ...f, subject: e.target.value }))}
-                placeholder="Subject"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Message</Label>
-              <RichTextEditor
-                html={composeForm.body}
-                onChange={(h) => setComposeForm((f) => ({ ...f, body: h }))}
-                placeholder="Write your message…"
-                minHeight={200}
-              />
-            </div>
-            {/* Attachments */}
-            <div className="flex flex-col gap-2">
-              <input
-                ref={composeFileRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  addFiles(setComposeFiles, composeFiles, e.target.files);
-                  e.target.value = '';
-                }}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-fit gap-1"
-                onClick={() => composeFileRef.current?.click()}
-              >
-                <Paperclip size={14} /> Attach
-              </Button>
-              {attachmentNotice && (
-                <p className="text-xs text-amber-600">{attachmentNotice}</p>
-              )}
-              {renderAttachedFiles(composeFiles, setComposeFiles)}
-            </div>
-            {uploadBar}
-            {sendMutation.isError && (
-              <p className="text-xs text-destructive">
-                {(sendMutation.error as Error)?.message ?? 'Failed to send'}
-              </p>
-            )}
-            {renderPolishPreview('compose', buildComposeContext())}
-          </div>
-          <div className="flex justify-end gap-2 mt-2 shrink-0">
-            <Button variant="outline" onClick={() => { setComposeOpen(false); setComposeFiles([]); setAttachmentNotice(null); resetPolish(); }}>
-              Cancel
-            </Button>
-            {renderPolishButton('compose', htmlToText(splitSignature(composeForm.body).body), buildComposeContext())}
-            <Button
-              disabled={sendMutation.isPending || (!htmlToText(composeForm.body) && composeFiles.length === 0)}
-              onClick={handleSend}
-              className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-            >
-              <Send size={14} />
-              {sendMutation.isPending ? 'Sending…' : 'Send'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Compose is no longer here: it is the app-level docked window (see
+          ComposerContext), so it survives leaving this tab. */}
 
       {/* Disconnect confirm dialog */}
       <Dialog open={disconnectConfirmOpen} onOpenChange={setDisconnectConfirmOpen}>

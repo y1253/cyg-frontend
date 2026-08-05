@@ -216,9 +216,16 @@ export async function fetchGmailAccount(
     token,
     `${API}/communications/companies/${companyId}/account`,
   );
+  // "Not connected" reaches us in two shapes. The unified endpoint answers with
+  // `null`, which Nest sends as a 200 carrying a ZERO-LENGTH body — `res.json()`
+  // throws SyntaxError on that, and the throw used to cost a 7s React Query retry
+  // chain with the whole tab stuck on its spinner. The older per-provider routes
+  // 404 instead. Both mean the same thing: no account.
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch account');
-  const account = (await res.json()) as GmailAccount | null;
+  const raw = (await res.text()).trim();
+  if (!raw || raw === 'null') return null;
+  const account = JSON.parse(raw) as GmailAccount | null;
   if (account?.provider) setCompanyProvider(companyId, account.provider);
   return account;
 }

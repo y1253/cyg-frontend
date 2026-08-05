@@ -18,7 +18,7 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
 import { UserAutocomplete } from './UserAutocomplete';
 import { InternalMessageRow } from './InternalMessageRow';
-import { InternalComposeDialog } from './InternalComposeDialog';
+import { useComposer } from '@/context/ComposerContext';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -155,6 +155,7 @@ function getStoredUI(): StoredUI {
 
 export function InternalMessagesTab({ active }: Props) {
   const { token, user } = useAuth();
+  const { openInternal } = useComposer();
   const stored = useRef(getStoredUI()).current;
 
   const [folder, setFolder] = useState<InternalFolder>(stored.folder ?? 'INBOX');
@@ -162,7 +163,6 @@ export function InternalMessagesTab({ active }: Props) {
   const [openThreadId, setOpenThreadId] = useState<number | null>(
     stored.openThreadId ?? null,
   );
-  const [composeOpen, setComposeOpen] = useState(false);
   const [banner, setBanner] = useState(false);
   // The message awaiting "mark complete" confirmation, mirroring the Communications
   // tab. `fromDetail` closes the thread afterwards. null = no confirm dialog open.
@@ -216,9 +216,8 @@ export function InternalMessagesTab({ active }: Props) {
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
-  const { data: directory = [] } = useUserDirectory(
-    forwardOpen || replyOpen || composeOpen,
-  );
+  // Compose fetches the directory itself now that it lives in the docked composer.
+  const { data: directory = [] } = useUserDirectory(forwardOpen || replyOpen);
   const { data: uncompleted } = useInternalUncompletedCount();
   const { data: unread } = useInternalUnreadCount();
   const { lastInternalEventAt } = useNotifications();
@@ -1143,7 +1142,7 @@ export function InternalMessagesTab({ active }: Props) {
           <Button
             size="sm"
             className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-            onClick={() => setComposeOpen(true)}
+            onClick={() => openInternal({ onSent: () => setFolder('SENT') })}
           >
             <Pencil size={14} /> New message
           </Button>
@@ -1188,11 +1187,8 @@ export function InternalMessagesTab({ active }: Props) {
         )}
       </div>
 
-      <InternalComposeDialog
-        open={composeOpen}
-        onOpenChange={setComposeOpen}
-        onSent={() => setFolder('SENT')}
-      />
+      {/* "New message" is the app-level docked composer now (ComposerContext), so
+          it survives leaving this tab. */}
       {completeConfirmDialog}
     </div>
   );
