@@ -43,6 +43,8 @@ const INTERNAL_POLISH_CONTEXT =
 interface BodyProps {
   /** Reports whether there is anything worth confirming before a discard. */
   onDirtyChange: (dirty: boolean) => void;
+  /** Reports an in-flight send, so navigating away can't close mid-upload. */
+  onSendingChange: (sending: boolean) => void;
   onSent: () => void;
 }
 
@@ -59,12 +61,14 @@ export function DockedComposer({
   minimized,
   onMinimize,
   onClose,
+  onSendingChange,
   attention,
 }: {
   draft: Draft;
   minimized: boolean;
   onMinimize: (on: boolean) => void;
   onClose: () => void;
+  onSendingChange: (sending: boolean) => void;
   /** Bumped when an already-open composer is re-requested; flashes the window. */
   attention: number;
 }) {
@@ -99,11 +103,13 @@ export function DockedComposer({
         cloudLabel={draft.cloudLabel}
         signatureHtml={draft.signatureHtml}
         onDirtyChange={setDirty}
+        onSendingChange={onSendingChange}
         onSent={onClose}
       />
     ) : (
       <InternalComposerBody
         onDirtyChange={setDirty}
+        onSendingChange={onSendingChange}
         onSent={() => {
           draft.onSent?.();
           onClose();
@@ -203,6 +209,7 @@ function EmailComposerBody({
   cloudLabel,
   signatureHtml,
   onDirtyChange,
+  onSendingChange,
   onSent,
 }: BodyProps & {
   companyId: number;
@@ -239,6 +246,15 @@ function EmailComposerBody({
         subject.trim().length > 0,
     );
   }, [draftPlain, files.length, to.length, subject, onDirtyChange]);
+
+  useEffect(() => {
+    onSendingChange(sendMutation.isPending);
+  }, [sendMutation.isPending, onSendingChange]);
+
+  // A successful send unmounts this body from inside `onSuccess`, before the effect
+  // above ever sees `isPending` go false — without this the flag would stay stuck on
+  // and close-on-navigate would never fire again.
+  useEffect(() => () => onSendingChange(false), [onSendingChange]);
 
   const polishContext =
     `Subject: ${subject || '(no subject)'}\n` +
@@ -363,7 +379,11 @@ function EmailComposerBody({
 
 // ── Internal ─────────────────────────────────────────────────────────────────
 
-function InternalComposerBody({ onDirtyChange, onSent }: BodyProps) {
+function InternalComposerBody({
+  onDirtyChange,
+  onSendingChange,
+  onSent,
+}: BodyProps) {
   const [to, setTo] = useState<number[]>([]);
   const [cc, setCc] = useState<number[]>([]);
   const [subject, setSubject] = useState('');
@@ -389,6 +409,14 @@ function InternalComposerBody({ onDirtyChange, onSent }: BodyProps) {
         subject.trim().length > 0,
     );
   }, [bodyText, files.length, to.length, subject, onDirtyChange]);
+
+  useEffect(() => {
+    onSendingChange(sendMutation.isPending);
+  }, [sendMutation.isPending, onSendingChange]);
+
+  // See the same pair in EmailComposerBody: a send that succeeds unmounts this
+  // before the effect above can clear the flag.
+  useEffect(() => () => onSendingChange(false), [onSendingChange]);
 
   const handleSend = () => {
     setError(null);

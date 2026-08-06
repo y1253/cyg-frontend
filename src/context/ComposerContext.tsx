@@ -29,15 +29,27 @@ export interface InternalDraftSeed {
   onSent?: () => void;
 }
 
+/**
+ * The route the composer was opened from. Stamped by the provider rather than
+ * supplied by callers, and a path rather than a company id because the internal
+ * draft carries no company id at all — yet still lives on a `/companies/:id`
+ * page (the workspace). One rule then covers both kinds.
+ */
+interface DraftOwner {
+  ownerPath: string;
+}
+
 export type Draft =
-  | ({ kind: 'email' } & EmailDraftSeed)
-  | ({ kind: 'internal' } & InternalDraftSeed);
+  | ({ kind: 'email' } & DraftOwner & EmailDraftSeed)
+  | ({ kind: 'internal' } & DraftOwner & InternalDraftSeed);
 
 interface ComposerValue {
   draft: Draft | null;
   openEmail: (seed: EmailDraftSeed) => void;
   openInternal: (seed?: InternalDraftSeed) => void;
   close: () => void;
+  /** Close because the user navigated away. Yields to a send in flight. */
+  closeOnNavigate: () => void;
   minimized: boolean;
   setMinimized: (on: boolean) => void;
 }
@@ -80,7 +92,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
       return;
     }
     setMinimized(false);
-    setDraft({ kind: 'email', ...seed });
+    setDraft({ kind: 'email', ownerPath: window.location.pathname, ...seed });
   }, []);
 
   const openInternal = useCallback((seed?: InternalDraftSeed) => {
@@ -90,10 +102,38 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
       return;
     }
     setMinimized(false);
-    setDraft({ kind: 'internal', ...(seed ?? {}) });
+    setDraft({
+      kind: 'internal',
+      ownerPath: window.location.pathname,
+      ...(seed ?? {}),
+    });
   }, []);
 
   const close = useCallback(() => {
+    setDraft(null);
+    setMinimized(false);
+  }, []);
+
+  // Whether a send is in flight, reported up by whichever body is mounted. A ref
+  // rather than state on purpose: the provider renders nothing from it, and a
+  // re-render here would re-create the composer body mid-send.
+  const sendingRef = useRef(false);
+  const handleSendingChange = useCallback((on: boolean) => {
+    sendingRef.current = on;
+  }, []);
+
+  /**
+   * Close because the user left the page this draft belongs to. Unlike the ×, it
+   * discards without the confirm dialog — navigation is the answer to "do you
+   * want to keep this?".
+   *
+   * A send in flight owns the window, though: a large attachment uploads for
+   * minutes, and closing would hide the progress bar and swallow a failure. On
+   * success the body's `onSent` closes it anyway; on failure it stays put with
+   * the error, and the next navigation clears it.
+   */
+  const closeOnNavigate = useCallback(() => {
+    if (sendingRef.current) return;
     setDraft(null);
     setMinimized(false);
   }, []);
@@ -111,8 +151,16 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
   }
 
   const value = useMemo(
-    () => ({ draft, openEmail, openInternal, close, minimized, setMinimized }),
-    [draft, openEmail, openInternal, close, minimized],
+    () => ({
+      draft,
+      openEmail,
+      openInternal,
+      close,
+      closeOnNavigate,
+      minimized,
+      setMinimized,
+    }),
+    [draft, openEmail, openInternal, close, closeOnNavigate, minimized],
   );
 
   return (
@@ -125,6 +173,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
               minimized={minimized}
               onMinimize={setMinimized}
               onClose={close}
+              onSendingChange={handleSendingChange}
               attention={attention}
             />,
             document.body,

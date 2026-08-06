@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { NotificationBell } from '@/components/Layout/NotificationBell';
+import { ComposerRouteWatcher } from '@/components/Layout/ComposerRouteWatcher';
 
 function SideNavLink({
   to,
@@ -39,6 +40,9 @@ export function AppLayout() {
   // it (and the bell) can consume the context.
   return (
     <NotificationProvider>
+      {/* Same reason as the provider above: it needs the router, so it can't live
+          beside ComposerProvider in App.tsx. */}
+      <ComposerRouteWatcher />
       <AppShell />
     </NotificationProvider>
   );
