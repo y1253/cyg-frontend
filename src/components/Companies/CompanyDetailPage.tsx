@@ -45,6 +45,7 @@ import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
 import type { EmailProvider } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
+import { CopyButton } from './CopyButton';
 import { CommunicationsTab } from './CommunicationsTab';
 import { InternalMessagesTab } from './InternalMessagesTab';
 import type { TodoItem } from '@/api/companies';
@@ -1386,26 +1387,32 @@ function LinksSection({ companyId }: { companyId: number }) {
               {/* Credentials + note */}
               {(link.username || link.password || link.note) && (
                 <div className="pl-8 flex flex-col gap-1.5 text-xs">
+                  {/* The value spans take the free space so the trailing buttons
+                      land at the right edge and line up across both rows. */}
                   {link.username && (
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground w-16 shrink-0">Username</span>
-                      <span className="font-medium break-all">{link.username}</span>
+                      <span className="font-medium break-all flex-1 min-w-0">{link.username}</span>
+                      <CopyButton value={link.username} label="Copy username" />
                     </div>
                   )}
                   {link.password && (
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground w-16 shrink-0">Password</span>
-                      <span className="font-medium font-mono break-all">
+                      <span className="font-medium font-mono break-all flex-1 min-w-0">
                         {revealed.has(link.id) ? link.password : '••••••••'}
                       </span>
                       <button
                         type="button"
                         onClick={() => toggleReveal(link.id)}
-                        className="flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+                        className="shrink-0 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
                         aria-label={revealed.has(link.id) ? 'Hide password' : 'Show password'}
                       >
                         {revealed.has(link.id) ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
+                      {/* Copies the real password even while it is masked — the
+                          server hands it over decrypted, so it's already here. */}
+                      <CopyButton value={link.password} label="Copy password" />
                     </div>
                   )}
                   {link.note && (
