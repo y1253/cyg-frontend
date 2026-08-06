@@ -438,8 +438,9 @@ export function InternalMessagesTab({ active }: Props) {
     forwardPolish.reset();
   };
 
-  const startReply = () => {
-    const target = anchorMessage;
+  // `target` defaults to the message the user opened; the per-message buttons in
+  // the thread pass an earlier one explicitly.
+  const startReply = (target: InternalMessageDetail | undefined = anchorMessage) => {
     if (!target) return;
     closeForward();
     setReplyTarget(target);
@@ -463,8 +464,7 @@ export function InternalMessagesTab({ active }: Props) {
     );
   };
 
-  const startForward = () => {
-    const target = anchorMessage;
+  const startForward = (target: InternalMessageDetail | undefined = anchorMessage) => {
     if (!target) return;
     closeReply();
     const reqId = ++forwardReqRef.current;
@@ -501,6 +501,30 @@ export function InternalMessagesTab({ active }: Props) {
       50,
     );
     void hydrateForwardAttachments(target, reqId);
+  };
+
+  /**
+   * Re-anchor the open thread to an earlier message and reply to / forward it
+   * there — mirrors `handleNavigateToEmailMessage` in the company mailbox.
+   *
+   * Moving `openMsgId` re-points everything derived from it: the toolbar
+   * Reply/Forward, and the dimming that marks later messages as the "future" of
+   * this moment. The init effect keys on `openMsgId` and would collapse whatever
+   * the user expanded, so claim its key first and fold the new anchor in.
+   * `startReply`/`startForward` get `m` directly, because `anchorMessage` won't
+   * reflect the new id until the next render.
+   */
+  const navigateToInternalMessage = (
+    m: InternalMessageDetail,
+    mode: 'reply' | 'forward',
+  ) => {
+    if (threadMessages.length > 0) {
+      threadInitKeyRef.current = `${openThreadId}|${m.id}|${threadMessages.length}`;
+      setExpandedThreadIds((prev) => new Set(prev).add(m.id));
+    }
+    setOpenMsgId(m.id);
+    if (mode === 'reply') startReply(m);
+    else startForward(m);
   };
 
   /**
@@ -747,40 +771,67 @@ export function InternalMessagesTab({ active }: Props) {
     return (
       <div
         key={m.id}
-        className={`border rounded-md overflow-hidden transition-opacity ${
+        className={`group/msg border rounded-md overflow-hidden transition-opacity ${
           isFuture ? 'opacity-50' : ''
         }`}
       >
-        <button
-          type="button"
-          onClick={() => toggleThreadMessage(m.id)}
-          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
-        >
-          <div className="h-8 w-8 shrink-0 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-semibold">
-            {senderInitial(m.from.name)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium truncate">
-                {m.from.name}
-                {m.isOwn && (
-                  <span className="text-xs text-muted-foreground font-normal"> (you)</span>
-                )}
-              </span>
-              <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
-                {formatEmailDate(m.date)}
-              </span>
+        {/* The action buttons are siblings of the header, not children — the
+            header is itself a <button> and nesting one inside it is invalid HTML. */}
+        <div className="flex items-start">
+          <button
+            type="button"
+            onClick={() => toggleThreadMessage(m.id)}
+            className="min-w-0 flex-1 flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40"
+          >
+            <div className="h-8 w-8 shrink-0 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-semibold">
+              {senderInitial(m.from.name)}
             </div>
-            {expanded ? (
-              <div className="text-xs text-muted-foreground truncate">
-                To: {m.to.map((u) => u.name).join(', ') || '—'}
-                {m.cc.length > 0 && ` · Cc: ${m.cc.map((u) => u.name).join(', ')}`}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium truncate">
+                  {m.from.name}
+                  {m.isOwn && (
+                    <span className="text-xs text-muted-foreground font-normal"> (you)</span>
+                  )}
+                </span>
+                <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
+                  {formatEmailDate(m.date)}
+                </span>
               </div>
-            ) : (
-              <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
-            )}
-          </div>
-        </button>
+              {expanded ? (
+                <div className="text-xs text-muted-foreground truncate">
+                  To: {m.to.map((u) => u.name).join(', ') || '—'}
+                  {m.cc.length > 0 && ` · Cc: ${m.cc.map((u) => u.name).join(', ')}`}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
+              )}
+            </div>
+          </button>
+          {/* Reply to / forward THIS message even though newer ones follow it.
+              Hidden on the message that is already the target, where the toolbar
+              buttons do the same thing. */}
+          {m.id !== openMsgId && (
+            <div className="shrink-0 self-center mr-2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+              <button
+                type="button"
+                title="Reply to this message"
+                onClick={() => navigateToInternalMessage(m, 'reply')}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Reply size={14} />
+              </button>
+              <button
+                type="button"
+                title="Forward this message"
+                onClick={() => navigateToInternalMessage(m, 'forward')}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Forward size={14} />
+              </button>
+            </div>
+          )}
+        </div>
 
         {expanded && (
           <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
@@ -847,10 +898,12 @@ export function InternalMessagesTab({ active }: Props) {
           <Button variant="ghost" size="sm" className="gap-1" onClick={closeThread}>
             <ArrowLeft size={14} /> Back
           </Button>
-          <Button variant="outline" size="sm" className="gap-1" onClick={startReply}>
+          {/* Wrapped, not passed by reference: the handlers take an optional
+              target and would otherwise receive the click event as one. */}
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => startReply()}>
             <Reply size={14} /> Reply
           </Button>
-          <Button variant="outline" size="sm" className="gap-1" onClick={startForward}>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => startForward()}>
             <Forward size={14} /> Forward
           </Button>
           <Button variant="outline" size="sm" className="gap-1" onClick={printThread}>
@@ -995,9 +1048,18 @@ export function InternalMessagesTab({ active }: Props) {
               ref={forwardRef}
               className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
             >
-              <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                <Forward size={13} /> Forward
-              </p>
+              <div className="flex flex-col gap-0.5">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <Forward size={13} /> Forward
+                </p>
+                {/* The form sits below the dimmed later messages, so name the
+                    message being forwarded rather than leaving it implied. */}
+                {forwardSource && (
+                  <p className="text-xs text-muted-foreground">
+                    Forwarding {forwardSource.from.name} · {formatEmailDate(forwardSource.date)}
+                  </p>
+                )}
+              </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">To</Label>
                 <UserAutocomplete

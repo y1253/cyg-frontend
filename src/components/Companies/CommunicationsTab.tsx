@@ -729,17 +729,28 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
               )}
             </div>
           </button>
-          {/* Reply to THIS message even though newer ones follow it. Hidden on the
-              message that is already the target, where it would do nothing. */}
+          {/* Reply to / forward THIS message even though newer ones follow it.
+              Hidden on the message that is already the target, where the toolbar
+              buttons do the same thing. */}
           {m.id !== selectedMsgId && (
-            <button
-              type="button"
-              title="Reply to this message"
-              onClick={() => handleNavigateToEmailMessage(m)}
-              className="shrink-0 self-center mr-2 p-1.5 rounded-md text-muted-foreground opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 hover:bg-muted hover:text-foreground transition-opacity"
-            >
-              <Reply size={14} />
-            </button>
+            <div className="shrink-0 self-center mr-2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+              <button
+                type="button"
+                title="Reply to this message"
+                onClick={() => handleNavigateToEmailMessage(m)}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Reply size={14} />
+              </button>
+              <button
+                type="button"
+                title="Forward this message"
+                onClick={() => handleNavigateToEmailMessageForward(m)}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Forward size={14} />
+              </button>
+            </div>
           )}
         </div>
 
@@ -1625,6 +1636,21 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     }
     setSelectedMsgId(m.id);
     handleOpenReply(m);
+  };
+
+  /**
+   * Forward counterpart of `handleNavigateToEmailMessage` — same re-anchoring, so
+   * the conversation shows the moment being forwarded and everything after it
+   * dims, then the forward form opens seeded from that message.
+   */
+  const handleNavigateToEmailMessageForward = (m: EmailDetail) => {
+    const msgs = emailThread?.messages;
+    if (msgs && msgs.length > 0) {
+      threadInitKeyRef.current = `${activeThreadId}|${m.id}|${msgs.length}`;
+      setExpandedThreadIds((prev) => new Set(prev).add(m.id));
+    }
+    setSelectedMsgId(m.id);
+    handleOpenForward(m);
   };
 
   // ── Forward ────────────────────────────────────────────────────────────────
@@ -2603,9 +2629,18 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
             {/* Inline forward form — seeded from the open email */}
             {forwardOpen && (
               <div ref={forwardFormRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  <Forward size={13} /> Forward
-                </p>
+                <div className="flex flex-col gap-0.5">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    <Forward size={13} /> Forward
+                  </p>
+                  {/* The form sits below the dimmed later messages, so name the
+                      message being forwarded rather than leaving it implied. */}
+                  {forwardSource && (
+                    <p className="text-xs text-muted-foreground">
+                      Forwarding {forwardSource.from} · {formatEmailDate(forwardSource.date)}
+                    </p>
+                  )}
+                </div>
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">To</Label>
                   <RecipientAutocomplete
