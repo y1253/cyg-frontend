@@ -136,6 +136,22 @@ body {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ─── Composer window ────────────────────────────────────────────────────── */
+
+/* A teal outline pulses once when an already-open compose window is re-requested.
+   Two identical keyframes on purpose: the window alternates between them, and it is
+   the change of animation-name that restarts the animation. Same name twice in a row
+   would simply not replay. Outline rather than ring/box-shadow so it composes with
+   the window's own shadow and costs no layout. */
+@keyframes composer-flash-a {
+  0%, 100% { outline-color: transparent; }
+  20%, 70% { outline-color: oklch(0.77 0.13 187); }
+}
+@keyframes composer-flash-b {
+  0%, 100% { outline-color: transparent; }
+  20%, 70% { outline-color: oklch(0.77 0.13 187); }
+}
+
 /* ─── Task completion animations ─────────────────────────────────────────── */
 
 /* Checkbox circle bounces with spring overshoot */

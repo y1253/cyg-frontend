@@ -17,7 +17,8 @@ export function useSendInternalMessage() {
       // Invalidate every thread rather than the sent message's own: a forward
       // roots a NEW conversation, so its threadId is not the thread the user is
       // looking at — but that thread now has to show the "You forwarded this
-      // message" banner. At most one thread is open, so this costs one refetch.
+      // message" banner. Only the open thread is mounted, so this costs one refetch
+      // however many compose windows are in flight.
       void qc.invalidateQueries({ queryKey: ['internal-messages'] });
       void qc.invalidateQueries({ queryKey: ['internal-message-thread'] });
     },

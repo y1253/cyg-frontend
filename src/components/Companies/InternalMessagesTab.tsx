@@ -18,7 +18,7 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
 import { UserAutocomplete } from './UserAutocomplete';
 import { InternalMessageRow } from './InternalMessageRow';
-import { useComposer } from '@/context/ComposerContext';
+import { useComposer, useComposerSignals } from '@/context/ComposerContext';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -156,6 +156,7 @@ function getStoredUI(): StoredUI {
 export function InternalMessagesTab({ active }: Props) {
   const { token, user } = useAuth();
   const { openInternal } = useComposer();
+  const { internalSentAt } = useComposerSignals();
   const stored = useRef(getStoredUI()).current;
 
   const [folder, setFolder] = useState<InternalFolder>(stored.folder ?? 'INBOX');
@@ -169,6 +170,15 @@ export function InternalMessagesTab({ active }: Props) {
   const [completeTarget, setCompleteTarget] = useState<
     { id: number; fromDetail?: boolean } | null
   >(null);
+
+  // Jump to Sent once a compose window lands. Driven by a signal from the provider
+  // rather than an `onSent` callback handed to it: a compose window outlives this
+  // tab now (leaving the workspace and coming back remounts it by key), so a
+  // captured `setFolder` would belong to an instance that no longer exists and the
+  // jump would silently stop happening.
+  useEffect(() => {
+    if (internalSentAt > 0) setFolder('SENT');
+  }, [internalSentAt]);
 
   // The message the user clicked to open the thread — expanded on arrival
   // alongside the newest one, like the Communications tab.
@@ -1204,7 +1214,7 @@ export function InternalMessagesTab({ active }: Props) {
           <Button
             size="sm"
             className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-            onClick={() => openInternal({ onSent: () => setFolder('SENT') })}
+            onClick={() => openInternal()}
           >
             <Pencil size={14} /> New message
           </Button>

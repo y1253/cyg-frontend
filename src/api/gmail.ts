@@ -472,6 +472,10 @@ export async function sendEmail(
     references?: string;
     threadId?: string;
     forwardedFrom?: string;
+    // How much of the conversation is quoted in `bodyHtml`. Only Outlook acts on
+    // it: 'thread' tells the server to skip Graph's createForward, which would
+    // otherwise quote the newest message a second time.
+    forwardScope?: 'message' | 'thread';
     // Provider resource id of the message being replied to. Gmail threads via
     // inReplyTo/threadId and ignores this; Outlook needs it to call createReply,
     // which is the only way Graph will emit In-Reply-To/References.
@@ -493,6 +497,7 @@ export async function sendEmail(
   if (data.references) form.set('references', data.references);
   if (data.threadId) form.set('threadId', data.threadId);
   if (data.forwardedFrom) form.set('forwardedFrom', data.forwardedFrom);
+  if (data.forwardScope) form.set('forwardScope', data.forwardScope);
   if (data.replyToMessageId) form.set('replyToMessageId', data.replyToMessageId);
   for (const file of data.files ?? []) form.append('attachments', file);
 

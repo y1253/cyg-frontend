@@ -28,6 +28,7 @@ export function useSendEmail(companyId: number) {
       references?: string;
       threadId?: string;
       forwardedFrom?: string;
+      forwardScope?: 'message' | 'thread';
       replyToMessageId?: string;
       files?: File[];
     }) => {

@@ -104,7 +104,7 @@ export function textToHtml(text: string): string {
 const FORBIDDEN_TAGS = 'script,style,link,meta,iframe,object,embed,form,base';
 const URL_ATTRS = ['href', 'src', 'action'];
 
-export function sanitizeForwardHtml(html: string): string {
+export function sanitizeForwardHtml(html: string, dropDataImages = false): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   doc.body.querySelectorAll(FORBIDDEN_TAGS).forEach((el) => el.remove());
   doc.body.querySelectorAll('*').forEach((el) => {
@@ -122,8 +122,16 @@ export function sanitizeForwardHtml(html: string): string {
   // Inline images reference `cid:` parts of the ORIGINAL message. We re-attach
   // their bytes as normal attachments instead, so drop the tags rather than
   // leave broken-image icons for the recipient.
+  //
+  // `dropDataImages` additionally strips base64 `data:` images. Only used when
+  // quoting a whole conversation: a reply usually embeds every earlier message, so
+  // one embedded logo is repeated once per message and a dozen-message thread can
+  // push `bodyHtml` past multer's 25 MB per-field limit — which surfaces as an
+  // opaque failed send.
   doc.body.querySelectorAll('img').forEach((img) => {
-    if (/^\s*cid:/i.test(img.getAttribute('src') ?? '')) img.remove();
+    const src = img.getAttribute('src') ?? '';
+    if (/^\s*cid:/i.test(src)) img.remove();
+    else if (dropDataImages && /^\s*data:/i.test(src)) img.remove();
   });
   return doc.body.innerHTML;
 }
@@ -140,6 +148,63 @@ export interface ForwardSource {
   bodyText: string | null;
 }
 
+/** The `From:/Date:/Subject:/To:` header block above one quoted message. */
+function forwardHeader(src: ForwardSource): string {
+  return (
+    '<div>---------- Forwarded message ----------</div>' +
+    `<div>From: ${escapeHtml(src.from)}</div>` +
+    `<div>Date: ${escapeHtml(new Date(src.date).toLocaleString())}</div>` +
+    `<div>Subject: ${escapeHtml(src.subject || '(no subject)')}</div>` +
+    `<div>To: ${escapeHtml(src.to)}</div>` +
+    '<div><br></div>'
+  );
+}
+
+/**
+ * The quoted block alone — header + body per message, oldest first, wrapped in a
+ * SINGLE `data-cyg-forward` div.
+ *
+ * One wrapper for the whole run, not one per message: `splitSignature` cuts at the
+ * first marker it finds, so per-message markers would leave every block after the
+ * first outside the protected region and expose it to AI polish.
+ *
+ * Split out from `buildForwardedBody` so the forward panel can swap the quote when
+ * the user switches between forwarding one message and the whole conversation,
+ * without disturbing the signature or anything they have typed above it.
+ */
+export function buildForwardQuote(sources: ForwardSource[]): string {
+  if (sources.length === 0) return '';
+  // See sanitizeForwardHtml: a conversation quote repeats each embedded image once
+  // per message, so those get dropped.
+  const dropDataImages = sources.length > 1;
+  const blocks = sources.map((src) => {
+    const quoted = src.bodyHtml
+      ? sanitizeForwardHtml(src.bodyHtml, dropDataImages)
+      : `<div>${escapeHtml(src.bodyText ?? '').replace(/\n/g, '<br>')}</div>`;
+    return forwardHeader(src) + quoted;
+  });
+  // data-cyg-forward marks the quote as untouchable — see splitSignature.
+  return `<div data-cyg-forward>${blocks.join('<div><br></div>')}</div>`;
+}
+
+/**
+ * Replace the quoted block in a forward draft, keeping everything above it — the
+ * caret space, the signature (which the user may have edited) and whatever they
+ * have already written.
+ *
+ * Deliberately not `splitSignature`, which cuts at whichever of
+ * `data-cyg-signature` / `data-cyg-forward` comes first: with a signature present
+ * that would take the signature too, and re-prepending a freshly built body would
+ * emit SIGNATURE_LEAD twice.
+ *
+ * No marker means there is no quote yet — the Outlook single-message draft, where
+ * Graph supplies the quote server-side — so the new one is simply appended.
+ */
+export function replaceForwardQuote(html: string, quote: string): string {
+  const i = html.search(/<div[^>]*data-cyg-forward/i);
+  return (i === -1 ? html : html.slice(0, i)) + quote;
+}
+
 /**
  * The Gmail-style quoted block seeded into a forward editor. Order matters:
  * caret space → signature → quote, so `splitSignature` still cuts at the
@@ -151,24 +216,8 @@ export function buildForwardedBody(
   src: ForwardSource,
   signatureHtml: string,
 ): string {
-  const quoted = src.bodyHtml
-    ? sanitizeForwardHtml(src.bodyHtml)
-    : `<div>${escapeHtml(src.bodyText ?? '').replace(/\n/g, '<br>')}</div>`;
-  const dateLabel = new Date(src.date).toLocaleString();
   return (
-    SIGNATURE_LEAD +
-    signatureHtml +
-    '<div><br></div>' +
-    // data-cyg-forward marks the quote as untouchable — see splitSignature.
-    '<div data-cyg-forward>' +
-    '<div>---------- Forwarded message ----------</div>' +
-    `<div>From: ${escapeHtml(src.from)}</div>` +
-    `<div>Date: ${escapeHtml(dateLabel)}</div>` +
-    `<div>Subject: ${escapeHtml(src.subject || '(no subject)')}</div>` +
-    `<div>To: ${escapeHtml(src.to)}</div>` +
-    '<div><br></div>' +
-    quoted +
-    '</div>'
+    SIGNATURE_LEAD + signatureHtml + '<div><br></div>' + buildForwardQuote([src])
   );
 }
 

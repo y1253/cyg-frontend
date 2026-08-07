@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronDown, ChevronUp, Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,11 +23,14 @@ import {
   textToHtml,
 } from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { useDraggable } from '@/hooks/useDraggable';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useSendEmail } from '@/hooks/useSendEmail';
 import { useUserDirectory } from '@/hooks/useUserDirectory';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
-import type { Draft } from '@/context/ComposerContext';
+import { slotRight } from './composer-layout';
+import { cn } from '@/lib/utils';
+import type { ComposerActions, Draft } from '@/context/ComposerContext';
 
 // Outbound email: matches FilesInterceptor('attachments', MAX_ATTACHMENTS) in
 // gmail.controller.ts / microsoft.controller.ts. The per-file byte cap lives in
@@ -49,70 +52,114 @@ interface BodyProps {
 }
 
 /**
- * The Gmail-style compose window docked at the bottom-right.
+ * One Gmail-style compose window, parked at the bottom-right until it is dragged.
  *
  * Deliberately NOT a `<Dialog>`: `DialogContent` hard-wires a blurred, click-to-close
  * backdrop that traps focus, which is exactly what made composing block the rest of
  * the app. Nothing here closes on Escape or an outside click — only Cancel, the ×,
  * or a successful send.
+ *
+ * `hidden` means "the user is on another page": the window is dropped from layout but
+ * never unmounted, so its text, attachments and in-flight send are all still there
+ * when they come back.
  */
 export function DockedComposer({
   draft,
-  minimized,
-  onMinimize,
-  onClose,
-  onSendingChange,
-  attention,
+  hidden,
+  slot,
+  zIndex,
+  actions,
 }: {
   draft: Draft;
-  minimized: boolean;
-  onMinimize: (on: boolean) => void;
-  onClose: () => void;
-  onSendingChange: (sending: boolean) => void;
-  /** Bumped when an already-open composer is re-requested; flashes the window. */
-  attention: number;
+  /** Off its own page — `display:none`, still mounted. */
+  hidden: boolean;
+  /** Position in the row of parked windows; ignored once `draft.pos` is set. */
+  slot: number;
+  zIndex: number;
+  actions: ComposerActions;
 }) {
+  const { close, setMinimized, setPos, setSending, raise, notifyInternalSent } = actions;
+  const { id, minimized } = draft;
   const [dirty, setDirty] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Flash by touching the DOM rather than through state: a re-render here is both
-  // unnecessary and risky, since the composer body must never be re-created.
-  useEffect(() => {
-    if (attention === 0) return;
-    const el = rootRef.current;
-    if (!el) return;
-    const ring = ['ring-2', 'ring-teal-400'];
-    el.classList.add(...ring);
-    const t = setTimeout(() => el.classList.remove(...ring), 700);
-    return () => clearTimeout(t);
-  }, [attention]);
+  // Stable per draft. The bodies take these as effect dependencies, so an inline
+  // arrow would get a fresh identity on every provider render, re-run the effect,
+  // set state, and loop.
+  const handleClose = useCallback(() => close(id), [close, id]);
+  const handleMinimize = useCallback(
+    (on: boolean) => setMinimized(id, on),
+    [setMinimized, id],
+  );
+  const handleSendingChange = useCallback(
+    (on: boolean) => setSending(id, on),
+    [setSending, id],
+  );
+
+  // The confirm is portaled to <body> by base-ui, *outside* this window, so hiding
+  // the window would not hide the dialog: it is only rendered while visible. Drop the
+  // pending confirm on the way out too, or returning to the company reopens a modal
+  // the user has long since walked away from. Adjusted during render — the pattern
+  // React prescribes for "reset state when a prop changes".
+  const [wasHidden, setWasHidden] = useState(hidden);
+  if (hidden !== wasHidden) {
+    setWasHidden(hidden);
+    if (hidden && confirmOpen) setConfirmOpen(false);
+  }
+
+  // Both anchors are always spelled so an imperative write during a drag and a later
+  // React render touch the same four properties. The flash rides along as an
+  // animation whose *name* changes with `attention` — a repeat of the same name
+  // would not replay, and the className can't carry it because these classes are
+  // rewritten on every hide/show.
+  const style: CSSProperties = {
+    ...(draft.pos
+      ? { left: draft.pos.x, top: draft.pos.y, right: 'auto', bottom: 'auto' }
+      : { left: 'auto', top: 'auto', right: slotRight(slot), bottom: 0 }),
+    zIndex,
+    outline: '2px solid transparent',
+    animation: draft.attention
+      ? `${draft.attention % 2 ? 'composer-flash-a' : 'composer-flash-b'} 700ms ease-out`
+      : undefined,
+  };
+
+  const drag = useDraggable({
+    ref: rootRef,
+    style: {
+      left: style.left as number | 'auto',
+      top: style.top as number | 'auto',
+      right: style.right as number | 'auto',
+      bottom: style.bottom as number | 'auto',
+    },
+    minimized,
+    onCommit: (pos) => setPos(id, pos),
+  });
 
   // There is no draft autosave, so an accidental × is unrecoverable — unlike Gmail,
   // which is why an always-dismissable window needs the confirm.
   const requestClose = () => {
     if (dirty) setConfirmOpen(true);
-    else onClose();
+    else handleClose();
   };
 
   const body =
     draft.kind === 'email' ? (
       <EmailComposerBody
-        key={draft.companyId}
         companyId={draft.companyId}
         cloudLabel={draft.cloudLabel}
         signatureHtml={draft.signatureHtml}
         onDirtyChange={setDirty}
-        onSendingChange={onSendingChange}
-        onSent={onClose}
+        onSendingChange={handleSendingChange}
+        onSent={handleClose}
       />
     ) : (
       <InternalComposerBody
         onDirtyChange={setDirty}
-        onSendingChange={onSendingChange}
+        onSendingChange={handleSendingChange}
         onSent={() => {
-          draft.onSent?.();
-          onClose();
+          notifyInternalSent();
+          handleClose();
         }}
       />
     );
@@ -124,19 +171,34 @@ export function DockedComposer({
           The header rounds its own corners instead. */}
       <div
         ref={rootRef}
-        className="fixed bottom-0 right-0 z-40 flex w-full flex-col rounded-t-lg border bg-background shadow-2xl sm:right-6 sm:w-[30rem] sm:max-w-[calc(100vw-3rem)]"
+        style={style}
+        onPointerDownCapture={() => raise(id)}
+        className={cn(
+          'pointer-events-auto absolute flex flex-col rounded-t-lg border bg-background shadow-2xl',
+          'max-w-[calc(100vw-3rem)]',
+          minimized ? 'w-[17rem]' : 'w-[30rem]',
+          // Dropped from layout, never unmounted — this is what makes walking to
+          // another company and back give the draft back untouched.
+          hidden && 'hidden',
+        )}
       >
-        <div className="flex items-center gap-2 rounded-t-lg bg-slate-800 px-3 py-2 text-white">
+        <div
+          {...drag}
+          onDoubleClick={() => setPos(id, null)}
+          title="Drag to move · double-click to dock"
+          className="flex cursor-move touch-none select-none items-center gap-2 rounded-t-lg bg-slate-800 px-3 py-2 text-white"
+        >
           <button
             type="button"
-            onClick={() => onMinimize(!minimized)}
+            onClick={() => handleMinimize(!minimized)}
             className="min-w-0 flex-1 text-left"
             title={minimized ? 'Expand' : 'Minimize'}
           >
             <div className="truncate text-sm font-medium">New message</div>
             {draft.kind === 'email' && draft.fromAddress && (
-              // Which mailbox this sends from — it stays open while the user walks
-              // to another company, so the window must say who it is writing as.
+              // Which mailbox this sends from — several windows can be open at once
+              // and it stays open while the user walks to another company, so it must
+              // say who it is writing as.
               <div className="truncate text-[11px] text-slate-300">
                 from {draft.fromAddress}
               </div>
@@ -144,7 +206,7 @@ export function DockedComposer({
           </button>
           <button
             type="button"
-            onClick={() => onMinimize(!minimized)}
+            onClick={() => handleMinimize(!minimized)}
             aria-label={minimized ? 'Expand' : 'Minimize'}
             className="shrink-0 rounded p-1 hover:bg-white/10"
           >
@@ -173,31 +235,33 @@ export function DockedComposer({
         </div>
       </div>
 
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Discard this draft?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Your message hasn't been sent and won't be saved.
-          </p>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>
-              Keep writing
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => {
-                setConfirmOpen(false);
-                onClose();
-              }}
-            >
-              Discard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {!hidden && (
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Discard this draft?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Your message hasn't been sent and won't be saved.
+            </p>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>
+                Keep writing
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  handleClose();
+                }}
+              >
+                Discard
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
@@ -399,8 +463,9 @@ function InternalComposerBody({
 
   const bodyText = htmlToText(body);
 
-  // No reset-on-open effect is needed the way the old dialog had one: this mounts
-  // fresh every time the composer opens and unmounts when it closes.
+  // No reset-on-open effect is needed the way the old dialog had one: every open
+  // creates its own window, and this body is mounted from then until that window is
+  // closed or sent — navigating away only hides it.
   useEffect(() => {
     onDirtyChange(
       bodyText.trim().length > 0 ||

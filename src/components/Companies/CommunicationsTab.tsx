@@ -42,7 +42,8 @@ import { RecipientAutocomplete } from './RecipientAutocomplete';
 import {
   escapeHtml, formatEmailDate, prefixReSubject, prefixFwdSubject, senderInitial,
   dedupeById, htmlToText, SIGNATURE_LEAD, splitSignature, textToHtml,
-  openPrintWindow, buildForwardedBody, mergeAttachments, MAX_FILE_BYTES,
+  openPrintWindow, buildForwardedBody, buildForwardQuote, replaceForwardQuote,
+  mergeAttachments, MAX_FILE_BYTES,
 } from './message-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -108,7 +109,8 @@ const MAX_ATTACHMENTS = 10;
 // dumping them at the top of the inbox. Its own key — CompanyDetailPage's
 // `cmp-ui-<id>` writer rewrites that whole blob and would clobber extra fields.
 // Drafts/attachments are deliberately NOT persisted (a File can't be serialized);
-// those survive tab switches via keep-alive only.
+// those survive via keep-alive only — a tab switch here, and, for the docked compose
+// windows, navigating to another company and back (see ComposerContext).
 type CommUI = {
   selectedLabel?: string;
   selectedMsgId?: string | null;
@@ -425,10 +427,18 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [forwardSkipped, setForwardSkipped] = useState<string[]>([]);
   const [forwardSource, setForwardSource] = useState<EmailDetail | null>(null);
+  // Whether the forward carries just the opened message or the whole back-and-forth.
+  // 'thread' quotes every message in `threadEmails` and pulls attachments from all
+  // of them.
+  const [forwardScope, setForwardScope] = useState<'message' | 'thread'>('message');
   const forwardFileRef = useRef<HTMLInputElement>(null);
-  // Bumped on every forward open — an in-flight attachment fetch whose token no
-  // longer matches has been superseded (dialog closed or reopened elsewhere).
+  // Bumped on every forward open AND every scope switch — an in-flight attachment
+  // fetch whose token no longer matches has been superseded (dialog closed, reopened
+  // elsewhere, or the user changed how much of the conversation to send).
   const forwardReqRef = useRef(0);
+  // `name:size` keys of the files hydrated from the original messages. Everything
+  // else in `forwardFiles` was picked by hand and must survive a scope switch.
+  const forwardAutoKeysRef = useRef<Set<string>>(new Set());
   const [newEmailBanner, setNewEmailBanner] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   // The message this reply answers, captured when the form opened. Held rather
@@ -1668,31 +1678,60 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setForwardAttError(false);
     setForwardAttLoading(false);
     setForwardSource(null);
+    setForwardScope('message');
+    forwardAutoKeysRef.current = new Set();
     resetPolish();
   };
+
+  /** Dedupe key. Not `attachmentId`: the same physical file quoted down a thread
+   *  gets a different id in every message. `contentId` is stable for inline parts
+   *  (a signature logo), so prefer it when present. */
+  const attachKey = (att: EmailAttachment) =>
+    att.contentId
+      ? `cid:${att.contentId}`
+      : `${att.filename}:${att.size}:${att.mimeType}`;
 
   // Pull the original attachments back down through the authed attachment
   // endpoint (the JWT rides in the query string) and turn them into Files so
   // they re-upload with the forward. Inline images come along too — their
   // `cid:` <img> tags were stripped from the quoted body.
-  const hydrateForwardAttachments = async (detail: EmailDetail, reqId: number) => {
-    const all = detail.attachments ?? [];
-    if (all.length === 0) return;
+  //
+  // Takes the whole set of messages being forwarded, because each attachment has
+  // to be fetched with ITS OWN message id: Gmail scopes attachment ids to their
+  // message, and Graph's path is /me/messages/{messageId}/attachments/{id}.
+  const hydrateForwardAttachments = async (details: EmailDetail[], reqId: number) => {
+    const candidates: { message: EmailDetail; att: EmailAttachment }[] = [];
+    const seenKeys = new Set<string>();
+    // Real files before inline ones, so a signature logo repeated down the thread
+    // can't consume the 10-file cap ahead of an actual document.
+    for (const inlinePass of [false, true]) {
+      for (const message of details) {
+        for (const att of message.attachments ?? []) {
+          if (!!att.isInline !== inlinePass) continue;
+          const key = attachKey(att);
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          candidates.push({ message, att });
+        }
+      }
+    }
+    if (candidates.length === 0) return;
 
-    const tooBig = all.filter((a) => a.size > MAX_FORWARD_FILE_BYTES);
-    let keep = all.filter((a) => a.size <= MAX_FORWARD_FILE_BYTES);
+    const tooBig = candidates.filter((c) => c.att.size > MAX_FORWARD_FILE_BYTES);
+    let keep = candidates.filter((c) => c.att.size <= MAX_FORWARD_FILE_BYTES);
+    // Cap before fetching, so nothing is downloaded only to be thrown away.
     const overflow = keep.slice(MAX_ATTACHMENTS);
     keep = keep.slice(0, MAX_ATTACHMENTS);
-    const skipped = [...tooBig, ...overflow].map((a) => a.filename || 'attachment');
+    const skipped = [...tooBig, ...overflow].map((c) => c.att.filename || 'attachment');
     if (skipped.length) setForwardSkipped(skipped);
     if (keep.length === 0) return;
 
     setForwardAttLoading(true);
     try {
       const files = await Promise.all(
-        keep.map(async (att) => {
+        keep.map(async ({ message, att }) => {
           const res = await fetch(
-            emailAttachmentUrl(token ?? '', companyId, detail.id, att, 'attachment'),
+            emailAttachmentUrl(token ?? '', companyId, message.id, att, 'attachment'),
           );
           if (!res.ok) throw new Error('Failed to fetch attachment');
           const blob = await res.blob();
@@ -1700,14 +1739,23 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         }),
       );
       if (forwardReqRef.current !== reqId) return; // superseded
+      const nextKeys = new Set(files.map((f) => `${f.name}:${f.size}`));
       // Merge, don't replace: this lands asynchronously, and anything the user
       // attached manually while the originals were downloading would otherwise be
       // silently discarded. Originals first, then the user's picks, capped.
+      //
+      // Files hydrated for a PREVIOUS scope are dropped rather than kept — without
+      // the auto-key set they'd look like manual picks, so switching from the whole
+      // conversation back to one message would strand the other messages' files.
       setForwardFiles((prev) => {
-        const seen = new Set(files.map((f) => `${f.name}:${f.size}`));
-        const manual = prev.filter((f) => !seen.has(`${f.name}:${f.size}`));
+        const auto = forwardAutoKeysRef.current;
+        const manual = prev.filter((f) => {
+          const key = `${f.name}:${f.size}`;
+          return !nextKeys.has(key) && !auto.has(key);
+        });
         return [...files, ...manual].slice(0, MAX_ATTACHMENTS);
       });
+      forwardAutoKeysRef.current = nextKeys;
     } catch {
       if (forwardReqRef.current !== reqId) return;
       setForwardAttError(true);
@@ -1716,19 +1764,31 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     }
   };
 
+  // Outlook builds the quoted original server-side via Graph's createForward,
+  // which keeps the original's own formatting AND its inline `cid:` images — both
+  // of which sanitizeForwardHtml has to discard (it strips <style>, since that CSS
+  // would otherwise leak into this whole compose editor, and drops cid: images as
+  // unresolvable). Quoting here too would duplicate the message for the recipient.
+  //
+  // That only holds for a single-message forward. createForward can quote just the
+  // one message it is called on, so a whole-conversation forward is quoted here for
+  // BOTH providers and the server is told to skip the native quote.
+  const nativeQuote = provider === 'MICROSOFT';
+
+  /** The messages a forward carries, in conversation order. */
+  const forwardMessages = (scope: 'message' | 'thread', src: EmailDetail | null) =>
+    scope === 'thread' && threadEmails.length > 0
+      ? threadEmails
+      : src
+        ? [src]
+        : [];
+
   const handleOpenForward = (detail: EmailDetail) => {
     // Reply and forward share the same inline slot below the message.
     setReplyOpen(false);
     setReplyTarget(null);
     setReplyFiles([]); setAttachmentNotice(null);
     const reqId = ++forwardReqRef.current;
-    // Outlook builds the quoted original server-side via Graph's createForward,
-    // which keeps the original's own formatting AND its inline `cid:` images —
-    // both of which sanitizeForwardHtml has to discard (it strips <style>, since
-    // that CSS would otherwise leak into this whole compose editor, and drops
-    // cid: images as unresolvable). Quoting here too would duplicate the whole
-    // message for the recipient.
-    const nativeQuote = provider === 'MICROSOFT';
     setForwardForm({
       to: [],
       cc: [],
@@ -1743,26 +1803,89 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     setForwardSkipped([]);
     setForwardAttError(false);
     setForwardSource(detail);
+    // Always reopen on the single message — the per-message Forward button
+    // re-enters here, and inheriting the previous scope would silently change what
+    // gets sent.
+    setForwardScope('message');
+    forwardAutoKeysRef.current = new Set();
     setForwardOpen(true);
     resetPolish();
     // Non-blocking: the dialog is usable while attachments stream in. Skipped for
     // Outlook — createForward already carries the originals, so re-uploading them
     // would attach every file twice.
-    if (!nativeQuote) void hydrateForwardAttachments(detail, reqId);
+    if (!nativeQuote) void hydrateForwardAttachments([detail], reqId);
+  };
+
+  // Switch between forwarding the opened message and the whole conversation.
+  // Rebuilds only the quoted block: the caret space, the signature (which the user
+  // may have edited) and anything they've typed all sit above the marker and are
+  // preserved verbatim.
+  const handleForwardScopeChange = (scope: 'message' | 'thread') => {
+    if (scope === forwardScope) return;
+    const messages = forwardMessages(scope, forwardSource);
+    setForwardScope(scope);
+    setForwardForm((f) => ({
+      ...f,
+      body: replaceForwardQuote(
+        f.body,
+        // Outlook's single-message draft carries no quote at all — the server adds
+        // it — so switching back to 'message' there removes ours again.
+        scope === 'message' && nativeQuote ? '' : buildForwardQuote(messages),
+      ),
+    }));
+    // Supersede the previous scope's downloads before starting this scope's.
+    const reqId = ++forwardReqRef.current;
+    setForwardSkipped([]);
+    setForwardAttError(false);
+    if (scope === 'thread' || !nativeQuote) {
+      void hydrateForwardAttachments(messages, reqId);
+    } else {
+      // Back to Outlook's native forward: Graph re-attaches the originals itself.
+      setForwardFiles((prev) =>
+        prev.filter((f) => !forwardAutoKeysRef.current.has(`${f.name}:${f.size}`)),
+      );
+      forwardAutoKeysRef.current = new Set();
+    }
+  };
+
+  // Multer caps a single form field at 25 MB (OUTBOUND_MULTER_LIMITS). A quoted
+  // conversation can approach that, since every reply usually embeds the messages
+  // before it — so fall back to header-only stubs for the older messages rather
+  // than let the send fail at the far end.
+  const FORWARD_BODY_BUDGET = 20 * 1024 * 1024;
+
+  const forwardBodyForSend = (): string => {
+    if (forwardForm.body.length <= FORWARD_BODY_BUDGET) return forwardForm.body;
+    const messages = forwardMessages(forwardScope, forwardSource);
+    const newest = messages[messages.length - 1];
+    return replaceForwardQuote(
+      forwardForm.body,
+      buildForwardQuote(
+        messages.map((m) =>
+          m === newest ? m : { ...m, bodyHtml: null, bodyText: m.snippet },
+        ),
+      ),
+    );
   };
 
   const handleSendForward = () => {
     if (forwardForm.to.length === 0) return;
+    const bodyHtml = forwardBodyForSend();
     // No inReplyTo/threadId — a forward starts its own conversation.
     sendMutation.mutate(
       {
         to: forwardForm.to.join(', '),
         subject: forwardForm.subject,
-        body: htmlToText(forwardForm.body),
-        bodyHtml: forwardForm.body,
+        body: htmlToText(bodyHtml),
+        bodyHtml,
         cc: forwardForm.cc.length ? forwardForm.cc.join(', ') : undefined,
         // Record the original message id so the inbox shows a "forwarded" marker.
+        // Kept to the opened message even for a whole-conversation forward, so the
+        // banner appears once, on the message the user acted from.
         forwardedFrom: forwardSource?.id,
+        // Tells the server we quoted the conversation ourselves — Outlook must not
+        // add Graph's own quote on top.
+        forwardScope,
         files: forwardFiles,
       },
       { onSuccess: closeForward },
@@ -1806,12 +1929,16 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     openPrintWindow(name, buildChatPrintHtml(name, threadMessages));
   };
 
-  // A forward polishes against the email being forwarded. Kept non-empty so it
+  // A forward polishes against whatever is being forwarded — the one email, or the
+  // whole conversation when that is what's going out, so the AI isn't reasoning
+  // about a single reply while the user sends twelve. Kept non-empty so it
   // satisfies the polish endpoint's required `context` field.
-  const forwardPolishContext = (): string =>
-    forwardSource
-      ? buildEmailContext(forwardSource)
+  const forwardPolishContext = (): string => {
+    const messages = forwardMessages(forwardScope, forwardSource);
+    return messages.length > 0
+      ? messages.map(buildEmailContext).join('\n\n---\n\n')
       : '(Forwarded email — no prior conversation.)';
+  };
 
   // Where a polished draft is written back. Reply and forward both use the
   // email polish tone; chat uses the chat tone. (Compose has its own per-instance
@@ -2633,14 +2760,44 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     <Forward size={13} /> Forward
                   </p>
-                  {/* The form sits below the dimmed later messages, so name the
-                      message being forwarded rather than leaving it implied. */}
+                  {/* The form sits below the dimmed later messages, so name what is
+                      being forwarded rather than leaving it implied. */}
                   {forwardSource && (
                     <p className="text-xs text-muted-foreground">
-                      Forwarding {forwardSource.from} · {formatEmailDate(forwardSource.date)}
+                      {forwardScope === 'thread'
+                        ? `Forwarding all ${threadEmails.length} messages · ${formatEmailDate(threadEmails[0].date)} – ${formatEmailDate(threadEmails[threadEmails.length - 1].date)}`
+                        : `Forwarding ${forwardSource.from} · ${formatEmailDate(forwardSource.date)}`}
                     </p>
                   )}
                 </div>
+                {/* How much of the back-and-forth goes with it. Hidden when there is
+                    nothing else in the conversation to add. */}
+                {threadEmails.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-4 rounded-md border bg-background px-3 py-2">
+                    {([
+                      { value: 'message', label: 'This message' },
+                      { value: 'thread', label: `Whole conversation (${threadEmails.length} messages)` },
+                    ] as const).map((opt) => (
+                      <label
+                        key={opt.value}
+                        className="flex cursor-pointer items-center gap-1.5 text-xs"
+                      >
+                        {/* A real focusable radio on purpose: RichTextEditor only
+                            writes the `html` prop into the DOM while it is NOT
+                            focused, so a control that kept focus in the editor
+                            would swap the quote in state and never repaint it. */}
+                        <input
+                          type="radio"
+                          name="forward-scope"
+                          className="accent-teal-600"
+                          checked={forwardScope === opt.value}
+                          onChange={() => handleForwardScopeChange(opt.value)}
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs">To</Label>
                   <RecipientAutocomplete
@@ -2713,6 +2870,12 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   {forwardSkipped.length > 0 && (
                     <p className="text-xs text-amber-600">
                       Not forwarded (too large or over the {MAX_ATTACHMENTS}-file limit): {forwardSkipped.join(', ')}
+                    </p>
+                  )}
+                  {forwardForm.body.length > FORWARD_BODY_BUDGET && (
+                    <p className="text-xs text-amber-600">
+                      This conversation is too long to quote in full — the older
+                      messages will be sent as headers and a one-line preview.
                     </p>
                   )}
                   {renderAttachedFiles(forwardFiles, setForwardFiles)}
