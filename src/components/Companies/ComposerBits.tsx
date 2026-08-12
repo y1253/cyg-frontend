@@ -10,20 +10,26 @@ import { attachmentsToLink, formatBytes } from './message-utils';
  * router, so they had to become real components rather than be duplicated.
  */
 
+const NO_LINKED_FILES: Set<File> = new Set();
+
 export function AttachmentChips({
   files,
   setFiles,
-  /** "Drive" or "OneDrive" — which service oversized files get hosted on. */
+  /**
+   * "Drive" or "OneDrive" — which service oversized files get hosted on. `null`
+   * for internal messages, which store every attachment on our own disk however
+   * big it is, so no file is ever off-loaded and the badge would be a lie.
+   */
   cloudLabel,
 }: {
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  cloudLabel: string;
+  cloudLabel: string | null;
 }) {
   if (files.length === 0) return null;
   // Files the server will host on Drive/OneDrive instead of attaching are flagged
   // before sending — `attachmentsToLink` mirrors the server's split.
-  const linked = attachmentsToLink(files);
+  const linked = cloudLabel ? attachmentsToLink(files) : NO_LINKED_FILES;
   const total = files.reduce((sum, f) => sum + f.size, 0);
   return (
     <div className="flex flex-col gap-1.5">

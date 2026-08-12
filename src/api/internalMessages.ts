@@ -1,4 +1,4 @@
-import { fetchWithAuth } from './client';
+import { fetchWithAuth, handleUnauthorized } from './client';
 
 // Internal staff-to-staff messaging. Shapes deliberately mirror the Gmail
 // EmailSummary/EmailDetail/EmailListResult types in ./gmail so the message-row and
@@ -140,6 +140,8 @@ export async function sendInternalMessage(
     parentId?: number;
     isForward?: boolean;
     files?: File[];
+    /** Fraction 0–1 of the attachment bytes uploaded so far. */
+    onProgress?: (fraction: number) => void;
   },
 ): Promise<InternalMessageDetail> {
   // multipart/form-data so attachments ride along. No explicit Content-Type —
@@ -155,9 +157,55 @@ export async function sendInternalMessage(
   if (data.isForward) form.set('isForward', '1');
   data.files?.forEach((f) => form.append('attachments', f));
 
-  return json(
-    await fetchWithAuth(token, BASE, { method: 'POST', body: form }),
-  );
+  // XHR rather than fetch: attachments run to 250 MB each, and fetch still has no
+  // upload-progress event. The auth header and the error shape match
+  // `fetchWithAuth` + `json()` exactly, so callers can't tell the difference.
+  return new Promise<InternalMessageDetail>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', BASE);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    if (data.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          data.onProgress?.(e.loaded / e.total);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as InternalMessageDetail);
+        } catch {
+          reject(new Error('The server sent back an unreadable response'));
+        }
+        return;
+      }
+      // `fetchWithAuth` does this for every other call; a token that lapsed
+      // mid-upload has to log out the same way rather than read as a send failure.
+      if (xhr.status === 401) handleUnauthorized();
+      let message = xhr.responseText;
+      try {
+        const body = JSON.parse(xhr.responseText) as {
+          message?: string | string[];
+        };
+        message = Array.isArray(body.message)
+          ? body.message.join(', ')
+          : (body.message ?? xhr.responseText);
+      } catch {
+        // non-JSON error body (e.g. a proxy's 413 page) — surface the raw text
+      }
+      if (xhr.status === 413) {
+        message = 'The attachments were too large for the server to accept.';
+      }
+      reject(new Error(message || `Request failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Network error while sending'));
+    xhr.onabort = () => reject(new Error('Sending was cancelled'));
+
+    xhr.send(form);
+  });
 }
 
 export type InternalStateAction =

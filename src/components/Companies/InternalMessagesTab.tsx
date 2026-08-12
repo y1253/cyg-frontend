@@ -21,8 +21,11 @@ import { InternalMessageRow } from './InternalMessageRow';
 import { useComposer, useComposerSignals } from '@/context/ComposerContext';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { EmailBodyFrame } from './EmailBodyFrame';
+import { Linkified } from './Linkified';
 import { AttachmentPreview } from './AttachmentPreview';
+import { UploadProgressBar } from './ComposerBits';
 import {
+  MAX_FILE_BYTES,
   buildForwardedBody, dedupeById, escapeHtml, formatBytes, formatEmailDate,
   htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
   prefixReSubject, senderInitial, splitSignature, textToHtml,
@@ -66,9 +69,20 @@ const FOLDERS: { id: InternalFolder; label: string; icon: typeof Inbox }[] = [
 const UI_KEY = 'internal-msgs-ui';
 const POLISH_CONTEXT = 'An internal message between colleagues at a bookkeeping firm.';
 
-/** Mirrors the server's multer limits (internal-messages/uploads.ts). */
+/**
+ * Mirrors the server's multer limits (internal-messages/uploads.ts). The per-file
+ * byte cap is `MAX_FILE_BYTES` from message-utils — the same 250 MB email uses.
+ */
 const MAX_ATTACHMENTS = 10;
-const MAX_FORWARD_FILE_BYTES = 15 * 1024 * 1024;
+
+/**
+ * Ceiling for RE-ATTACHING an original on forward, which is a different problem
+ * from the send cap: the browser has to pull the file all the way down and push it
+ * all the way back up. Worth doing for a document, not for a 200 MB video — those
+ * are named in the "not forwarded" notice so the user can link or re-send them
+ * deliberately.
+ */
+const MAX_FORWARD_HYDRATE_BYTES = 50 * 1024 * 1024;
 
 /** Forward rows use a full timestamp — "2:14 PM" alone reads as today. */
 function formatForwardTime(iso: string): string {
@@ -131,7 +145,7 @@ function InternalForwardPreview({ messageId }: { messageId: number }) {
           <EmailBodyFrame html={fwd.bodyHtml} />
         ) : (
           <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-            {fwd.bodyText ?? '(empty)'}
+            <Linkified text={fwd.bodyText ?? '(empty)'} />
           </pre>
         )}
       </div>
@@ -550,7 +564,7 @@ export function InternalMessagesTab({ active }: Props) {
     const skipped: string[] = [];
     const wanted: typeof source.attachments = [];
     for (const att of source.attachments) {
-      if (att.size > MAX_FORWARD_FILE_BYTES || wanted.length >= MAX_ATTACHMENTS) {
+      if (att.size > MAX_FORWARD_HYDRATE_BYTES || wanted.length >= MAX_ATTACHMENTS) {
         skipped.push(att.filename);
       } else {
         wanted.push(att);
@@ -597,6 +611,7 @@ export function InternalMessagesTab({ active }: Props) {
       current,
       Array.from(incoming),
       MAX_ATTACHMENTS,
+      MAX_FILE_BYTES,
     );
     set(files);
     setAttachmentNotice(notice);
@@ -693,6 +708,7 @@ export function InternalMessagesTab({ active }: Props) {
       {attachmentNotice && (
         <p className="text-xs text-amber-600">{attachmentNotice}</p>
       )}
+      <UploadProgressBar progress={sendMutation.uploadProgress} />
       {files.map((f, i) => (
         <div
           key={`${f.name}:${f.size}:${i}`}
@@ -873,7 +889,7 @@ export function InternalMessagesTab({ active }: Props) {
                 <EmailBodyFrame html={m.bodyHtml} />
               ) : (
                 <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-                  {m.bodyText ?? '(empty)'}
+                  <Linkified text={m.bodyText ?? '(empty)'} />
                 </pre>
               )}
             </div>
@@ -1107,7 +1123,8 @@ export function InternalMessagesTab({ active }: Props) {
               )}
               {forwardSkipped.length > 0 && (
                 <p className="text-xs text-amber-600">
-                  Not forwarded (too large or over the {MAX_ATTACHMENTS}-file limit):{' '}
+                  Not re-attached (too large to forward, or over the{' '}
+                  {MAX_ATTACHMENTS}-file limit):{' '}
                   {forwardSkipped.join(', ')}
                 </p>
               )}

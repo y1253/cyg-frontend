@@ -222,8 +222,10 @@ export function buildForwardedBody(
 }
 
 /**
- * Per-file ceiling, matching MAX_OUTBOUND_FILE_BYTES on the server. Anything
- * bigger is rejected in the browser rather than uploaded and 413'd.
+ * Per-file ceiling for every composer, email and internal alike. Matches
+ * MAX_ATTACHMENT_BYTES on the server (which outbound email re-exports as
+ * MAX_OUTBOUND_FILE_BYTES). Anything bigger is rejected in the browser rather
+ * than uploaded and 400'd.
  */
 export const MAX_FILE_BYTES = 250 * 1024 * 1024;
 

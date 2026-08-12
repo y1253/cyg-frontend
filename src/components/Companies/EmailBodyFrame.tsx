@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { findLinks } from './linkify';
 
 // Kill the frame's own vertical scrollbar — the frame is sized to fit its content,
 // so the page scrolls instead. Horizontal scroll stays available for wide emails.
@@ -6,6 +7,80 @@ const FRAME_RESET = '<style>html{overflow-y:hidden}body{margin:0;padding:8px}</s
 
 const INITIAL_HEIGHT = 384;
 const HEIGHT_BUFFER = 24;
+
+// Text inside these never becomes a link: <a> is already one (and re-linking it would
+// nest anchors), the rest isn't prose. <pre>/<code> are NOT here — a URL in a
+// monospace block is still a URL, and Gmail links those too.
+const NO_LINK_INSIDE = new Set(['A', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE']);
+
+/**
+ * Make links work inside a rendered message body.
+ *
+ * Two jobs, both against the frame's LIVE document rather than the HTML string:
+ *
+ * 1. Point every existing anchor at a new tab. Emails get this from the `<base>` tag
+ *    injected upstream, but internal messages don't — a link a colleague added with
+ *    the editor's Link button would otherwise load inside this little frame.
+ * 2. Linkify bare URLs sitting in text nodes.
+ *
+ * Doing it here rather than by transforming the HTML string is deliberate: a
+ * DOMParser round-trip that returns `body.innerHTML` (the way `sanitizeForwardHtml`
+ * does) drops `<style>`, which would strip the styling out of every HTML email we
+ * display, and would also swallow the injected `<base>`.
+ *
+ * Idempotent — the second pass finds nothing because it skips text inside anchors.
+ */
+function enhanceLinks(doc: Document): void {
+  if (!doc.body) return;
+
+  doc.querySelectorAll('a').forEach((anchor) => {
+    anchor.setAttribute('target', '_blank');
+    anchor.setAttribute('rel', 'noopener noreferrer');
+  });
+
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+      for (let el = node.parentElement; el; el = el.parentElement) {
+        if (NO_LINK_INSIDE.has(el.tagName)) return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  // Collect before mutating — replacing nodes mid-walk invalidates the walker.
+  const targets: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    targets.push(node as Text);
+  }
+
+  for (const node of targets) {
+    const text = node.nodeValue ?? '';
+    const links = findLinks(text);
+    if (links.length === 0) continue;
+
+    const fragment = doc.createDocumentFragment();
+    let cursor = 0;
+    for (const link of links) {
+      if (link.start > cursor) {
+        fragment.append(doc.createTextNode(text.slice(cursor, link.start)));
+      }
+      const anchor = doc.createElement('a');
+      // `href` is always one we built (https/http/mailto), never copied out of the
+      // text, so no javascript:/data: URL can reach this.
+      anchor.href = link.href;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.textContent = link.text;
+      fragment.append(anchor);
+      cursor = link.end;
+    }
+    if (cursor < text.length) {
+      fragment.append(doc.createTextNode(text.slice(cursor)));
+    }
+    node.replaceWith(fragment);
+  }
+}
 
 // Renders an email body in a sandboxed iframe whose height tracks its content, so a
 // long email lays out at full height instead of scrolling inside a fixed-size box.
@@ -39,6 +114,9 @@ export function EmailBodyFrame({ html, title = 'Email body' }: { html: string; t
     const attach = () => {
       const doc = frame.contentDocument;
       if (!doc?.documentElement) return;
+      // Before measuring: turning a long URL into an anchor can change how the text
+      // wraps, and therefore the height we're about to report.
+      enhanceLinks(doc);
       measure();
       observer?.disconnect();
       observer = new ResizeObserver(measure);

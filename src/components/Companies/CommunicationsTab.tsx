@@ -36,6 +36,8 @@ import { AttachmentPreview, AttachmentChip } from './AttachmentPreview';
 import { useAttachmentViewer } from './AttachmentViewerContext';
 import { AttachmentChips, UploadProgressBar } from './ComposerBits';
 import { EmailBodyFrame } from './EmailBodyFrame';
+import { Linkified } from './Linkified';
+import { linkifyEscapedText } from './linkify';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
@@ -204,7 +206,7 @@ function buildEmailPrintHtml(
 ): string {
   const bodyHtml = email.bodyHtml
     ? injectBaseTarget(rewriteInlineImages(email.bodyHtml, email.attachments ?? [], urlFor))
-    : `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(
+    : `<pre style="white-space:pre-wrap;font-family:inherit;">${linkifyEscapedText(
         email.bodyText ?? '(empty)',
       )}</pre>`;
   const strip = (email.attachments ?? []).filter((a) => !a.isInline);
@@ -241,7 +243,7 @@ function buildChatPrintHtml(spaceName: string, messages: ChatMessage[]): string 
         .join('');
       return `<div class="chat-msg">
         <div class="who">${escapeHtml(m.isOwn ? 'You' : m.sender)}<span class="when">${escapeHtml(when)}</span></div>
-        ${m.text ? `<div class="text">${escapeHtml(m.text)}</div>` : ''}
+        ${m.text ? `<div class="text">${linkifyEscapedText(m.text)}</div>` : ''}
         ${atts}
       </div>`;
     })
@@ -368,7 +370,7 @@ function ForwardPreview({
           />
         ) : (
           <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-            {fwd.bodyText ?? '(empty)'}
+            <Linkified text={fwd.bodyText ?? '(empty)'} />
           </pre>
         )}
       </div>
@@ -856,7 +858,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 />
               ) : (
                 <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-                  {m.bodyText ?? '(empty)'}
+                  <Linkified text={m.bodyText ?? '(empty)'} />
                 </pre>
               )}
             </div>
@@ -2249,7 +2251,22 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   )}
                 </div>
               )}
-              {m.text || (m.attachments && m.attachments.length > 0 ? '' : '(empty message)')}
+              {m.text ? (
+                // Own bubbles are teal with white text, where the default blue link
+                // is unreadable — hand those their own anchor styling.
+                <Linkified
+                  text={m.text}
+                  className={
+                    m.isOwn
+                      ? 'underline decoration-white/70 hover:decoration-white'
+                      : 'text-blue-600 underline hover:text-blue-700'
+                  }
+                />
+              ) : m.attachments && m.attachments.length > 0 ? (
+                ''
+              ) : (
+                '(empty message)'
+              )}
               {m.attachments && m.attachments.length > 0 && (
                 <div className={`flex flex-col gap-2 ${m.text ? 'mt-2' : ''}`}>
                   {m.attachments.map((att) =>

@@ -16,6 +16,7 @@ import { UserAutocomplete } from './UserAutocomplete';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { AttachmentChips, UploadProgressBar } from './ComposerBits';
 import {
+  MAX_FILE_BYTES,
   SIGNATURE_LEAD,
   htmlToText,
   mergeAttachments,
@@ -32,13 +33,11 @@ import { slotRight } from './composer-layout';
 import { cn } from '@/lib/utils';
 import type { ComposerActions, Draft } from '@/context/ComposerContext';
 
-// Outbound email: matches FilesInterceptor('attachments', MAX_ATTACHMENTS) in
-// gmail.controller.ts / microsoft.controller.ts. The per-file byte cap lives in
-// message-utils as MAX_FILE_BYTES.
+// Matches FilesInterceptor('attachments', MAX_ATTACHMENTS) in gmail.controller.ts,
+// microsoft.controller.ts and internal-messages.controller.ts — all three agree.
+// The per-file byte cap lives in message-utils as MAX_FILE_BYTES and is likewise
+// the same on both paths.
 const MAX_ATTACHMENTS = 10;
-// Internal attachments live on our own disk, so they keep the smaller cap
-// (internal-messages/uploads.ts).
-const MAX_INTERNAL_FILE_BYTES = 15 * 1024 * 1024;
 
 const INTERNAL_POLISH_CONTEXT =
   'An internal message between colleagues at a bookkeeping firm.';
@@ -555,7 +554,7 @@ function InternalComposerBody({
               files,
               Array.from(e.target.files ?? []),
               MAX_ATTACHMENTS,
-              MAX_INTERNAL_FILE_BYTES,
+              MAX_FILE_BYTES,
             );
             setFiles(merged.files);
             setAttachmentNotice(merged.notice);
@@ -565,9 +564,10 @@ function InternalComposerBody({
         {attachmentNotice && (
           <p className="text-xs text-amber-600">{attachmentNotice}</p>
         )}
-        {/* Internal attachments are stored by us, never off-loaded to Drive — the
-            cloudLabel is unreachable here because nothing exceeds the inline budget. */}
-        <AttachmentChips files={files} setFiles={setFiles} cloudLabel="Drive" />
+        {/* Internal attachments are stored by us at any size, never off-loaded to
+            Drive, so `null` suppresses the "sent as … link" badge. */}
+        <AttachmentChips files={files} setFiles={setFiles} cloudLabel={null} />
+        <UploadProgressBar progress={sendMutation.uploadProgress} />
         <PolishPanel
           polish={polish}
           context={INTERNAL_POLISH_CONTEXT}
