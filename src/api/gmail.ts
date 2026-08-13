@@ -88,6 +88,10 @@ export interface EmailAttachment {
 
 export interface EmailDetail extends EmailSummary {
   to: string;
+  // Comma-joined `Name <email>` list, same shape as `to`; empty when nobody was
+  // copied. Optional so a payload cached before the server started sending it
+  // still renders. No `bcc`: neither provider returns one on received mail.
+  cc?: string;
   threadId: string;
   messageId: string;
   // RFC 5322 References chain. Sent back with a reply so the recipient's client

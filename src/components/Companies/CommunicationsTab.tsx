@@ -45,8 +45,9 @@ import {
   escapeHtml, formatEmailDate, prefixReSubject, prefixFwdSubject, senderInitial,
   dedupeById, htmlToText, SIGNATURE_LEAD, splitSignature, textToHtml,
   openPrintWindow, buildForwardedBody, buildForwardQuote, replaceForwardQuote,
-  mergeAttachments, MAX_FILE_BYTES,
+  mergeAttachments, MAX_FILE_BYTES, parseAddressList, displayName, extractEmail,
 } from './message-utils';
+import { RecipientDetails } from './RecipientDetails';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -192,11 +193,6 @@ function formatForwardTime(iso: string): string {
   return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function extractEmail(from: string): string {
-  const match = /<(.+?)>/.exec(from);
-  return match ? match[1] : from.trim();
-}
-
 // Build the printable HTML for a single email (header + rendered body + list of
 // non-inline attachments). Reuses the same inline-image rewrite + base-target
 // transforms as the on-screen iframe so embedded images resolve.
@@ -220,6 +216,7 @@ function buildEmailPrintHtml(
     <div class="print-meta">
       <div><span class="label">From:</span> ${escapeHtml(email.from)}</div>
       <div><span class="label">To:</span> ${escapeHtml(email.to)}</div>
+      ${email.cc ? `<div><span class="label">Cc:</span> ${escapeHtml(email.cc)}</div>` : ''}
       <div><span class="label">Date:</span> ${escapeHtml(formatEmailDate(email.date))}</div>
     </div>
   </div>
@@ -340,6 +337,7 @@ function ForwardPreview({
       <div className="text-xs text-muted-foreground space-y-0.5">
         <div><span className="font-medium">From:</span> {fwd.from}</div>
         <div><span className="font-medium">To:</span> {fwd.to}</div>
+        {fwd.cc && <div><span className="font-medium">Cc:</span> {fwd.cc}</div>}
         <div><span className="font-medium">Date:</span> {formatEmailDate(fwd.date)}</div>
       </div>
       {strip.length > 0 && (
@@ -719,7 +717,8 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         }`}
       >
         {/* The arrow is a sibling of the header, not a child — the header is itself
-            a <button> and nesting one inside it is invalid HTML. */}
+            a <button> and nesting one inside it is invalid HTML. Same reason the
+            recipient disclosure sits in its own row below rather than inline. */}
         <div className="flex items-start">
           <button
             type="button"
@@ -734,9 +733,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                 <span className="text-sm font-medium truncate">{m.from}</span>
                 <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{formatEmailDate(m.date)}</span>
               </div>
-              {expanded ? (
-                <div className="text-xs text-muted-foreground truncate">To: {m.to}</div>
-              ) : (
+              {!expanded && (
                 <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
               )}
             </div>
@@ -765,6 +762,19 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
             </div>
           )}
         </div>
+        {expanded && (
+          // pl-14 lines the details up under the sender name: px-3 (12) + avatar
+          // w-8 (32) + gap-3 (12) = 56px.
+          <div className="pl-14 pr-3 pb-2 -mt-1.5">
+            <RecipientDetails
+              from={parseAddressList(m.from)[0] ?? { name: m.from, email: m.from }}
+              to={parseAddressList(m.to)}
+              cc={parseAddressList(m.cc)}
+              date={m.date}
+              selfEmail={accountAddress}
+            />
+          </div>
+        )}
 
         {expanded && (
           <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
@@ -899,6 +909,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const anchorRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const detailScrollRef = useRef<HTMLDivElement>(null);
+  // Root of the inbox list view. It is not itself a scroller (the list scrolls the
+  // page container in CompanyDetailPage) — it exists to reach that container, and
+  // because it unmounts while a detail view is open it doubles as a "list is
+  // showing" guard. See the list scroll save/restore below.
+  const listRootRef = useRef<HTMLDivElement>(null);
   // Inline reply forms render below a (potentially tall) message/thread; scroll
   // them into view when opened so the user doesn't have to scroll down to reply.
   const replyFormRef = useRef<HTMLDivElement>(null);
@@ -944,6 +959,36 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     }
     el.scrollTop = detailScrollTop.current;
   }, [active, selectedMsgId]);
+
+  // Scroll offset of the INBOX LIST, so returning from a message lands on the row
+  // it was opened from instead of at the top. The list scrolls the page container
+  // (CompanyDetailPage's `contentRef`), which survives the switch to a detail view —
+  // but the detail view is `h-full`, so the container has nothing to overflow and the
+  // browser clamps its scrollTop to 0. The offset is therefore already lost by the
+  // time Back runs, and has to be captured in the open handlers instead.
+  const listScrollTop = useRef(0);
+  const restoreListScroll = useRef(false); // armed on open, consumed on the way back
+
+  // Class-name coupling, same as the infinite-scroll observer root below: the tab
+  // renders inside a `display: contents` wrapper, so `closest` walks up to the page's
+  // scroll container. It resolves to null while a detail view is open (the list root
+  // is unmounted) — which is the guard that stops in-thread navigation from
+  // overwriting the saved offset with a clamped 0.
+  const saveListScroll = () => {
+    const el = listRootRef.current?.closest('.overflow-y-auto') as HTMLElement | null | undefined;
+    if (!el) return;
+    listScrollTop.current = el.scrollTop;
+    restoreListScroll.current = true;
+  };
+
+  useLayoutEffect(() => {
+    if (!active || selectedMsgId || selectedSpaceId) return;
+    if (!restoreListScroll.current) return; // only after a message was opened, not on every re-render
+    const el = listRootRef.current?.closest('.overflow-y-auto') as HTMLElement | null | undefined;
+    if (!el) return;
+    el.scrollTop = listScrollTop.current;
+    restoreListScroll.current = false;
+  }, [active, selectedMsgId, selectedSpaceId]);
 
   // On open (or when the anchor / thread changes), position the anchor message
   // at the BOTTOM of the visible area so the view reads as if the conversation
@@ -1510,6 +1555,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   };
 
   const handleOpenEmail = (msg: EmailSummary) => {
+    saveListScroll();
     if (!msg.isRead) markReadMutation.mutate(msg.id);
     setSelectedMsgId(msg.id);
     setSelectedThreadId(msg.threadId || null);
@@ -1522,6 +1568,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   };
 
   const handleOpenChat = (msg: ChatInboxMessage) => {
+    saveListScroll();
     if (!msg.isRead) markChatReadMutation.mutate(msg.id); // mark THIS message read, not the whole space
     setSelectedSpaceId(msg.spaceId);
     setOpenedChatMsgId(msg.id);
@@ -2934,7 +2981,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   const isLoading = isInboxLike ? (emailsLoading || chatsLoading) : emailsLoading;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={listRootRef} className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -3305,7 +3352,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className={['text-sm truncate', !item.data.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
-                        {item.data.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || item.data.from}
+                        {displayName(item.data.from)}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {renderCompleteToggle('email', item.data.id, !!item.data.isCompleted)}
@@ -3445,7 +3492,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
                   <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className={['text-sm truncate', !msg.isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'].join(' ')}>
-                        {msg.from.replace(/<[^>]+>/, '').trim().replace(/"/g, '') || msg.from}
+                        {displayName(msg.from)}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {renderCompleteToggle('email', msg.id, !!msg.isCompleted)}

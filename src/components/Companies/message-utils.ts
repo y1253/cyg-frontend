@@ -36,10 +36,84 @@ export function prefixFwdSubject(subject: string): string {
   return /^fwd?:/i.test(subject.trim()) ? subject : `Fwd: ${subject}`;
 }
 
+/** One parsed recipient. `name` falls back to the address when there's no display name. */
+export interface EmailAddr {
+  name: string;
+  email: string;
+}
+
+/** The address half of a header token: `Name <a@b.com>` → `a@b.com`. */
+export function extractEmail(addr: string): string {
+  const match = /<(.+?)>/.exec(addr);
+  return (match ? match[1] : addr).trim();
+}
+
+/** The human half: `"Doe, Jane" <j@x.com>` → `Doe, Jane`. Falls back to the address. */
+export function displayName(addr: string): string {
+  const name = addr.replace(/<[^>]+>/, '').replace(/"/g, '').trim();
+  return name || extractEmail(addr);
+}
+
 /** Avatar letter. Accepts a raw From header ("Name <a@b.com>") or a bare name. */
 export function senderInitial(from: string): string {
-  const name = from.replace(/<[^>]+>/, '').trim().replace(/"/g, '');
-  return (name[0] ?? '?').toUpperCase();
+  return (displayName(from)[0] ?? '?').toUpperCase();
+}
+
+/**
+ * Split a `To:`/`Cc:` header into recipients. Commas inside quotes or angle
+ * brackets are NOT separators — a plain `.split(',')` turns the single recipient
+ * `"Doe, Jane" <j@x.com>` into two bogus ones, which is what every ad-hoc split in
+ * this codebase used to do.
+ */
+export function parseAddressList(raw: string | undefined | null): EmailAddr[] {
+  const out: EmailAddr[] = [];
+  let token = '';
+  let inQuotes = false;
+  let inAngle = false;
+  const flush = () => {
+    const t = token.trim();
+    token = '';
+    if (t) out.push({ name: displayName(t), email: extractEmail(t) });
+  };
+  for (const ch of raw ?? '') {
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (ch === '<' && !inQuotes) inAngle = true;
+    else if (ch === '>' && !inQuotes) inAngle = false;
+    else if (ch === ',' && !inQuotes && !inAngle) {
+      flush();
+      continue;
+    }
+    token += ch;
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Gmail's collapsed recipient line: `to me, David, +2`. Cc recipients are counted
+ * alongside To — the whole point is that being copied is discoverable without
+ * opening the details. "me" sorts first, as Gmail does.
+ */
+export function recipientSummary(
+  to: EmailAddr[],
+  cc: EmailAddr[],
+  selfEmail?: string,
+  maxNames = 2,
+): string {
+  const all = [...to, ...cc];
+  if (all.length === 0) return 'to —';
+  const self = selfEmail?.trim().toLowerCase();
+  const isSelf = (a: EmailAddr) => !!self && a.email.toLowerCase() === self;
+  const ordered = [
+    ...all.filter(isSelf).slice(0, 1), // self can appear in both To and Cc — name it once
+    ...all.filter((a) => !isSelf(a)),
+  ];
+  const labels = ordered.map((a) =>
+    isSelf(a) ? 'me' : a.name.includes('@') ? a.name : a.name.split(/\s+/)[0],
+  );
+  const shown = labels.slice(0, maxNames);
+  const rest = labels.length - shown.length;
+  return `to ${shown.join(', ')}${rest > 0 ? `, +${rest}` : ''}`;
 }
 
 /** De-dupe a list by `id`, keeping first occurrence (guards against page overlap). */

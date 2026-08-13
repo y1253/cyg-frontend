@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
   MailOpen, Paperclip, Pencil, Printer, Reply, Send, SendHorizonal, X,
@@ -30,6 +30,7 @@ import {
   htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
   prefixReSubject, senderInitial, splitSignature, textToHtml,
 } from './message-utils';
+import { RecipientDetails } from './RecipientDetails';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useInternalMessage } from '@/hooks/useInternalMessage';
 import { useInternalMessages } from '@/hooks/useInternalMessages';
@@ -229,6 +230,7 @@ export function InternalMessagesTab({ active }: Props) {
   const replyRef = useRef<HTMLDivElement>(null);
   const forwardRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const listScrollRef = useRef<HTMLDivElement>(null);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const forwardFileInputRef = useRef<HTMLInputElement>(null);
   // Bumped on every new forward so a slow attachment download from a previous
@@ -347,9 +349,30 @@ export function InternalMessagesTab({ active }: Props) {
     return () => io.disconnect();
   }, [openThreadId, listQuery]);
 
+  // ── List scroll position ──────────────────────────────────────────────────
+  // Opening a thread early-returns above the list, unmounting its scroll box and
+  // destroying its scrollTop — so the offset is captured on the way in and put back
+  // when the list returns, landing the user on the row they opened.
+  const listScrollTop = useRef(0);
+  const restoreListScroll = useRef(false); // armed on open, consumed on the way back
+
+  useLayoutEffect(() => {
+    if (!active || openThreadId) return;
+    if (!restoreListScroll.current) return; // only after a thread was opened, not on every re-render
+    const el = listScrollRef.current;
+    if (!el) return;
+    el.scrollTop = listScrollTop.current;
+    restoreListScroll.current = false;
+  }, [active, openThreadId]);
+
   // ── Opening a thread ──────────────────────────────────────────────────────
   const openMessage = useCallback(
     (message: InternalMessageSummary) => {
+      // The list is still laid out at this point; once the thread renders it's gone.
+      if (listScrollRef.current) {
+        listScrollTop.current = listScrollRef.current.scrollTop;
+        restoreListScroll.current = true;
+      }
       setOpenThreadId(message.threadId);
       setOpenMsgId(message.id);
       // Let the init effect re-run for the newly opened thread.
@@ -802,7 +825,8 @@ export function InternalMessagesTab({ active }: Props) {
         }`}
       >
         {/* The action buttons are siblings of the header, not children — the
-            header is itself a <button> and nesting one inside it is invalid HTML. */}
+            header is itself a <button> and nesting one inside it is invalid HTML.
+            Same reason the recipient disclosure sits in its own row below. */}
         <div className="flex items-start">
           <button
             type="button"
@@ -824,12 +848,7 @@ export function InternalMessagesTab({ active }: Props) {
                   {formatEmailDate(m.date)}
                 </span>
               </div>
-              {expanded ? (
-                <div className="text-xs text-muted-foreground truncate">
-                  To: {m.to.map((u) => u.name).join(', ') || '—'}
-                  {m.cc.length > 0 && ` · Cc: ${m.cc.map((u) => u.name).join(', ')}`}
-                </div>
-              ) : (
+              {!expanded && (
                 <div className="text-xs text-muted-foreground truncate">{m.snippet}</div>
               )}
             </div>
@@ -858,6 +877,19 @@ export function InternalMessagesTab({ active }: Props) {
             </div>
           )}
         </div>
+        {expanded && (
+          // pl-14 lines the details up under the sender name: px-3 (12) + avatar
+          // w-8 (32) + gap-3 (12) = 56px.
+          <div className="pl-14 pr-3 pb-2 -mt-1.5">
+            <RecipientDetails
+              from={{ name: m.from.name, email: m.from.email }}
+              to={m.to.map((u) => ({ name: u.name, email: u.email }))}
+              cc={m.cc.map((u) => ({ name: u.name, email: u.email }))}
+              date={m.date}
+              selfEmail={user?.email}
+            />
+          </div>
+        )}
 
         {expanded && (
           <div className="px-3 pt-3 pb-3 flex flex-col gap-3 border-t">
@@ -1238,7 +1270,7 @@ export function InternalMessagesTab({ active }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-lg border">
+      <div ref={listScrollRef} className="flex-1 overflow-y-auto rounded-lg border">
         {listQuery.isLoading ? (
           <p className="text-sm text-muted-foreground p-6 text-center">Loading…</p>
         ) : messages.length === 0 ? (
