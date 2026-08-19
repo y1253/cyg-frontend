@@ -12,7 +12,18 @@
  * pure functions are what make that tuning testable.
  */
 
-export type PoseTarget = 'any' | 'straight' | 'right' | 'left';
+/**
+ * Which head position a capture requires.
+ *
+ * Direction is **relative**, not absolute: `turn` accepts either side and
+ * `turn-opposite` simply requires the other side from whichever way the previous
+ * shot went. Absolute left/right cannot be determined reliably here — the preview
+ * is CSS-mirrored while the detector sees unmirrored pixels, and MediaPipe's eye
+ * ordering is anatomical (the subject's left/right, not the image's). Making
+ * nothing depend on absolute direction removes that failure mode rather than
+ * guessing at it, and three distinct angles is the actual goal anyway.
+ */
+export type PoseTarget = 'any' | 'straight' | 'turn' | 'turn-opposite';
 
 export type GateReason =
   | 'no-face'
@@ -94,18 +105,6 @@ export const REQUIRED_STREAK = 5;
 /** Inference cadence. 60fps detection would make the login page janky for nothing. */
 export const DETECT_INTERVAL_MS = 66;
 
-/**
- * Sign convention for "the user turned to their own right", in the coordinate
- * space MediaPipe actually reports.
- *
- * This is deliberately a named constant rather than inlined arithmetic, because it
- * cannot be reasoned out reliably: the preview is CSS-mirrored while the pixels fed
- * to the detector are not, and MediaPipe's eye ordering is anatomical (the
- * subject's left/right, not the image's). Two independent chances to get it
- * backwards. Verify by logging `yaw` while turning right and reading the sign.
- */
-export const YAW_SIGN_RIGHT = -1;
-
 export const GATE_MESSAGES: Record<GateReason, string> = {
   'no-face': 'Looking for your face…',
   'multiple-faces': 'Only one person in frame, please',
@@ -115,16 +114,16 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   blurry: 'Hold still',
   'too-dark': 'Too dark — find better light',
   'too-bright': 'Too bright — move away from the light',
-  'wrong-pose': 'Turn your head',
+  'wrong-pose': 'Turn your head to one side',
 };
 
-/** Pose-specific wording, always phrased from the user's own perspective. */
+/** Pose-specific wording. Never names a side we cannot reliably identify. */
 export function poseMessage(pose: PoseTarget): string {
   switch (pose) {
-    case 'right':
-      return 'Turn your head to your right';
-    case 'left':
-      return 'Turn your head to your left';
+    case 'turn':
+      return 'Turn your head to one side';
+    case 'turn-opposite':
+      return 'Now turn the other way';
     case 'straight':
       return 'Look straight at the camera';
     default:
@@ -162,14 +161,19 @@ function poseSatisfied(
   yaw: number,
   pose: PoseTarget,
   cfg: GateConfig,
+  referenceYaw: number | null,
 ): boolean {
   switch (pose) {
     case 'straight':
       return Math.abs(yaw) <= cfg.maxYawStraight;
-    case 'right':
-      return yaw * YAW_SIGN_RIGHT >= cfg.minYawTurned;
-    case 'left':
-      return yaw * YAW_SIGN_RIGHT <= -cfg.minYawTurned;
+    case 'turn':
+      return Math.abs(yaw) >= cfg.minYawTurned;
+    case 'turn-opposite':
+      // Must be a real turn, and to the other side from the reference shot. With
+      // no reference yet this degrades to a plain turn rather than blocking.
+      if (Math.abs(yaw) < cfg.minYawTurned) return false;
+      if (referenceYaw === null) return true;
+      return Math.sign(yaw) !== Math.sign(referenceYaw);
     default:
       return true;
   }
@@ -242,6 +246,8 @@ export function evaluateFrame(params: {
   sharpness: number;
   brightness: number;
   pose: PoseTarget;
+  /** Yaw of the previous shot, for 'turn-opposite'. */
+  referenceYaw?: number | null;
   config?: GateConfig;
 }): { ok: boolean; reason: GateReason | null; metrics: FrameMetrics | null } {
   const cfg = params.config ?? DEFAULT_GATE;
@@ -280,7 +286,8 @@ export function evaluateFrame(params: {
   if (metrics.sizeRatio > cfg.maxSizeRatio) return fail('too-large');
   if (metrics.centerOffsetX > cfg.maxCenterOffsetX) return fail('off-center');
   if (metrics.centerOffsetY > cfg.maxCenterOffsetY) return fail('off-center');
-  if (!poseSatisfied(yaw, params.pose, cfg)) return fail('wrong-pose');
+  if (!poseSatisfied(yaw, params.pose, cfg, params.referenceYaw ?? null))
+    return fail('wrong-pose');
   if (metrics.sharpness < cfg.minSharpness) return fail('blurry');
 
   return { ok: true, reason: null, metrics };

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { WebcamCapture } from '../ui/WebcamCapture';
 import { useEnrollFace } from '../../hooks/useEnrollFace';
-import type { PoseTarget } from '../../lib/faceQuality';
+import type { FrameMetrics, PoseTarget } from '../../lib/faceQuality';
 
 /**
  * The three angles Luxand is trained on. Requiring a real head turn is what
@@ -11,12 +11,12 @@ import type { PoseTarget } from '../../lib/faceQuality';
  * actually turned — which is both instant and far more useful than rejecting all
  * three photos after the fact.
  */
-const POSES: PoseTarget[] = ['straight', 'right', 'left'];
+const POSES: PoseTarget[] = ['straight', 'turn', 'turn-opposite'];
 
 const INSTRUCTIONS = [
   'Look straight at the camera',
   'Turn slightly to your right',
-  'Turn slightly to your left — try different lighting if possible',
+  'Now turn the other way — to your left',
 ];
 
 /**
@@ -44,16 +44,35 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
   const [previews, setPreviews] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [settling, setSettling] = useState(false);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which way the second shot turned, so the third can require the other side.
+  const [referenceYaw, setReferenceYaw] = useState<number | null>(null);
   const enroll = useEnrollFace();
 
-  // Object URLs pin the whole JPEG in memory until revoked.
+  /**
+   * The settle pause stops the gate firing a second, near-identical shot off the
+   * tail of the previous pose.
+   *
+   * React owns the timer, keyed on `settling`, so it is started and cleared as one
+   * unit. It used to be a bare ref set inside handleCapture, and an unrelated
+   * cleanup keyed on [previews] cancelled it on the very next render — leaving
+   * `settling` stuck true, the gate permanently paused, and enrolment frozen after
+   * the first photo.
+   */
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setTimeout(() => setSettling(false), POSE_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [settling]);
+
+  // Object URLs pin the whole JPEG in memory until revoked. Read through a ref on
+  // unmount only: revoking on every change would kill URLs still on screen.
+  const previewsRef = useRef<string[]>([]);
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
   useEffect(
-    () => () => {
-      previews.forEach((url) => URL.revokeObjectURL(url));
-      if (settleTimer.current) clearTimeout(settleTimer.current);
-    },
-    [previews],
+    () => () => previewsRef.current.forEach((url) => URL.revokeObjectURL(url)),
+    [],
   );
 
   function reset() {
@@ -62,17 +81,21 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
     setBlobs([]);
     setStep(0);
     setSettling(false);
+    setReferenceYaw(null);
   }
 
-  function handleCapture(blob: Blob) {
+  function handleCapture(blob: Blob, metrics?: FrameMetrics) {
     const nextBlobs = [...blobs, blob];
     setBlobs(nextBlobs);
     setPreviews((p) => [...p, URL.createObjectURL(blob)]);
 
+    // Remember which side the first turn went, so the last shot can demand the
+    // other one. Direction is relative on purpose — see PoseTarget.
+    if (nextBlobs.length === 2 && metrics) setReferenceYaw(metrics.yaw);
+
     if (nextBlobs.length < 3) {
       setSettling(true);
       setStep(nextBlobs.length);
-      settleTimer.current = setTimeout(() => setSettling(false), POSE_SETTLE_MS);
       return;
     }
 
@@ -97,6 +120,8 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
     setPreviews((p) => p.slice(0, index));
     setBlobs((b) => b.slice(0, index));
     setStep(index);
+    // Re-shooting the turn invalidates the recorded direction.
+    if (index <= 1) setReferenceYaw(null);
     setError('');
   }
 
@@ -151,6 +176,7 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
         onError={setError}
         mode="auto"
         pose={POSES[step]}
+        referenceYaw={referenceYaw}
         paused={settling}
         theme="light"
         label="Capture"

@@ -61,7 +61,9 @@ export function useFaceCaptureGate(opts: {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   enabled: boolean;
   pose?: PoseTarget;
-  onCapture: () => void;
+  /** Receives the metrics of the frame that actually fired. */
+  onCapture: (metrics: FrameMetrics) => void;
+  referenceYaw?: number | null;
   requiredStreak?: number;
   config?: GateConfig;
 }): FaceCaptureGate {
@@ -70,6 +72,7 @@ export function useFaceCaptureGate(opts: {
     enabled,
     pose = 'any',
     onCapture,
+    referenceYaw = null,
     requiredStreak = REQUIRED_STREAK,
     config = DEFAULT_GATE,
   } = opts;
@@ -100,7 +103,7 @@ export function useFaceCaptureGate(opts: {
    * what keeps a finished streak from flashing on screen for one frame after the
    * pose changes — and avoids a cascading render besides.
    */
-  const stamp = `${String(enabled)}|${pose}`;
+  const stamp = `${String(enabled)}|${pose}|${String(referenceYaw)}`;
   const current = state.stamp === stamp ? state : { stamp, ...EMPTY };
 
   /** Reused across every frame; allocating one per frame would thrash the GC. */
@@ -178,11 +181,21 @@ export function useFaceCaptureGate(opts: {
       try {
         detector = await getFaceDetector();
       } catch {
-        // Model unavailable: the caller shows the manual button instead.
+        // Model unavailable: the caller shows the manual button instead. Release
+        // first -- holding the single-consumer lock here would make every later
+        // mount report 'unsupported' for the rest of the session.
+        release();
+        holdsLock = false;
         if (!cancelled) setStatus('unsupported');
         return;
       }
-      if (cancelled) return;
+      if (cancelled) {
+        if (holdsLock) {
+          release();
+          holdsLock = false;
+        }
+        return;
+      }
       setStatus('ready');
 
       const tick = () => {
@@ -248,6 +261,7 @@ export function useFaceCaptureGate(opts: {
           sharpness,
           brightness,
           pose,
+          referenceYaw,
           config,
         });
 
@@ -266,9 +280,11 @@ export function useFaceCaptureGate(opts: {
           metrics: verdict.metrics,
         });
 
-        if (streakRef.current >= requiredStreak) {
+        if (streakRef.current >= requiredStreak && verdict.metrics) {
           firedRef.current = true;
-          onCaptureRef.current();
+          // Pass the firing frame's own metrics, not the state copy, which lags a
+          // render behind.
+          onCaptureRef.current(verdict.metrics);
         }
       };
 
@@ -276,7 +292,16 @@ export function useFaceCaptureGate(opts: {
     })();
 
     return stop;
-  }, [enabled, pose, stamp, requiredStreak, config, videoRef, measure]);
+  }, [
+    enabled,
+    pose,
+    stamp,
+    referenceYaw,
+    requiredStreak,
+    config,
+    videoRef,
+    measure,
+  ]);
 
   return {
     status,

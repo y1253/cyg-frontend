@@ -8,7 +8,6 @@ import {
   reasonMessage,
   toGrayscale,
   varianceOfLaplacian,
-  YAW_SIGN_RIGHT,
   type FaceCandidate,
   type GateConfig,
   type PoseTarget,
@@ -44,7 +43,13 @@ function goodFace(overrides: Partial<FaceCandidate> = {}): FaceCandidate {
 
 function evaluate(
   faces: FaceCandidate[],
-  extra: { sharpness?: number; brightness?: number; pose?: PoseTarget; config?: GateConfig } = {},
+  extra: {
+    sharpness?: number;
+    brightness?: number;
+    pose?: PoseTarget;
+    referenceYaw?: number | null;
+    config?: GateConfig;
+  } = {},
 ) {
   return evaluateFrame({
     faces,
@@ -53,6 +58,7 @@ function evaluate(
     sharpness: extra.sharpness ?? 200,
     brightness: extra.brightness ?? 130,
     pose: extra.pose ?? 'any',
+    referenceYaw: extra.referenceYaw ?? null,
     config: extra.config,
   });
 }
@@ -215,35 +221,70 @@ describe('pose gating', () => {
       ],
     });
 
-  it('accepts a frontal face for pose "straight"', () => {
+  it('accepts a frontal face for "straight"', () => {
     expect(evaluate([faceWithYaw(0)], { pose: 'straight' }).ok).toBe(true);
   });
 
-  it('rejects a turned head for pose "straight"', () => {
+  it('rejects a turned head for "straight"', () => {
     expect(evaluate([faceWithYaw(0.4)], { pose: 'straight' }).reason).toBe(
       'wrong-pose',
     );
   });
 
-  it('accepts a right turn for pose "right"', () => {
-    const yaw = 0.4 * YAW_SIGN_RIGHT;
-    expect(evaluate([faceWithYaw(yaw)], { pose: 'right' }).ok).toBe(true);
+  // Direction is relative on purpose: absolute left/right is not reliably
+  // determinable, so "turn" must accept a turn either way.
+  it.each([0.4, -0.4])('accepts a turn of %s for "turn"', (yaw) => {
+    expect(evaluate([faceWithYaw(yaw)], { pose: 'turn' }).ok).toBe(true);
   });
 
-  it('rejects a LEFT turn for pose "right" — the whole point of the pose gate', () => {
-    const yaw = -0.4 * YAW_SIGN_RIGHT;
-    expect(evaluate([faceWithYaw(yaw)], { pose: 'right' }).reason).toBe(
+  it('rejects a frontal face for "turn"', () => {
+    expect(evaluate([faceWithYaw(0)], { pose: 'turn' }).reason).toBe('wrong-pose');
+  });
+
+  it('rejects a turn that is too slight for "turn"', () => {
+    expect(evaluate([faceWithYaw(0.05)], { pose: 'turn' }).reason).toBe(
       'wrong-pose',
     );
   });
 
-  it('rejects a frontal face for pose "right"', () => {
-    expect(evaluate([faceWithYaw(0)], { pose: 'right' }).reason).toBe('wrong-pose');
+  it('accepts the opposite side for "turn-opposite"', () => {
+    expect(
+      evaluate([faceWithYaw(-0.4)], { pose: 'turn-opposite', referenceYaw: 0.4 })
+        .ok,
+    ).toBe(true);
   });
 
-  it('accepts a left turn for pose "left"', () => {
-    const yaw = -0.4 * YAW_SIGN_RIGHT;
-    expect(evaluate([faceWithYaw(yaw)], { pose: 'left' }).ok).toBe(true);
+  it('rejects the SAME side for "turn-opposite" — this is what forces 3 distinct angles', () => {
+    expect(
+      evaluate([faceWithYaw(0.4)], { pose: 'turn-opposite', referenceYaw: 0.4 })
+        .reason,
+    ).toBe('wrong-pose');
+  });
+
+  it('works mirrored: reference left, so right is accepted and left refused', () => {
+    expect(
+      evaluate([faceWithYaw(0.4)], { pose: 'turn-opposite', referenceYaw: -0.4 })
+        .ok,
+    ).toBe(true);
+    expect(
+      evaluate([faceWithYaw(-0.4)], { pose: 'turn-opposite', referenceYaw: -0.4 })
+        .reason,
+    ).toBe('wrong-pose');
+  });
+
+  it('rejects a frontal face for "turn-opposite" even with a reference', () => {
+    expect(
+      evaluate([faceWithYaw(0)], { pose: 'turn-opposite', referenceYaw: 0.4 })
+        .reason,
+    ).toBe('wrong-pose');
+  });
+
+  it('degrades to a plain turn when there is no reference yet', () => {
+    // Better to accept a genuine turn than to strand the user on a missing value.
+    expect(
+      evaluate([faceWithYaw(-0.4)], { pose: 'turn-opposite', referenceYaw: null })
+        .ok,
+    ).toBe(true);
   });
 
   it('ignores pose entirely for "any", which is what login uses', () => {
@@ -315,17 +356,20 @@ describe('grayscale and luma', () => {
 });
 
 describe('messages', () => {
-  it('phrases pose guidance from the user perspective', () => {
-    expect(poseMessage('right')).toBe('Turn your head to your right');
-    expect(poseMessage('left')).toBe('Turn your head to your left');
+  it('never names a side it cannot reliably identify', () => {
+    expect(poseMessage('turn')).toBe('Turn your head to one side');
+    expect(poseMessage('turn-opposite')).toBe('Now turn the other way');
+    expect(poseMessage('straight')).toBe('Look straight at the camera');
   });
 
   it('specialises the wrong-pose message per target', () => {
-    expect(reasonMessage('wrong-pose', 'left')).toBe('Turn your head to your left');
+    expect(reasonMessage('wrong-pose', 'turn-opposite')).toBe(
+      'Now turn the other way',
+    );
   });
 
   it('leaves non-pose reasons alone', () => {
-    expect(reasonMessage('too-small', 'left')).toBe('Move closer');
+    expect(reasonMessage('too-small', 'turn')).toBe('Move closer');
   });
 
   it('has wording for every reason', () => {

@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AMBER, TEAL } from '../../lib/brand';
-import { reasonMessage, type PoseTarget } from '../../lib/faceQuality';
+import {
+  reasonMessage,
+  type FrameMetrics,
+  type PoseTarget,
+} from '../../lib/faceQuality';
 import { useFaceCaptureGate } from '../../hooks/useFaceCaptureGate';
 
 /** How long to wait before offering a manual shutter as an escape hatch. */
 const MANUAL_FALLBACK_MS = 8000;
 
 interface Props {
-  onCapture: (blob: Blob) => void;
+  /** `metrics` is present only for an automatic capture. */
+  onCapture: (blob: Blob, metrics?: FrameMetrics) => void;
   onError?: (msg: string) => void;
   /** Label for the manual button. */
   label?: string;
@@ -16,6 +21,8 @@ interface Props {
   mode?: 'manual' | 'auto';
   /** Which head position to require before firing, in auto mode. */
   pose?: PoseTarget;
+  /** Yaw of the previous shot, so `turn-opposite` knows which way is 'other'. */
+  referenceYaw?: number | null;
   /** Freeze the gate without tearing down the camera. */
   paused?: boolean;
   /** Dark login page vs light admin dialog. */
@@ -48,6 +55,7 @@ export function WebcamCapture({
   autoStart = true,
   mode = 'auto',
   pose = 'any',
+  referenceYaw = null,
   paused = false,
   theme = 'login',
   mirrored = true,
@@ -118,7 +126,8 @@ export function WebcamCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, attempt]);
 
-  const capture = useCallback(() => {
+  const capture = useCallback(
+    (metrics?: FrameMetrics) => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return;
     // toBlob is async; without this latch a double-click (or an auto-fire racing a
@@ -137,21 +146,24 @@ export function WebcamCapture({
     setFlash(true);
     setTimeout(() => setFlash(false), 240);
 
-    canvas.toBlob(
-      (blob) => {
-        capturingRef.current = false;
-        if (blob) onCapture(blob);
-      },
-      'image/jpeg',
-      0.92,
-    );
-  }, [onCapture]);
+      canvas.toBlob(
+        (blob) => {
+          capturingRef.current = false;
+          if (blob) onCapture(blob, metrics);
+        },
+        'image/jpeg',
+        0.92,
+      );
+    },
+    [onCapture],
+  );
 
   const gateEnabled = mode === 'auto' && ready && !paused && !error;
   const gate = useFaceCaptureGate({
     videoRef,
     enabled: gateEnabled,
     pose,
+    referenceYaw,
     onCapture: capture,
   });
 
@@ -405,7 +417,7 @@ export function WebcamCapture({
         <button
           type="button"
           disabled={!ready || paused}
-          onClick={capture}
+          onClick={() => capture()}
           style={{
             width: '100%',
             background: ready && !paused ? TEAL : 'rgba(59,191,180,0.3)',
