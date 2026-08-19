@@ -18,9 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { WebcamCapture } from "@/components/ui/WebcamCapture";
+import { FaceEnrollFlow } from './FaceEnrollFlow';
 import { useUser } from "@/hooks/useUser";
-import { useEnrollFace } from "@/hooks/useEnrollFace";
 
 const ENROLL_PARTICLES = [
   { angle:   0, dist: 36, color: '#2dd4bf' },
@@ -103,56 +102,22 @@ export function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: user, isLoading, isError } = useUser(Number(id));
-  const enrollMutation = useEnrollFace();
   const [enrollOpen, setEnrollOpen] = useState(false);
-  const [enrollError, setEnrollError] = useState('');
   const [enrollSuccess, setEnrollSuccess] = useState(false);
   const [badgeGlow, setBadgeGlow] = useState(false);
-  const [enrollStep, setEnrollStep] = useState(0);
-  const [capturedBlobs, setCapturedBlobs] = useState<Blob[]>([]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const STEP_INSTRUCTIONS = [
-    'Look straight at the camera',
-    'Turn slightly to the right',
-    'Turn slightly to the left — try different lighting if possible',
-  ];
-
-  function handleCapture(blob: Blob) {
-    if (!user) return;
-    const newBlobs = [...capturedBlobs, blob];
-    setCapturedBlobs(newBlobs);
-    if (enrollStep < 2) {
-      setEnrollStep(enrollStep + 1);
-    } else {
-      setEnrollError('');
-      enrollMutation.mutate(
-        { userId: user.id, blobs: newBlobs as [Blob, Blob, Blob] },
-        {
-          onSuccess: () => {
-            setEnrollSuccess(true);
-            closeTimerRef.current = setTimeout(() => {
-              setEnrollOpen(false);
-              setEnrollSuccess(false);
-              setBadgeGlow(true);
-              setTimeout(() => setBadgeGlow(false), 1200);
-            }, 1800);
-          },
-          onError: (err) => {
-            setEnrollError(err instanceof Error ? err.message : 'Enrollment failed. Try again.');
-            setEnrollStep(0);
-            setCapturedBlobs([]);
-          },
-        },
-      );
-    }
+  function handleEnrolled() {
+    setEnrollSuccess(true);
+    closeTimerRef.current = setTimeout(() => {
+      setEnrollOpen(false);
+      setEnrollSuccess(false);
+      setBadgeGlow(true);
+      setTimeout(() => setBadgeGlow(false), 1200);
+    }, 1800);
   }
 
   function openEnrollDialog() {
-    setEnrollError('');
-    setEnrollStep(0);
-    setCapturedBlobs([]);
-    enrollMutation.reset();
     setEnrollOpen(true);
   }
 
@@ -165,7 +130,7 @@ export function UserDetailPage() {
     return <div className="p-8 text-destructive text-sm">User not found.</div>;
   }
 
-  const faceEnrolled = (user.faceImages?.length ?? 0) > 0;
+  const faceEnrolled = Boolean(user.faceEnrolled);
 
   return (
     <div className="p-6 max-w-3xl mx-auto flex flex-col gap-6">
@@ -326,51 +291,12 @@ export function UserDetailPage() {
                   {faceEnrolled ? `Re-enroll Face — ${user.name}` : `Enroll Face — ${user.name}`}
                 </DialogTitle>
               </DialogHeader>
-              <div className="flex flex-col gap-4 mt-2">
-                {/* Step indicator */}
-                <div className="flex items-center gap-2">
-                  {[0, 1, 2].map(i => (
-                    <div
-                      key={i}
-                      className={`flex-1 h-1.5 rounded-full transition-colors ${
-                        i < capturedBlobs.length
-                          ? 'bg-teal-500'
-                          : i === enrollStep && !enrollMutation.isPending
-                          ? 'bg-teal-300'
-                          : 'bg-muted'
-                      }`}
-                    />
-                  ))}
-                </div>
-
-                <p className="text-sm font-medium text-center">
-                  Photo {Math.min(enrollStep + 1, 3)} of 3
-                </p>
-                <p className="text-sm text-muted-foreground text-center">
-                  {STEP_INSTRUCTIONS[enrollStep]}
-                </p>
-
-                {enrollMutation.isPending ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
-                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                    </svg>
-                    Enrolling…
-                  </div>
-                ) : (
-                  <WebcamCapture
-                    onCapture={handleCapture}
-                    label={enrollStep < 2 ? 'Capture' : 'Capture & Enroll'}
-                    onError={msg => setEnrollError(msg)}
-                  />
-                )}
-
-                {enrollError && (
-                  <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                    {enrollError}
-                  </p>
-                )}
+              <div className="mt-2">
+                <FaceEnrollFlow
+                  key={enrollOpen ? 'open' : 'closed'}
+                  userId={user.id}
+                  onSuccess={handleEnrolled}
+                />
               </div>
             </>
           )}

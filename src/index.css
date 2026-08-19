@@ -205,6 +205,19 @@ body {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* Camera overlay: the manual-mode scan line (was injected inline by
+   WebcamCapture, which re-added the same <style> tag per instance) plus the
+   capture flash that tells the user an automatic shot just fired. */
+@keyframes face-scan-line {
+  0%   { top: 10%; }
+  50%  { top: 88%; }
+  100% { top: 10%; }
+}
+@keyframes face-capture-flash {
+  0%   { opacity: 0; }
+  35%  { opacity: 0.6; }
+  100% { opacity: 0; }
+}
 @keyframes face-badge-glow {
   0%   { box-shadow: 0 0 0 0 oklch(0.7 0.17 185 / 0); }
   20%  { box-shadow: 0 0 0 5px oklch(0.7 0.17 185 / 0.45); }

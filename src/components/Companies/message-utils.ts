@@ -28,6 +28,17 @@ export function formatEmailDate(dateStr: string): string {
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`;
 }
 
+/**
+ * Full, unambiguous timestamp for a forward-history row. Unlike formatEmailDate
+ * (which collapses recent dates to a weekday, so "2:14 PM" alone reads as today),
+ * a history entry needs the exact date and time it was forwarded.
+ */
+export function formatForwardTime(iso: string): string {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export function prefixReSubject(subject: string): string {
   return /^re:/i.test(subject.trim()) ? subject : `Re: ${subject}`;
 }
@@ -302,6 +313,15 @@ export function buildForwardedBody(
  * than uploaded and 400'd.
  */
 export const MAX_FILE_BYTES = 250 * 1024 * 1024;
+
+/**
+ * How many files one message may carry. Must match the server cap —
+ * FilesInterceptor('attachments', MAX_ATTACHMENTS) in gmail.controller.ts,
+ * microsoft.controller.ts and internal-messages.controller.ts, which all agree.
+ * Exceeding it made multer throw LIMIT_UNEXPECTED_FILE, which surfaced only as a
+ * generic "Failed to send". (The per-file byte cap is MAX_FILE_BYTES above.)
+ */
+export const MAX_ATTACHMENTS = 10;
 
 /**
  * How many raw bytes ride inside the message itself. Must match

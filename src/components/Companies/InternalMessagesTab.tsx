@@ -1,32 +1,26 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
-  MailOpen, Paperclip, Pencil, Printer, Reply, Send, SendHorizonal, X,
+  MailOpen, Paperclip, Pencil, Printer, Reply, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { SearchInput } from '@/components/ui/SearchInput';
-import { RichTextEditor } from './RichTextEditor';
 import { UserAutocomplete } from './UserAutocomplete';
 import { InternalMessageRow } from './InternalMessageRow';
 import { useComposer, useComposerSignals } from '@/context/ComposerContext';
-import { PolishButton, PolishPanel } from './PolishPanel';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { Linkified } from './Linkified';
 import { AttachmentPreview } from './AttachmentPreview';
-import { UploadProgressBar } from './ComposerBits';
+import { CompleteConfirmDialog } from './CompleteConfirmDialog';
+import { InlineComposerPanel } from './InlineComposerPanel';
 import {
-  MAX_FILE_BYTES,
-  buildForwardedBody, dedupeById, escapeHtml, formatBytes, formatEmailDate,
+  ForwardPreviewCard, ForwardPreviewLoading, ForwardPreviewMissing,
+} from './ForwardPreviewCard';
+import {
+  MAX_ATTACHMENTS, MAX_FILE_BYTES,
+  buildForwardedBody, dedupeById, escapeHtml, formatEmailDate, formatForwardTime,
   htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
   prefixReSubject, senderInitial, splitSignature, textToHtml,
 } from './message-utils';
@@ -71,12 +65,6 @@ const UI_KEY = 'internal-msgs-ui';
 const POLISH_CONTEXT = 'An internal message between colleagues at a bookkeeping firm.';
 
 /**
- * Mirrors the server's multer limits (internal-messages/uploads.ts). The per-file
- * byte cap is `MAX_FILE_BYTES` from message-utils — the same 250 MB email uses.
- */
-const MAX_ATTACHMENTS = 10;
-
-/**
  * Ceiling for RE-ATTACHING an original on forward, which is a different problem
  * from the send cap: the browser has to pull the file all the way down and push it
  * all the way back up. Worth doing for a document, not for a 200 MB video — those
@@ -85,72 +73,40 @@ const MAX_ATTACHMENTS = 10;
  */
 const MAX_FORWARD_HYDRATE_BYTES = 50 * 1024 * 1024;
 
-/** Forward rows use a full timestamp — "2:14 PM" alone reads as today. */
-function formatForwardTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-}
-
 /**
- * What was actually sent on a forward, expanded under the banner. Mirrors
- * `ForwardPreview` in CommunicationsTab — same card, different data source (the
- * internal store rather than Gmail, so the attachment URLs differ too).
+ * What was actually sent on a forward, expanded under the banner. The card itself
+ * is shared with the company mailbox's ForwardPreview; only the data source and
+ * the attachment URLs differ.
  */
 function InternalForwardPreview({ messageId }: { messageId: number }) {
   const { token } = useAuth();
   const { data: fwd, isLoading, isError } = useInternalMessage(messageId);
 
-  if (isLoading) {
-    return (
-      <p className="text-xs text-muted-foreground py-2">Loading forwarded message…</p>
-    );
-  }
-  if (isError || !fwd) {
-    return (
-      <p className="text-xs text-muted-foreground py-2">
-        This forwarded message is no longer available.
-      </p>
-    );
-  }
+  if (isLoading) return <ForwardPreviewLoading />;
+  if (isError || !fwd) return <ForwardPreviewMissing />;
+
   return (
-    <div className="mt-1 border rounded-md bg-muted/10 p-3 flex flex-col gap-2">
-      <div className="text-xs text-muted-foreground space-y-0.5">
-        <div>
-          <span className="font-medium">From:</span> {fwd.from.name}
-        </div>
-        <div>
-          <span className="font-medium">To:</span>{' '}
-          {fwd.to.map((u) => u.name).join(', ') || '—'}
-        </div>
-        <div>
-          <span className="font-medium">Date:</span> {formatEmailDate(fwd.date)}
-        </div>
-      </div>
-      {fwd.attachments.length > 0 && (
-        <div className="flex flex-wrap gap-3">
-          {fwd.attachments.map((att) => (
-            <AttachmentPreview
-              key={att.id}
-              url={internalAttachmentUrl(token ?? '', att.id, 'inline')}
-              downloadUrl={internalAttachmentUrl(token ?? '', att.id, 'attachment')}
-              mimeType={att.mimeType}
-              filename={att.filename}
-              size={att.size}
-            />
-          ))}
-        </div>
-      )}
-      <div className="border rounded-md overflow-hidden bg-background">
-        {fwd.bodyHtml ? (
-          <EmailBodyFrame html={fwd.bodyHtml} />
-        ) : (
-          <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
-            <Linkified text={fwd.bodyText ?? '(empty)'} />
-          </pre>
-        )}
-      </div>
-    </div>
+    <ForwardPreviewCard
+      from={fwd.from.name}
+      to={fwd.to.map((u) => u.name).join(', ') || '—'}
+      date={fwd.date}
+      bodyHtml={fwd.bodyHtml}
+      bodyText={fwd.bodyText}
+      attachments={
+        fwd.attachments.length > 0
+          ? fwd.attachments.map((att) => (
+              <AttachmentPreview
+                key={att.id}
+                url={internalAttachmentUrl(token ?? '', att.id, 'inline')}
+                downloadUrl={internalAttachmentUrl(token ?? '', att.id, 'attachment')}
+                mimeType={att.mimeType}
+                filename={att.filename}
+                size={att.size}
+              />
+            ))
+          : undefined
+      }
+    />
   );
 }
 
@@ -231,8 +187,6 @@ export function InternalMessagesTab({ active }: Props) {
   const forwardRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const listScrollRef = useRef<HTMLDivElement>(null);
-  const replyFileInputRef = useRef<HTMLInputElement>(null);
-  const forwardFileInputRef = useRef<HTMLInputElement>(null);
   // Bumped on every new forward so a slow attachment download from a previous
   // one can't land in the form the user is looking at now.
   const forwardReqRef = useRef(0);
@@ -427,33 +381,12 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const completeConfirmDialog = (
-    <Dialog
+    <CompleteConfirmDialog
       open={completeTarget !== null}
-      onOpenChange={(open) => {
-        if (!open) setCompleteTarget(null);
-      }}
-    >
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Mark message complete?</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          Confirm you've completed this message. It stays in your inbox with a blue
-          check.
-        </p>
-        <div className="flex justify-end gap-2 mt-4">
-          <Button variant="outline" onClick={() => setCompleteTarget(null)}>
-            Cancel
-          </Button>
-          <Button
-            className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
-            onClick={confirmComplete}
-          >
-            <CheckCircle2 size={14} /> Mark complete
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
+      onConfirm={confirmComplete}
+      description="Confirm you've completed this message. It stays in your inbox with a blue check."
+    />
   );
 
   // ── Reply / forward ───────────────────────────────────────────────────────
@@ -698,60 +631,6 @@ export function InternalMessagesTab({ active }: Props) {
       },
     );
   };
-
-  // The Attach button + picked-file list, shared by the reply and forward forms.
-  const renderAttachRow = (
-    files: File[],
-    setFiles: (files: File[]) => void,
-    inputRef: React.RefObject<HTMLInputElement | null>,
-  ) => (
-    <div className="flex flex-col gap-2">
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          pickFiles(e.target.files, files, setFiles);
-          // Reset so picking the same file again still fires onChange.
-          e.target.value = '';
-        }}
-      />
-      <div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="gap-1"
-          onClick={() => inputRef.current?.click()}
-        >
-          <Paperclip size={14} /> Attach
-        </Button>
-      </div>
-      {attachmentNotice && (
-        <p className="text-xs text-amber-600">{attachmentNotice}</p>
-      )}
-      <UploadProgressBar progress={sendMutation.uploadProgress} />
-      {files.map((f, i) => (
-        <div
-          key={`${f.name}:${f.size}:${i}`}
-          className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-        >
-          <Paperclip size={12} className="shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{f.name}</span>
-          <span className="shrink-0 text-muted-foreground">{formatBytes(f.size)}</span>
-          <button
-            type="button"
-            aria-label={`Remove ${f.name}`}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
-          >
-            <X size={13} />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
 
   // The teal "You forwarded this message" block, shown on a message that has been
   // forwarded on. Only forwards the viewer is party to reach the client, so the
@@ -1017,190 +896,135 @@ export function InternalMessagesTab({ active }: Props) {
           )}
 
           {replyOpen && (
-            <div
-              ref={replyRef}
-              className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
-            >
-              <div className="flex flex-col gap-0.5">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Reply
-                </p>
-                {/* The form sits below the dimmed later messages — name the one
-                    being answered rather than leaving it implied. */}
-                {replyTarget && (
-                  <p className="text-xs text-muted-foreground">
-                    Replying to {replyTarget.from.name} · {formatEmailDate(replyTarget.date)}
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">To</Label>
+            <InlineComposerPanel
+              variant="reply"
+              formRef={replyRef}
+              // The form sits below the dimmed later messages — name the one
+              // being answered rather than leaving it implied.
+              subtitle={
+                replyTarget
+                  ? `Replying to ${replyTarget.from.name} · ${formatEmailDate(replyTarget.date)}`
+                  : undefined
+              }
+              toField={
                 <UserAutocomplete
                   value={replyTo}
                   onChange={setReplyTo}
                   users={directory}
                   placeholder="Start typing a name…"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">CC</Label>
+              }
+              ccField={
                 <UserAutocomplete
                   value={replyCc}
                   onChange={setReplyCc}
                   users={directory}
                   placeholder="Optional"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Subject</Label>
-                <Input
-                  value={replySubject}
-                  onChange={(e) => setReplySubject(e.target.value)}
-                />
-              </div>
-              <RichTextEditor
-                html={replyBody}
-                onChange={setReplyBody}
-                placeholder="Write your reply…"
-                minHeight={140}
-                maxHeight={320}
-              />
-              {renderAttachRow(
-                replyFiles,
-                setReplyFiles,
-                replyFileInputRef,
-              )}
-              <PolishPanel
-                polish={replyPolish}
-                context={POLISH_CONTEXT}
-                onAccept={(t) => setReplyBody(textToHtml(t))}
-              />
-              {sendError && <p className="text-xs text-destructive">{sendError}</p>}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-                  disabled={
-                    sendMutation.isPending ||
-                    (!htmlToText(replyBody).trim() && replyFiles.length === 0)
-                  }
-                  onClick={submitReply}
-                >
-                  <Send size={14} />
-                  {sendMutation.isPending ? 'Sending…' : 'Send Reply'}
-                </Button>
-                <PolishButton
-                  polish={replyPolish}
-                  draftPlain={htmlToText(replyBody)}
-                  context={POLISH_CONTEXT}
-                />
-                <Button size="sm" variant="outline" onClick={closeReply}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
+              }
+              subject={replySubject}
+              onSubjectChange={setReplySubject}
+              body={replyBody}
+              onBodyChange={setReplyBody}
+              bodyPlaceholder="Write your reply…"
+              minHeight={140}
+              maxHeight={320}
+              files={replyFiles}
+              setFiles={setReplyFiles}
+              onPickFiles={(picked) => pickFiles(picked, replyFiles, setReplyFiles)}
+              attachmentNotice={attachmentNotice}
+              // Internal attachments are stored by us at any size, never off-loaded
+              // to Drive, so `null` suppresses the "sent as … link" badge.
+              cloudLabel={null}
+              uploadProgress={sendMutation.uploadProgress}
+              error={sendError}
+              polish={replyPolish}
+              polishContext={POLISH_CONTEXT}
+              polishDraftPlain={htmlToText(replyBody)}
+              onPolishAccept={(t) => setReplyBody(textToHtml(t))}
+              sendLabel="Send Reply"
+              sendDisabled={
+                sendMutation.isPending ||
+                (!htmlToText(replyBody).trim() && replyFiles.length === 0)
+              }
+              isSending={sendMutation.isPending}
+              onSend={submitReply}
+              onCancel={closeReply}
+            />
           )}
 
           {forwardOpen && (
-            <div
-              ref={forwardRef}
-              className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
-            >
-              <div className="flex flex-col gap-0.5">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  <Forward size={13} /> Forward
-                </p>
-                {/* The form sits below the dimmed later messages, so name the
-                    message being forwarded rather than leaving it implied. */}
-                {forwardSource && (
-                  <p className="text-xs text-muted-foreground">
-                    Forwarding {forwardSource.from.name} · {formatEmailDate(forwardSource.date)}
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">To</Label>
+            <InlineComposerPanel
+              variant="forward"
+              formRef={forwardRef}
+              // The form sits below the dimmed later messages, so name the
+              // message being forwarded rather than leaving it implied.
+              subtitle={
+                forwardSource
+                  ? `Forwarding ${forwardSource.from.name} · ${formatEmailDate(forwardSource.date)}`
+                  : undefined
+              }
+              toField={
                 <UserAutocomplete
                   value={forwardTo}
                   onChange={setForwardTo}
                   users={directory}
                   placeholder="Start typing a name…"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">CC</Label>
+              }
+              ccField={
                 <UserAutocomplete
                   value={forwardCc}
                   onChange={setForwardCc}
                   users={directory}
                   placeholder="Optional"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Subject</Label>
-                <Input
-                  value={forwardSubject}
-                  onChange={(e) => setForwardSubject(e.target.value)}
-                />
-              </div>
-              <RichTextEditor
-                html={forwardBody}
-                onChange={setForwardBody}
-                placeholder="Add a note…"
-                minHeight={200}
-                maxHeight={360}
-              />
-              {forwardAttLoading && (
-                <p className="text-xs text-muted-foreground">Loading attachments…</p>
-              )}
-              {forwardSkipped.length > 0 && (
-                <p className="text-xs text-amber-600">
-                  Not re-attached (too large to forward, or over the{' '}
-                  {MAX_ATTACHMENTS}-file limit):{' '}
-                  {forwardSkipped.join(', ')}
-                </p>
-              )}
-              {renderAttachRow(
-                forwardFiles,
-                setForwardFiles,
-                forwardFileInputRef,
-              )}
-              <PolishPanel
-                polish={forwardPolish}
-                context={POLISH_CONTEXT}
-                onAccept={(t) => {
-                  // Keep the quoted block; polish only rewrites the note above it.
-                  const { sig } = splitSignature(forwardBody);
-                  setForwardBody(
-                    sig ? `${textToHtml(t)}<div><br></div>${sig}` : textToHtml(t),
-                  );
-                }}
-              />
-              {sendError && <p className="text-xs text-destructive">{sendError}</p>}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-                  disabled={
-                    sendMutation.isPending ||
-                    forwardTo.length === 0 ||
-                    forwardAttLoading
-                  }
-                  onClick={submitForward}
-                >
-                  <Send size={14} />
-                  {sendMutation.isPending ? 'Sending…' : 'Send'}
-                </Button>
-                <PolishButton
-                  polish={forwardPolish}
-                  draftPlain={htmlToText(splitSignature(forwardBody).body)}
-                  context={POLISH_CONTEXT}
-                />
-                <Button size="sm" variant="outline" onClick={closeForward}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
+              }
+              subject={forwardSubject}
+              onSubjectChange={setForwardSubject}
+              body={forwardBody}
+              onBodyChange={setForwardBody}
+              bodyPlaceholder="Add a note…"
+              minHeight={200}
+              maxHeight={360}
+              files={forwardFiles}
+              setFiles={setForwardFiles}
+              onPickFiles={(picked) => pickFiles(picked, forwardFiles, setForwardFiles)}
+              attachmentNotice={attachmentNotice}
+              attachNotices={
+                <>
+                  {forwardAttLoading && (
+                    <p className="text-xs text-muted-foreground">Loading attachments…</p>
+                  )}
+                  {forwardSkipped.length > 0 && (
+                    <p className="text-xs text-amber-600">
+                      Not re-attached (too large to forward, or over the{' '}
+                      {MAX_ATTACHMENTS}-file limit): {forwardSkipped.join(', ')}
+                    </p>
+                  )}
+                </>
+              }
+              cloudLabel={null}
+              uploadProgress={sendMutation.uploadProgress}
+              error={sendError}
+              polish={forwardPolish}
+              polishContext={POLISH_CONTEXT}
+              polishDraftPlain={htmlToText(splitSignature(forwardBody).body)}
+              onPolishAccept={(t) => {
+                // Keep the quoted block; polish only rewrites the note above it.
+                const { sig } = splitSignature(forwardBody);
+                setForwardBody(
+                  sig ? `${textToHtml(t)}<div><br></div>${sig}` : textToHtml(t),
+                );
+              }}
+              sendLabel="Send"
+              sendDisabled={
+                sendMutation.isPending || forwardTo.length === 0 || forwardAttLoading
+              }
+              isSending={sendMutation.isPending}
+              onSend={submitForward}
+              onCancel={closeForward}
+            />
           )}
         </div>
         {completeConfirmDialog}

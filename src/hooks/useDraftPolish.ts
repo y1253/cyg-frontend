@@ -4,12 +4,14 @@ import { usePolishReply } from './usePolishReply';
 /**
  * Shared AI-polish state for a single draft editor (compose, reply or forward).
  *
- * CommunicationsTab keeps this inline because one component owns all three of its
- * drafts; the internal tab splits compose into its own component, so the logic
- * lives here instead of being written three times. Backed by the same
- * `POST /api/ai/polish-reply` endpoint — no new server work.
+ * One instance per editor: every composer that can be open at the same time as
+ * another needs its own, or they share a preview and an error. Backed by
+ * `POST /api/ai/polish-reply` — no new server work.
+ *
+ * `kind` picks the tone the server writes in: 'email' for mail bodies, 'chat' for
+ * a Google Chat / Teams reply (shorter, no salutation).
  */
-export function useDraftPolish() {
+export function useDraftPolish(kind: 'email' | 'chat' = 'email') {
   const mutation = usePolishReply();
   // The polished text awaiting an accept/discard decision.
   const [preview, setPreview] = useState<string | null>(null);
@@ -20,7 +22,7 @@ export function useDraftPolish() {
     if (!draftPlain.trim()) return;
     setSource(draftPlain);
     mutation.mutate(
-      { kind: 'email', draft: draftPlain, context },
+      { kind, draft: draftPlain, context },
       { onSuccess: (r) => setPreview(r.polished) },
     );
   };

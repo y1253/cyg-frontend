@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, faceLogin } from '../../api/auth';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +9,7 @@ import { FaceStage } from './FaceStage';
 import { LoginStyles } from './LoginStyles';
 import { VerifiedStage } from './VerifiedStage';
 import { NAVY_MID, TEXT_PRIMARY } from './loginTheme';
+import { warmup } from '../../lib/faceDetector';
 
 type Stage = 'email' | 'face' | 'admin' | 'verified';
 
@@ -20,6 +21,8 @@ export function LoginPage() {
   const [verifiedName, setVerifiedName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [faceAttempts, setFaceAttempts] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setUser, setToken } = useAuth();
   const navigate = useNavigate();
 
@@ -34,8 +37,20 @@ export function LoginPage() {
     const err = validateEmail(email);
     if (err) { setError(err); return; }
     setError('');
+    setFaceAttempts(0);
+    // Start fetching the detection model now, so the download hides behind the
+    // stage transition instead of stalling the camera.
+    warmup();
     setStage('face');
   }
+
+  /**
+   * The camera now fires by itself, so a failing login would otherwise retry
+   * forever against a paid API. Three consecutive attempts, then stop and wait for
+   * a deliberate retry or the password route.
+   */
+  const MAX_FACE_ATTEMPTS = 3;
+  const RETRY_COOLDOWN_MS = 2000;
 
   async function handleFaceCapture(blob: Blob) {
     setLoading(true);
@@ -48,11 +63,28 @@ export function LoginPage() {
       setStage('verified');
       setTimeout(() => navigate('/dashboard'), 3000);
     } catch (e) {
+      const attempts = faceAttempts + 1;
+      setFaceAttempts(attempts);
+      if (attempts >= MAX_FACE_ATTEMPTS) {
+        setError("We couldn't recognise you. Try again, or sign in with your password.");
+        setLoading(false);
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Face not recognized. Please try again.');
-    } finally {
-      setLoading(false);
+      // Hold the camera paused briefly before re-arming, so the user has a moment
+      // to read the message and reposition rather than being re-shot instantly.
+      cooldownRef.current = setTimeout(() => setLoading(false), RETRY_COOLDOWN_MS);
+      return;
     }
+    setLoading(false);
   }
+
+  const retryFace = useCallback(() => {
+    if (cooldownRef.current) clearTimeout(cooldownRef.current);
+    setFaceAttempts(0);
+    setError('');
+    setLoading(false);
+  }, []);
 
   async function handleAdminSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -134,9 +166,11 @@ export function LoginPage() {
                 email={email}
                 loading={loading}
                 error={error}
+                exhausted={faceAttempts >= MAX_FACE_ATTEMPTS}
                 onBack={() => goToStage('email')}
                 onCapture={handleFaceCapture}
                 onError={setError}
+                onRetry={retryFace}
               />
             )}
 

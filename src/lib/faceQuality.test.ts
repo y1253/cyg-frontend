@@ -1,0 +1,355 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_GATE,
+  estimateYaw,
+  evaluateFrame,
+  meanLuma,
+  poseMessage,
+  reasonMessage,
+  toGrayscale,
+  varianceOfLaplacian,
+  YAW_SIGN_RIGHT,
+  type FaceCandidate,
+  type GateConfig,
+  type PoseTarget,
+} from './faceQuality';
+
+const FRAME_W = 1280;
+const FRAME_H = 720;
+
+/** A face that passes every check, so each test can spoil exactly one thing. */
+function goodFace(overrides: Partial<FaceCandidate> = {}): FaceCandidate {
+  const width = FRAME_W * 0.4;
+  const height = width * 1.2;
+  return {
+    score: 0.95,
+    boundingBox: {
+      originX: FRAME_W / 2 - width / 2,
+      originY: FRAME_H / 2 - height / 2,
+      width,
+      height,
+    },
+    // Frontal: nose exactly between the eyes.
+    keypoints: [
+      { x: 0.45, y: 0.45 },
+      { x: 0.55, y: 0.45 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: 0.58 },
+      { x: 0.4, y: 0.48 },
+      { x: 0.6, y: 0.48 },
+    ],
+    ...overrides,
+  };
+}
+
+function evaluate(
+  faces: FaceCandidate[],
+  extra: { sharpness?: number; brightness?: number; pose?: PoseTarget; config?: GateConfig } = {},
+) {
+  return evaluateFrame({
+    faces,
+    frameWidth: FRAME_W,
+    frameHeight: FRAME_H,
+    sharpness: extra.sharpness ?? 200,
+    brightness: extra.brightness ?? 130,
+    pose: extra.pose ?? 'any',
+    config: extra.config,
+  });
+}
+
+describe('evaluateFrame — the happy path', () => {
+  it('accepts a centred, sharp, well-lit single face', () => {
+    const result = evaluate([goodFace()]);
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeNull();
+    expect(result.metrics?.faceCount).toBe(1);
+  });
+});
+
+describe('evaluateFrame — rejections', () => {
+  it('rejects an empty detection list', () => {
+    expect(evaluate([]).reason).toBe('no-face');
+  });
+
+  it('treats a low-confidence detection as no face', () => {
+    expect(evaluate([goodFace({ score: 0.2 })]).reason).toBe('no-face');
+  });
+
+  it('rejects two faces — you must not sign in as the person behind you', () => {
+    expect(evaluate([goodFace(), goodFace()]).reason).toBe('multiple-faces');
+  });
+
+  it('counts only confident faces, so a faint background face is ignored', () => {
+    expect(evaluate([goodFace(), goodFace({ score: 0.1 })]).ok).toBe(true);
+  });
+
+  it('rejects a face that is too far away', () => {
+    const width = FRAME_W * 0.1;
+    const face = goodFace({
+      boundingBox: {
+        originX: FRAME_W / 2 - width / 2,
+        originY: FRAME_H / 2 - width / 2,
+        width,
+        height: width * 1.2,
+      },
+    });
+    expect(evaluate([face]).reason).toBe('too-small');
+  });
+
+  it('rejects a face filling the frame', () => {
+    const width = FRAME_W * 0.9;
+    const face = goodFace({
+      boundingBox: { originX: 10, originY: 10, width, height: width },
+    });
+    expect(evaluate([face]).reason).toBe('too-large');
+  });
+
+  it('rejects a face pushed to the edge of frame', () => {
+    const width = FRAME_W * 0.4;
+    const face = goodFace({
+      boundingBox: {
+        originX: 0,
+        originY: FRAME_H / 2 - width / 2,
+        width,
+        height: width * 1.2,
+      },
+    });
+    expect(evaluate([face]).reason).toBe('off-center');
+  });
+
+  it('rejects a dark frame', () => {
+    expect(evaluate([goodFace()], { brightness: 20 }).reason).toBe('too-dark');
+  });
+
+  it('rejects a blown-out frame', () => {
+    expect(evaluate([goodFace()], { brightness: 250 }).reason).toBe('too-bright');
+  });
+
+  it('rejects a blurry frame', () => {
+    expect(evaluate([goodFace()], { sharpness: 3 }).reason).toBe('blurry');
+  });
+});
+
+describe('evaluateFrame — check precedence', () => {
+  // Order is the design: the user can act on one instruction at a time, and the
+  // first genuine problem should win.
+  it('reports darkness before blur, since a dark frame also measures as blurry', () => {
+    expect(evaluate([goodFace()], { brightness: 10, sharpness: 1 }).reason).toBe(
+      'too-dark',
+    );
+  });
+
+  it('reports distance before blur, for the same reason', () => {
+    const width = FRAME_W * 0.1;
+    const face = goodFace({
+      boundingBox: {
+        originX: FRAME_W / 2 - width / 2,
+        originY: FRAME_H / 2 - width / 2,
+        width,
+        height: width,
+      },
+    });
+    expect(evaluate([face], { sharpness: 1 }).reason).toBe('too-small');
+  });
+
+  it('reports no-face before anything else', () => {
+    expect(evaluate([], { brightness: 5, sharpness: 0 }).reason).toBe('no-face');
+  });
+});
+
+describe('estimateYaw', () => {
+  const kp = (noseX: number) => [
+    { x: 0.4, y: 0.45 },
+    { x: 0.6, y: 0.45 },
+    { x: noseX, y: 0.5 },
+  ];
+
+  it('is ~0 when the nose sits between the eyes', () => {
+    expect(estimateYaw(kp(0.5))).toBeCloseTo(0);
+  });
+
+  it('is signed, and opposite for opposite turns', () => {
+    expect(Math.sign(estimateYaw(kp(0.56)))).toBe(-Math.sign(estimateYaw(kp(0.44))));
+  });
+
+  it('is scale-invariant: leaning closer must not change the yaw', () => {
+    const near = [
+      { x: 0.3, y: 0.45 },
+      { x: 0.7, y: 0.45 },
+      { x: 0.62, y: 0.5 },
+    ];
+    const far = [
+      { x: 0.45, y: 0.45 },
+      { x: 0.55, y: 0.45 },
+      { x: 0.53, y: 0.5 },
+    ];
+    // Same relative offset (0.3 of the eye span) at two very different distances.
+    expect(estimateYaw(near)).toBeCloseTo(estimateYaw(far), 5);
+  });
+
+  it('returns 0 rather than NaN when the eyes coincide', () => {
+    const degenerate = [
+      { x: 0.5, y: 0.45 },
+      { x: 0.5, y: 0.45 },
+      { x: 0.5, y: 0.5 },
+    ];
+    expect(estimateYaw(degenerate)).toBe(0);
+  });
+
+  it('returns 0 when there are too few keypoints', () => {
+    expect(estimateYaw([{ x: 0.5, y: 0.5 }])).toBe(0);
+  });
+});
+
+describe('pose gating', () => {
+  /** Build keypoints whose yaw is exactly `yaw` (eye span 0.2 -> offset = yaw*0.2). */
+  const faceWithYaw = (yaw: number) =>
+    goodFace({
+      keypoints: [
+        { x: 0.4, y: 0.45 },
+        { x: 0.6, y: 0.45 },
+        { x: 0.5 + yaw * 0.2, y: 0.5 },
+        { x: 0.5, y: 0.58 },
+        { x: 0.4, y: 0.48 },
+        { x: 0.6, y: 0.48 },
+      ],
+    });
+
+  it('accepts a frontal face for pose "straight"', () => {
+    expect(evaluate([faceWithYaw(0)], { pose: 'straight' }).ok).toBe(true);
+  });
+
+  it('rejects a turned head for pose "straight"', () => {
+    expect(evaluate([faceWithYaw(0.4)], { pose: 'straight' }).reason).toBe(
+      'wrong-pose',
+    );
+  });
+
+  it('accepts a right turn for pose "right"', () => {
+    const yaw = 0.4 * YAW_SIGN_RIGHT;
+    expect(evaluate([faceWithYaw(yaw)], { pose: 'right' }).ok).toBe(true);
+  });
+
+  it('rejects a LEFT turn for pose "right" — the whole point of the pose gate', () => {
+    const yaw = -0.4 * YAW_SIGN_RIGHT;
+    expect(evaluate([faceWithYaw(yaw)], { pose: 'right' }).reason).toBe(
+      'wrong-pose',
+    );
+  });
+
+  it('rejects a frontal face for pose "right"', () => {
+    expect(evaluate([faceWithYaw(0)], { pose: 'right' }).reason).toBe('wrong-pose');
+  });
+
+  it('accepts a left turn for pose "left"', () => {
+    const yaw = -0.4 * YAW_SIGN_RIGHT;
+    expect(evaluate([faceWithYaw(yaw)], { pose: 'left' }).ok).toBe(true);
+  });
+
+  it('ignores pose entirely for "any", which is what login uses', () => {
+    expect(evaluate([faceWithYaw(0.5)], { pose: 'any' }).ok).toBe(true);
+  });
+});
+
+describe('varianceOfLaplacian', () => {
+  it('is ~0 for a flat image', () => {
+    const flat = new Uint8ClampedArray(32 * 32).fill(128);
+    expect(varianceOfLaplacian(flat, 32, 32)).toBeCloseTo(0);
+  });
+
+  it('is large for a high-contrast checkerboard', () => {
+    const size = 32;
+    const checker = new Uint8ClampedArray(size * size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        checker[y * size + x] = (x + y) % 2 === 0 ? 0 : 255;
+      }
+    }
+    expect(varianceOfLaplacian(checker, size, size)).toBeGreaterThan(1000);
+  });
+
+  it('ranks a sharp edge above a gradual ramp', () => {
+    const size = 32;
+    const ramp = new Uint8ClampedArray(size * size);
+    const edge = new Uint8ClampedArray(size * size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        ramp[y * size + x] = (x / size) * 255;
+        edge[y * size + x] = x < size / 2 ? 0 : 255;
+      }
+    }
+    expect(varianceOfLaplacian(edge, size, size)).toBeGreaterThan(
+      varianceOfLaplacian(ramp, size, size),
+    );
+  });
+
+  it('returns 0 for a buffer too small to have an interior', () => {
+    expect(varianceOfLaplacian(new Uint8ClampedArray(4), 2, 2)).toBe(0);
+  });
+});
+
+describe('grayscale and luma', () => {
+  it('converts RGBA to a buffer a quarter the length', () => {
+    const rgba = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255]);
+    const gray = toGrayscale(rgba);
+    expect(gray.length).toBe(2);
+    expect(gray[0]).toBe(255);
+    expect(gray[1]).toBe(0);
+  });
+
+  it('weights green most, per Rec. 601', () => {
+    const green = toGrayscale(new Uint8ClampedArray([0, 255, 0, 255]))[0];
+    const red = toGrayscale(new Uint8ClampedArray([255, 0, 0, 255]))[0];
+    const blue = toGrayscale(new Uint8ClampedArray([0, 0, 255, 255]))[0];
+    expect(green).toBeGreaterThan(red);
+    expect(red).toBeGreaterThan(blue);
+  });
+
+  it('averages luma across the buffer', () => {
+    expect(meanLuma(new Uint8ClampedArray([0, 100, 200]))).toBeCloseTo(100);
+  });
+
+  it('returns 0 for an empty buffer rather than NaN', () => {
+    expect(meanLuma(new Uint8ClampedArray(0))).toBe(0);
+  });
+});
+
+describe('messages', () => {
+  it('phrases pose guidance from the user perspective', () => {
+    expect(poseMessage('right')).toBe('Turn your head to your right');
+    expect(poseMessage('left')).toBe('Turn your head to your left');
+  });
+
+  it('specialises the wrong-pose message per target', () => {
+    expect(reasonMessage('wrong-pose', 'left')).toBe('Turn your head to your left');
+  });
+
+  it('leaves non-pose reasons alone', () => {
+    expect(reasonMessage('too-small', 'left')).toBe('Move closer');
+  });
+
+  it('has wording for every reason', () => {
+    const reasons = [
+      'no-face',
+      'multiple-faces',
+      'too-small',
+      'too-large',
+      'off-center',
+      'blurry',
+      'too-dark',
+      'too-bright',
+      'wrong-pose',
+    ] as const;
+    for (const r of reasons) {
+      expect(reasonMessage(r, 'any')).toBeTruthy();
+    }
+  });
+});
+
+describe('config overrides', () => {
+  it('honours a relaxed sharpness threshold, which is how tuning will work', () => {
+    const relaxed: GateConfig = { ...DEFAULT_GATE, minSharpness: 1 };
+    expect(evaluate([goodFace()], { sharpness: 5, config: relaxed }).ok).toBe(true);
+    expect(evaluate([goodFace()], { sharpness: 5 }).reason).toBe('blurry');
+  });
+});

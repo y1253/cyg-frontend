@@ -39,7 +39,26 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Deliberately NOT matching wasm/tflite: the MediaPipe runtime is ~11MB
+        // raw, and precaching it would make every PWA install download 11MB up
+        // front for a feature most sessions never reach. It is picked up by the
+        // runtimeCaching rule below instead — fetched once, on first use, then
+        // served from cache forever.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        runtimeCaching: [
+          {
+            // The face-detection model and its WASM runtime. Immutable for a given
+            // build and same-origin, so CacheFirst is safe — unlike /api, which is
+            // deliberately never cached (see the note below).
+            urlPattern: ({ url }) => url.pathname.startsWith('/mediapipe/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'mediapipe-assets',
+              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
         // The app uses createBrowserRouter, so unknown paths must fall back to the
         // shell — but every API helper uses a relative '/api' base, and without the
         // denylist the worker would answer those navigations with index.html.

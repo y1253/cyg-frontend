@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { roleLabel } from '../../api/users';
 import { selectItems } from '@/lib/select-items';
 import { useRoles } from '../../hooks/useRoles';
+import { FaceEnrollFlow } from './FaceEnrollFlow';
 import { useCreateUser } from '../../hooks/useCreateUser';
-import { useEnrollFace } from '../../hooks/useEnrollFace';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { WebcamCapture } from '@/components/ui/WebcamCapture';
 import {
   Dialog,
   DialogContent,
@@ -40,18 +39,8 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [newUserId, setNewUserId] = useState<number | null>(null);
   const [newUserName, setNewUserName] = useState('');
-  const [enrollError, setEnrollError] = useState('');
-  const [enrollStep, setEnrollStep] = useState(0);
-  const [capturedBlobs, setCapturedBlobs] = useState<Blob[]>([]);
   const { data: roles = [] } = useRoles();
   const createMutation = useCreateUser();
-  const enrollMutation = useEnrollFace();
-
-  const STEP_INSTRUCTIONS = [
-    'Look straight at the camera',
-    'Turn slightly to the right',
-    'Turn slightly to the left',
-  ];
 
   function handleOpenChange(val: boolean) {
     onOpenChange(val);
@@ -60,11 +49,7 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
       setForm(EMPTY_FORM);
       setNewUserId(null);
       setNewUserName('');
-      setEnrollError('');
-      setEnrollStep(0);
-      setCapturedBlobs([]);
       createMutation.reset();
-      enrollMutation.reset();
     }
   }
 
@@ -81,21 +66,6 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
         },
       },
     );
-  }
-
-  function handleCapture(blob: Blob) {
-    if (!newUserId) return;
-    const newBlobs = [...capturedBlobs, blob];
-    setCapturedBlobs(newBlobs);
-    if (enrollStep < 2) {
-      setEnrollStep(enrollStep + 1);
-    } else {
-      setEnrollError('');
-      enrollMutation.mutate(
-        { userId: newUserId, blobs: newBlobs as [Blob, Blob, Blob] },
-        { onSuccess: () => handleOpenChange(false) },
-      );
-    }
   }
 
   return (
@@ -170,66 +140,20 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
           </form>
         )}
 
-        {step === 2 && (
+        {step === 2 && newUserId !== null && (
           <div className="flex flex-col gap-4 mt-2">
             <p className="text-sm text-muted-foreground">
               User created. Capture 3 photos to enable face recognition login. You can skip and enroll later from the user detail page.
             </p>
 
-            {/* Step indicator */}
-            <div className="flex items-center gap-2">
-              {[0, 1, 2].map(i => (
-                <div
-                  key={i}
-                  className={`flex-1 h-1.5 rounded-full transition-colors ${
-                    i < capturedBlobs.length
-                      ? 'bg-teal-500'
-                      : i === enrollStep && !enrollMutation.isPending
-                      ? 'bg-teal-300'
-                      : 'bg-muted'
-                  }`}
-                />
-              ))}
-            </div>
-
-            <p className="text-sm font-medium text-center">
-              Photo {Math.min(enrollStep + 1, 3)} of 3
-            </p>
-            <p className="text-sm text-muted-foreground text-center">
-              {STEP_INSTRUCTIONS[enrollStep]}
-            </p>
-
-            {enrollMutation.isPending ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
-                  <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-                Enrolling face…
-              </div>
-            ) : (
-              <WebcamCapture
-                onCapture={handleCapture}
-                label={enrollStep < 2 ? 'Capture' : 'Capture & Enroll'}
-                onError={msg => setEnrollError(msg)}
-              />
-            )}
-
-            {enrollError && (
-              <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                {enrollError}
-              </p>
-            )}
-
-            <button
-              type="button"
-              onClick={() => handleOpenChange(false)}
-              className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 text-center transition-colors"
-            >
-              Skip for now
-            </button>
+            <FaceEnrollFlow
+              userId={newUserId}
+              onSuccess={() => handleOpenChange(false)}
+              onSkip={() => handleOpenChange(false)}
+            />
           </div>
         )}
+
       </DialogContent>
     </Dialog>
   );

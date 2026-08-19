@@ -8,7 +8,9 @@ export interface AppUser {
   id: number;
   name: string;
   email: string;
-  faceImages?: { id: number }[];
+  /** True once the user has a Luxand identity enrolled. */
+  faceEnrolled?: boolean;
+  faceEnrolledAt?: string | null;
   role: string;
   createdAt: string;
 }

@@ -16,6 +16,7 @@ import { UserAutocomplete } from './UserAutocomplete';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { AttachmentChips, UploadProgressBar } from './ComposerBits';
 import {
+  MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
   SIGNATURE_LEAD,
   htmlToText,
@@ -32,12 +33,6 @@ import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
 import { slotRight } from './composer-layout';
 import { cn } from '@/lib/utils';
 import type { ComposerActions, Draft } from '@/context/ComposerContext';
-
-// Matches FilesInterceptor('attachments', MAX_ATTACHMENTS) in gmail.controller.ts,
-// microsoft.controller.ts and internal-messages.controller.ts — all three agree.
-// The per-file byte cap lives in message-utils as MAX_FILE_BYTES and is likewise
-// the same on both paths.
-const MAX_ATTACHMENTS = 10;
 
 const INTERNAL_POLISH_CONTEXT =
   'An internal message between colleagues at a bookkeeping firm.';
@@ -375,6 +370,8 @@ function EmailComposerBody({
           placeholder="Write your message…"
           minHeight={160}
         />
+        {/* Not `AttachRow`: that renders its own Attach button above the chips,
+            and this window docks the trigger in the footer beside Send instead. */}
         <input
           ref={fileRef}
           type="file"
@@ -544,6 +541,7 @@ function InternalComposerBody({
           placeholder="Write your message…"
           minHeight={160}
         />
+        {/* See the email body above for why this isn't `AttachRow`. */}
         <input
           ref={fileRef}
           type="file"
