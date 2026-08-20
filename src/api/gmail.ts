@@ -592,7 +592,12 @@ export function emailAttachmentUrl(
     filename: att.filename,
   });
   if (disposition) params.set('disposition', disposition);
-  return `${base(companyId)}/companies/${companyId}/emails/${messageId}/attachments/${att.attachmentId}?${params.toString()}`;
+  // Both ids are encoded for the same reason `emailStateUrl` encodes its own:
+  // Outlook ids are base64 and can carry "/" and "=", which would otherwise split
+  // the path segment and 404 the route.
+  return `${base(companyId)}/companies/${companyId}/emails/${encodeURIComponent(
+    messageId,
+  )}/attachments/${encodeURIComponent(att.attachmentId)}?${params.toString()}`;
 }
 
 // Build an authenticated URL for an uploaded Chat attachment. Only valid when the

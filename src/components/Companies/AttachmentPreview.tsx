@@ -223,7 +223,7 @@ export function AttachmentPreview({
   // preview keeps rendering even once this component has been handed a new one.
   const enlarge = (viewerKind: 'image' | 'pdf') => {
     if (!url) return;
-    openViewer({ url, mimeType, filename, kind: viewerKind });
+    openViewer({ url, downloadUrl, mimeType, filename, kind: viewerKind });
   };
 
   if (url && !failed) {

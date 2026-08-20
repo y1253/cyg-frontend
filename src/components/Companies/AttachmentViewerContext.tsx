@@ -8,13 +8,20 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 
 // A file opened in the full-screen viewer. `url` is captured at open time and never
 // re-read from the message list, so the preview survives a background refetch that
 // hands the same file a brand-new Gmail attachment id.
 export interface ViewerItem {
   url: string;
+  /**
+   * Same bytes as `url` but served `Content-Disposition: attachment`, so the
+   * viewer can hand the file over without the user closing it to hunt for the
+   * tile's hover button. Optional: a body-embedded image may only have the one
+   * URL, and the browser still saves it, just inline-dispositioned.
+   */
+  downloadUrl?: string;
   mimeType: string;
   filename: string;
   kind: 'image' | 'pdf';
@@ -61,14 +68,28 @@ export function AttachmentViewerProvider({ children }: { children: ReactNode }) 
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
               onClick={close}
             >
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Close preview"
-                className="absolute right-4 top-4 inline-flex items-center justify-center rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="absolute right-4 top-4 flex items-center gap-2">
+                <a
+                  href={item.downloadUrl ?? item.url}
+                  download={item.filename}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Download ${item.filename}`}
+                  title={`Download ${item.filename}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center justify-center rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+                >
+                  <Download className="h-5 w-5" />
+                </a>
+                <button
+                  type="button"
+                  onClick={close}
+                  aria-label="Close preview"
+                  className="inline-flex items-center justify-center rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               {item.kind === 'pdf' ? (
                 <iframe
                   src={item.url}
