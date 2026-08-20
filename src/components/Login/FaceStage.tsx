@@ -1,3 +1,4 @@
+import type { FrameMetrics } from '../../lib/faceQuality';
 import { WebcamCapture } from '../ui/WebcamCapture';
 import { TEAL, TEXT_MUTED } from './loginTheme';
 import { BackLink, ErrorBox, Spinner, StageHeading } from './LoginUI';
@@ -18,7 +19,7 @@ export function FaceStage({
   /** Auto-capture has given up after repeated failures; wait for a deliberate retry. */
   exhausted: boolean;
   onBack: () => void;
-  onCapture: (blob: Blob) => void;
+  onCapture: (blob: Blob, metrics?: FrameMetrics) => void;
   onError: (message: string) => void;
   onRetry: () => void;
 }) {

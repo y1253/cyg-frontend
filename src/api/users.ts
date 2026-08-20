@@ -1,3 +1,4 @@
+import type { FaceBox } from './auth';
 import { fetchWithAuth } from './client';
 
 const API = '/api';
@@ -102,8 +103,23 @@ export async function deleteUser(token: string, id: number): Promise<void> {
   }
 }
 
-export async function enrollFace(token: string, userId: number, blobs: [Blob, Blob, Blob]): Promise<AppUser> {
+export async function enrollFace(
+  token: string,
+  userId: number,
+  blobs: [Blob, Blob, Blob],
+  /**
+   * Face rectangles, index-aligned with `blobs`. Enrolment is cropped the same
+   * way the login probe is: the stored gallery is what every later sign-in is
+   * compared against, so the two must not be prepared differently.
+   */
+  boxes?: (FaceBox | undefined)[],
+): Promise<AppUser> {
   const form = new FormData();
+  // JSON.stringify turns a missing entry into `null`, which is exactly what the
+  // server's parser reads as "no box for this photo".
+  if (boxes?.some(Boolean)) {
+    form.append('boxes', JSON.stringify(blobs.map((_, i) => boxes[i] ?? null)));
+  }
   blobs.forEach(b => form.append('photos', b, 'capture.jpg'));
   const res = await fetchWithAuth(token, `${API}/users/${userId}/enroll-face`, {
     method: 'POST',

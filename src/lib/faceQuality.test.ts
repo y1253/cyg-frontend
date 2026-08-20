@@ -72,6 +72,44 @@ describe('evaluateFrame — the happy path', () => {
   });
 });
 
+describe('evaluateFrame — the face box handed to the server', () => {
+  // The server crops to this box before sending the photo for recognition, so it
+  // has to be in fractions of the frame — not pixels. Pixels would force the
+  // server to reconcile the client's video dimensions against the decoded JPEG's.
+  it('reports the box normalised to 0..1 of the frame', () => {
+    const face = goodFace();
+    const { metrics } = evaluate([face]);
+
+    expect(metrics?.box).toEqual({
+      x: face.boundingBox.originX / FRAME_W,
+      y: face.boundingBox.originY / FRAME_H,
+      w: face.boundingBox.width / FRAME_W,
+      h: face.boundingBox.height / FRAME_H,
+    });
+  });
+
+  it('keeps the box inside the unit square for a centred face', () => {
+    const box = evaluate([goodFace()]).metrics!.box;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.w).toBeLessThanOrEqual(1);
+    expect(box.y + box.h).toBeLessThanOrEqual(1);
+  });
+
+  // A rejected frame still carries metrics, and the manual capture button may send
+  // one — so the box has to be populated there too, not only on the happy path.
+  it('reports the box on a rejected frame as well', () => {
+    const face = goodFace();
+    const result = evaluate([face], { sharpness: 1 });
+    expect(result.ok).toBe(false);
+    expect(result.metrics?.box.w).toBeCloseTo(face.boundingBox.width / FRAME_W);
+  });
+
+  it('defaults the timestamp when the caller does not stamp one', () => {
+    expect(evaluate([goodFace()]).metrics?.at).toBe(0);
+  });
+});
+
 describe('evaluateFrame — rejections', () => {
   it('rejects an empty detection list', () => {
     expect(evaluate([]).reason).toBe('no-face');

@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { AdminStage } from './AdminStage';
 import { BrandPanel } from './BrandPanel';
 import { EmailStage } from './EmailStage';
+import type { FrameMetrics } from '../../lib/faceQuality';
 import { FaceStage } from './FaceStage';
 import { LoginStyles } from './LoginStyles';
 import { VerifiedStage } from './VerifiedStage';
@@ -52,11 +53,11 @@ export function LoginPage() {
   const MAX_FACE_ATTEMPTS = 3;
   const RETRY_COOLDOWN_MS = 2000;
 
-  async function handleFaceCapture(blob: Blob) {
+  async function handleFaceCapture(blob: Blob, metrics?: FrameMetrics) {
     setLoading(true);
     setError('');
     try {
-      const data = await faceLogin(email, blob);
+      const data = await faceLogin(email, blob, metrics?.box);
       setToken(data.access_token);
       setUser(data.user);
       setVerifiedName(data.user.name);

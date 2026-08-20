@@ -167,6 +167,21 @@ export function WebcamCapture({
     onCapture: capture,
   });
 
+  /**
+   * The gate's latest reading, but only if it still describes what the camera is
+   * showing now.
+   *
+   * The common way the manual button gets used is the 8s fallback appearing while
+   * the gate is running perfectly well and simply being strict — so that press
+   * should still carry a face box and get the server-side crop. When the detector
+   * genuinely failed to load there are no metrics at all, and the upload falls
+   * back to the whole frame.
+   */
+  const freshMetrics = () => {
+    const m = gate.metrics;
+    return m && performance.now() - m.at < 500 ? m : undefined;
+  };
+
   // Offer the shutter if the gate cannot run, or is simply taking too long. This
   // is the universal escape hatch: too-strict thresholds, unusual lighting,
   // unusual faces, and whatever else was not anticipated.
@@ -417,7 +432,7 @@ export function WebcamCapture({
         <button
           type="button"
           disabled={!ready || paused}
-          onClick={() => capture()}
+          onClick={() => capture(freshMetrics())}
           style={{
             width: '100%',
             background: ready && !paused ? TEAL : 'rgba(59,191,180,0.3)',

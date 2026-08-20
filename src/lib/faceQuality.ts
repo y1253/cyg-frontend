@@ -67,6 +67,20 @@ export interface FrameMetrics {
   sharpness: number;
   brightness: number;
   yaw: number;
+  /**
+   * The detected face box, normalised to 0..1 of the frame.
+   *
+   * This is uploaded with the photo so the server can crop to the face before
+   * sending it on for recognition. Normalised rather than in pixels so that
+   * nothing downstream — the composer, the API helper, the server — has to know
+   * the frame dimensions or worry about whether they still match the JPEG.
+   */
+  box: { x: number; y: number; w: number; h: number };
+  /**
+   * `performance.now()` when this frame was judged. Lets a consumer ask whether
+   * the reading is still current; see the manual capture button.
+   */
+  at: number;
 }
 
 export interface GateConfig {
@@ -249,6 +263,8 @@ export function evaluateFrame(params: {
   /** Yaw of the previous shot, for 'turn-opposite'. */
   referenceYaw?: number | null;
   config?: GateConfig;
+  /** `performance.now()` of this frame; passed in to keep this function pure. */
+  at?: number;
 }): { ok: boolean; reason: GateReason | null; metrics: FrameMetrics | null } {
   const cfg = params.config ?? DEFAULT_GATE;
   const { faces, frameWidth, frameHeight } = params;
@@ -276,6 +292,13 @@ export function evaluateFrame(params: {
     sharpness: params.sharpness,
     brightness: params.brightness,
     yaw,
+    box: {
+      x: box.originX / frameWidth,
+      y: box.originY / frameHeight,
+      w: box.width / frameWidth,
+      h: box.height / frameHeight,
+    },
+    at: params.at ?? 0,
   };
 
   const fail = (reason: GateReason) => ({ ok: false, reason, metrics });

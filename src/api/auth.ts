@@ -26,9 +26,28 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return res.json();
 }
 
-export async function faceLogin(email: string, imageBlob: Blob): Promise<LoginResponse> {
+export interface FaceBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export async function faceLogin(
+  email: string,
+  imageBlob: Blob,
+  /**
+   * The face rectangle the browser's detector already found, as fractions of the
+   * frame. The server uses it to crop before sending the photo on for
+   * recognition; omitting it costs the crop, nothing else.
+   */
+  faceBox?: FaceBox,
+): Promise<LoginResponse> {
   const form = new FormData();
   form.append('email', email);
+  // Text fields before the file: busboy streams in order, so this keeps
+  // file-time validation possible if it is ever wanted.
+  if (faceBox) form.append('faceBox', JSON.stringify(faceBox));
   form.append('photo', imageBlob, 'capture.jpg');
 
   const res = await fetch(`${API}/auth/face-login`, {

@@ -263,6 +263,7 @@ export function useFaceCaptureGate(opts: {
           pose,
           referenceYaw,
           config,
+          at: now,
         });
 
         if (verdict.ok) {

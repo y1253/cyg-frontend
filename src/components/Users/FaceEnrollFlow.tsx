@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { WebcamCapture } from '../ui/WebcamCapture';
 import { useEnrollFace } from '../../hooks/useEnrollFace';
+import type { FaceBox } from '../../api/auth';
 import type { FrameMetrics, PoseTarget } from '../../lib/faceQuality';
 
 /**
@@ -41,6 +42,10 @@ interface Props {
 export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) {
   const [step, setStep] = useState(0);
   const [blobs, setBlobs] = useState<Blob[]>([]);
+  // Index-aligned with `blobs`. Entries may be undefined: a manual capture taken
+  // while the detector is unavailable has no box, and that photo simply goes to
+  // the server uncropped.
+  const [boxes, setBoxes] = useState<(FaceBox | undefined)[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [settling, setSettling] = useState(false);
@@ -79,6 +84,7 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
     previews.forEach((url) => URL.revokeObjectURL(url));
     setPreviews([]);
     setBlobs([]);
+    setBoxes([]);
     setStep(0);
     setSettling(false);
     setReferenceYaw(null);
@@ -86,7 +92,9 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
 
   function handleCapture(blob: Blob, metrics?: FrameMetrics) {
     const nextBlobs = [...blobs, blob];
+    const nextBoxes = [...boxes, metrics?.box];
     setBlobs(nextBlobs);
+    setBoxes(nextBoxes);
     setPreviews((p) => [...p, URL.createObjectURL(blob)]);
 
     // Remember which side the first turn went, so the last shot can demand the
@@ -101,7 +109,7 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
 
     setError('');
     enroll.mutate(
-      { userId, blobs: nextBlobs as [Blob, Blob, Blob] },
+      { userId, blobs: nextBlobs as [Blob, Blob, Blob], boxes: nextBoxes },
       {
         onSuccess,
         onError: (err) => {
@@ -119,6 +127,9 @@ export function FaceEnrollFlow({ userId, onSuccess, onSkip, skipLabel }: Props) 
     previews.slice(index).forEach((url) => URL.revokeObjectURL(url));
     setPreviews((p) => p.slice(0, index));
     setBlobs((b) => b.slice(0, index));
+    // Must be sliced alongside the blobs. Leaving this list long would shift every
+    // later box onto the wrong photo — a silent mis-crop rather than an error.
+    setBoxes((b) => b.slice(0, index));
     setStep(index);
     // Re-shooting the turn invalidates the recorded direction.
     if (index <= 1) setReferenceYaw(null);
