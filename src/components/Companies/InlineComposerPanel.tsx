@@ -5,9 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RichTextEditor } from './RichTextEditor';
 import { AttachRow } from './AttachRow';
-import { UploadProgressBar } from './ComposerBits';
+import { FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import type { DraftPolish } from '@/hooks/useDraftPolish';
+import { useFileDrop } from '@/hooks/useFileDrop';
 
 /**
  * The inline reply / forward form that opens below an open conversation, in both
@@ -46,6 +47,7 @@ export function InlineComposerPanel({
   files,
   setFiles,
   onPickFiles,
+  onDropFiles,
   attachmentNotice,
   attachNotices,
   cloudLabel,
@@ -84,6 +86,9 @@ export function InlineComposerPanel({
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
   onPickFiles: (picked: FileList | null) => void;
+  /** Opt-in drag-and-drop / paste-to-attach. Omitted by internal messaging,
+   *  which keeps the button-only flow. */
+  onDropFiles?: (files: File[]) => void;
   attachmentNotice: string | null;
   /** Extra warnings inside the attach block (hydration errors, size budgets). */
   attachNotices?: ReactNode;
@@ -101,8 +106,18 @@ export function InlineComposerPanel({
   onSend: () => void;
   onCancel: () => void;
 }) {
+  const drop = useFileDrop({
+    onFiles: (incoming) => onDropFiles?.(incoming),
+    enabled: !!onDropFiles,
+  });
+
   return (
-    <div ref={formRef} className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+    <div
+      ref={formRef}
+      {...drop.handlers}
+      className="relative border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
+    >
+      {drop.isOver && <FileDropOverlay />}
       <div className="flex flex-col gap-0.5">
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           {variant === 'forward' && <Forward size={13} />}

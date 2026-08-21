@@ -2,7 +2,11 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../api/auth';
 
-const TIMEOUT_MS = 30 * 60 * 1000;
+// How long the app sits idle before signing the user out. Read in two places
+// that must agree: the live idle timer below, and the cold-start check against
+// `lastActivity`, which is what makes the timeout survive a reload or a closed
+// tab rather than resetting every time the page loads.
+const TIMEOUT_MS = 60 * 60 * 1000;
 
 function clearSession() {
   localStorage.removeItem('token');

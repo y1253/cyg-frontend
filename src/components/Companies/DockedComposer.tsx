@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ChevronDown, ChevronUp, Paperclip, Send, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Maximize2, Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,7 @@ import { RichTextEditor } from './RichTextEditor';
 import { RecipientAutocomplete } from './RecipientAutocomplete';
 import { UserAutocomplete } from './UserAutocomplete';
 import { PolishButton, PolishPanel } from './PolishPanel';
-import { AttachmentChips, UploadProgressBar } from './ComposerBits';
+import { AttachmentChips, FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import {
   MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
@@ -26,6 +26,8 @@ import {
 } from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useDraggable } from '@/hooks/useDraggable';
+import { useResizable } from '@/hooks/useResizable';
+import { useFileDrop } from '@/hooks/useFileDrop';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useSendEmail } from '@/hooks/useSendEmail';
 import { useUserDirectory } from '@/hooks/useUserDirectory';
@@ -72,11 +74,14 @@ export function DockedComposer({
   zIndex: number;
   actions: ComposerActions;
 }) {
-  const { close, setMinimized, setPos, setSending, raise, notifyInternalSent } = actions;
+  const { close, setMinimized, setPos, setSize, setSending, raise, notifyInternalSent } =
+    actions;
   const { id, minimized } = draft;
   const [dirty, setDirty] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // The region below the title bar — what a resize actually gives a height to.
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   // Stable per draft. The bodies take these as effect dependencies, so an inline
   // arrow would get a fresh identity on every provider render, re-run the effect,
@@ -118,6 +123,12 @@ export function DockedComposer({
       : undefined,
   };
 
+  // A hand-set size is inline; the Tailwind width/height classes remain the
+  // default for a window the user has never resized. Minimized ignores it: the
+  // collapsed strip is a fixed width, and the size is remembered, not applied.
+  const sized = !minimized ? draft.size : null;
+  if (sized) style.width = sized.w;
+
   const drag = useDraggable({
     ref: rootRef,
     style: {
@@ -127,7 +138,28 @@ export function DockedComposer({
       bottom: style.bottom as number | 'auto',
     },
     minimized,
+    size: draft.size,
     onCommit: (pos) => setPos(id, pos),
+  });
+
+  const resize = useResizable({
+    rootRef,
+    bodyRef,
+    onCommit: (size, pos) => setSize(id, size, pos),
+  });
+
+  // The drop target is this wrapper — the whole window body, so a file can be
+  // dropped anywhere in it — but the attachment list lives in the composer body
+  // below. The child registers its adder here rather than the state being lifted,
+  // which would re-render the window on every keystroke in the editor.
+  const addFilesRef = useRef<((incoming: File[]) => void) | null>(null);
+  const registerAddFiles = useCallback((fn: (incoming: File[]) => void) => {
+    addFilesRef.current = fn;
+  }, []);
+  const drop = useFileDrop({
+    onFiles: (incoming) => addFilesRef.current?.(incoming),
+    // Email only, per the feature's scope; internal messages keep the button.
+    enabled: draft.kind === 'email',
   });
 
   // There is no draft autosave, so an accidental × is unrecoverable — unlike Gmail,
@@ -140,6 +172,7 @@ export function DockedComposer({
   const body =
     draft.kind === 'email' ? (
       <EmailComposerBody
+        registerAddFiles={registerAddFiles}
         companyId={draft.companyId}
         cloudLabel={draft.cloudLabel}
         signatureHtml={draft.signatureHtml}
@@ -176,11 +209,36 @@ export function DockedComposer({
           hidden && 'hidden',
         )}
       >
+        {/* Resize grip. Top-left because a parked window sits against the
+            bottom-right of the screen, so that is the only corner facing into the
+            page. A <button> so the drag hook's `closest('button')` guard skips it
+            and the title bar underneath never starts a move at the same time. */}
+        {!minimized && (
+          <button
+            type="button"
+            {...resize}
+            aria-label="Resize"
+            title="Drag to resize"
+            className="absolute left-0 top-0 z-10 flex h-6 w-6 cursor-nwse-resize touch-none items-center justify-center rounded-tl-lg text-white/40 hover:text-white/90"
+          >
+            {/* Rotated so the arrows run top-left to bottom-right, matching the
+                corner being dragged. */}
+            <Maximize2 size={11} className="rotate-90" />
+          </button>
+        )}
+
         <div
           {...drag}
-          onDoubleClick={() => setPos(id, null)}
+          onDoubleClick={() => {
+            setPos(id, null);
+            setSize(id, null);
+          }}
           title="Drag to move · double-click to dock"
-          className="flex cursor-move touch-none select-none items-center gap-2 rounded-t-lg bg-slate-800 px-3 py-2 text-white"
+          className={cn(
+            'flex cursor-move touch-none select-none items-center gap-2 rounded-t-lg bg-slate-800 py-2 pr-3 text-white',
+            // Room for the resize grip, which overlays this corner.
+            minimized ? 'pl-3' : 'pl-7',
+          )}
         >
           <button
             type="button"
@@ -219,13 +277,17 @@ export function DockedComposer({
         {/* Hidden, never unmounted — rendering it conditionally would destroy the
             draft, which is the whole point of a window you can minimize. */}
         <div
+          ref={bodyRef}
+          {...drop.handlers}
+          style={sized ? { height: sized.h } : undefined}
           className={
             minimized
               ? 'hidden'
-              : 'flex h-[min(32rem,calc(100vh-9rem))] flex-col gap-3 p-3'
+              : 'relative flex h-[min(32rem,calc(100vh-9rem))] flex-col gap-3 p-3'
           }
         >
           {body}
+          {drop.isOver && <FileDropOverlay />}
         </div>
       </div>
 
@@ -266,6 +328,7 @@ function EmailComposerBody({
   companyId,
   cloudLabel,
   signatureHtml,
+  registerAddFiles,
   onDirtyChange,
   onSendingChange,
   onSent,
@@ -273,6 +336,8 @@ function EmailComposerBody({
   companyId: number;
   cloudLabel: string;
   signatureHtml?: string;
+  /** Hands the window's drop target a way to add files to this list. */
+  registerAddFiles: (fn: (incoming: File[]) => void) => void;
 }) {
   const [to, setTo] = useState<string[]>([]);
   const [cc, setCc] = useState<string[]>([]);
@@ -283,6 +348,18 @@ function EmailComposerBody({
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // One path for every way a file arrives — the paperclip, a drop, a paste — so
+  // the de-duping and per-file ceiling can't diverge between them.
+  const addFiles = useCallback((incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setFiles((prev) => {
+      const merged = mergeAttachments(prev, incoming);
+      setAttachmentNotice(merged.notice);
+      return merged.files;
+    });
+  }, []);
+  useEffect(() => registerAddFiles(addFiles), [registerAddFiles, addFiles]);
 
   // Its OWN send mutation and polish state. CommunicationsTab shares one of each
   // across compose/reply/forward on the assumption that only one is ever open —
@@ -378,13 +455,7 @@ function EmailComposerBody({
           multiple
           className="hidden"
           onChange={(e) => {
-            const merged = mergeAttachments(
-              files,
-              Array.from(e.target.files ?? []),
-              MAX_ATTACHMENTS,
-            );
-            setFiles(merged.files);
-            setAttachmentNotice(merged.notice);
+            addFiles(Array.from(e.target.files ?? []));
             // Clear so picking the same file twice still fires onChange.
             e.target.value = '';
           }}
@@ -485,8 +556,9 @@ function InternalComposerBody({
       setError('Add at least one recipient.');
       return;
     }
-    if (!bodyText.trim()) {
-      setError('Write a message before sending.');
+    // An attachment on its own is a message — same rule as outbound email.
+    if (!bodyText.trim() && files.length === 0) {
+      setError('Write a message or attach a file before sending.');
       return;
     }
     sendMutation.mutate(
@@ -592,7 +664,11 @@ function InternalComposerBody({
         <Button
           size="sm"
           className="ml-auto gap-1 bg-teal-600 text-white hover:bg-teal-700"
-          disabled={sendMutation.isPending || to.length === 0 || !bodyText.trim()}
+          disabled={
+            sendMutation.isPending ||
+            to.length === 0 ||
+            (!bodyText.trim() && files.length === 0)
+          }
           onClick={handleSend}
         >
           <Send size={14} />

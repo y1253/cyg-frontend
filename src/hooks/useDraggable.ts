@@ -1,5 +1,9 @@
 import { useLayoutEffect, useRef } from 'react';
-import { clampPos, type ComposerPos } from '@/components/Companies/composer-layout';
+import {
+  clampPos,
+  type ComposerPos,
+  type ComposerSize,
+} from '@/components/Companies/composer-layout';
 
 /** The four offsets React writes into the window's inline style. Both anchors are
  *  always spelled — `'auto'` where unused — so an imperative write during a drag and
@@ -23,6 +27,7 @@ export function useDraggable({
   ref,
   style,
   minimized,
+  size,
   onCommit,
 }: {
   ref: React.RefObject<HTMLDivElement | null>;
@@ -30,6 +35,9 @@ export function useDraggable({
    *  went down but never actually moved. */
   style: DragStyle;
   minimized: boolean;
+  /** The window's hand-set size, if any. Without it a widened window clamps
+   *  against the default width and can be dragged partly off-screen. */
+  size: ComposerSize | null;
   onCommit: (pos: ComposerPos) => void;
 }) {
   const live = useRef<{
@@ -101,6 +109,7 @@ export function useDraggable({
       minimized,
       window.innerWidth,
       window.innerHeight,
+      size,
     );
     if (!d.moved && Math.abs(next.x - d.x) + Math.abs(next.y - d.y) > 4) d.moved = true;
     d.x = next.x;

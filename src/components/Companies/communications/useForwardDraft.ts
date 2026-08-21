@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { emailAttachmentUrl } from '@/api/gmail';
 import type { EmailAttachment, EmailDetail } from '@/api/gmail';
 import {
-  MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
   SIGNATURE_LEAD,
   buildForwardQuote,
@@ -123,11 +122,10 @@ export function useForwardDraft({
     if (candidates.length === 0) return;
 
     const tooBig = candidates.filter((c) => c.att.size > MAX_FORWARD_FILE_BYTES);
-    let keep = candidates.filter((c) => c.att.size <= MAX_FORWARD_FILE_BYTES);
-    // Cap before fetching, so nothing is downloaded only to be thrown away.
-    const overflow = keep.slice(MAX_ATTACHMENTS);
-    keep = keep.slice(0, MAX_ATTACHMENTS);
-    const skippedNames = [...tooBig, ...overflow].map((c) => c.att.filename || 'attachment');
+    // No count cap on outbound email, so every attachment under the per-file
+    // ceiling is forwarded; only oversized ones are skipped.
+    const keep = candidates.filter((c) => c.att.size <= MAX_FORWARD_FILE_BYTES);
+    const skippedNames = tooBig.map((c) => c.att.filename || 'attachment');
     if (skippedNames.length) setSkipped(skippedNames);
     if (keep.length === 0) return;
 
@@ -158,7 +156,7 @@ export function useForwardDraft({
           const key = `${f.name}:${f.size}`;
           return !nextKeys.has(key) && !auto.has(key);
         });
-        return [...fetched, ...manual].slice(0, MAX_ATTACHMENTS);
+        return [...fetched, ...manual];
       });
       autoKeysRef.current = nextKeys;
     } catch {

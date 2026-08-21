@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseAddressList, recipientSummary, displayName, extractEmail } from './message-utils';
+import {
+  displayName,
+  extractEmail,
+  mergeAttachments,
+  parseAddressList,
+  recipientSummary,
+} from './message-utils';
 
 describe('parseAddressList', () => {
   it('keeps a quoted comma inside one recipient', () => {
@@ -53,5 +59,39 @@ describe('displayName / extractEmail', () => {
     expect(displayName('"Jane" <j@x.com>')).toBe('Jane');
     expect(extractEmail('Jane <j@x.com>')).toBe('j@x.com');
     expect(extractEmail('j@x.com')).toBe('j@x.com');
+  });
+});
+
+describe('mergeAttachments', () => {
+  const f = (name: string, size = 10) =>
+    new File([new Uint8Array(size)], name, { type: 'application/pdf' });
+
+  // Outbound email has no count cap; the composers call it with no `max`.
+  it('keeps every file when no cap is given', () => {
+    const incoming = Array.from({ length: 40 }, (_, i) => f(`doc-${i}.pdf`));
+    const { files, notice } = mergeAttachments([], incoming);
+    expect(files).toHaveLength(40);
+    expect(notice).toBeNull();
+  });
+
+  // Internal messages still pass one, because their files live on our disk.
+  it('still truncates and explains when a cap is given', () => {
+    const incoming = Array.from({ length: 12 }, (_, i) => f(`doc-${i}.pdf`));
+    const { files, notice } = mergeAttachments([], incoming, 10);
+    expect(files).toHaveLength(10);
+    expect(notice).toContain('only 10 files can be attached');
+  });
+
+  it('de-dupes on name and size whether capped or not', () => {
+    const existing = [f('a.pdf')];
+    const { files, notice } = mergeAttachments(existing, [f('a.pdf'), f('b.pdf')]);
+    expect(files.map((x) => x.name)).toEqual(['a.pdf', 'b.pdf']);
+    expect(notice).toContain('already attached');
+  });
+
+  it('rejects a file over the per-file ceiling even with no count cap', () => {
+    const { files, notice } = mergeAttachments([], [f('huge.pdf', 100)], undefined, 50);
+    expect(files).toHaveLength(0);
+    expect(notice).toContain('limit');
   });
 });

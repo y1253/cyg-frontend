@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import type { CompanySummary } from '@/api/companies';
 import { CountBadge } from './CountBadge';
+import { isQuietCompany } from './quiet-company';
 
 export function CompanyRow({
   company,
@@ -18,6 +19,10 @@ export function CompanyRow({
   internal?: boolean;
   onClick: () => void;
 }) {
+  // Nothing pending and no tag of its own — recede so the rows that do want
+  // attention are the ones that stand out. Hover still lifts it back.
+  const quiet = isQuietCompany(company, uncompleted, internal);
+
   return (
     <button
       type="button"
@@ -26,7 +31,9 @@ export function CompanyRow({
         'group w-full text-left flex items-center gap-5 px-4 py-3 rounded-lg border transition-colors',
         internal
           ? 'border-teal-300 bg-teal-50/60 hover:bg-teal-50'
-          : 'bg-background hover:bg-muted/50',
+          : quiet
+            ? 'border-muted bg-muted/30 hover:bg-muted/60'
+            : 'bg-background hover:bg-muted/50',
       ].join(' ')}
     >
       {/* Name + meta */}
@@ -34,7 +41,7 @@ export function CompanyRow({
         <p
           className={[
             'font-medium text-[13px] truncate shrink-0 max-w-[280px]',
-            internal ? 'text-teal-800' : '',
+            internal ? 'text-teal-800' : quiet ? 'text-muted-foreground' : '',
           ].join(' ')}
         >
           {company.businessName}
@@ -65,7 +72,9 @@ export function CompanyRow({
           <CountBadge tone="amber">{company.importantTodos} important</CountBadge>
         )}
         {uncompleted !== undefined && (
-          <CountBadge tone="red">{uncompleted} uncompleted</CountBadge>
+          <CountBadge tone={uncompleted === 0 ? 'muted' : 'red'}>
+            {uncompleted} uncompleted
+          </CountBadge>
         )}
         {!internal && (
           <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">

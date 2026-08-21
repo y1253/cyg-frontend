@@ -12,7 +12,6 @@ import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { InlineComposerPanel } from '../InlineComposerPanel';
 import { RecipientAutocomplete } from '../RecipientAutocomplete';
 import {
-  MAX_ATTACHMENTS,
   SIGNATURE_LEAD,
   extractEmail,
   formatEmailDate,
@@ -252,14 +251,16 @@ export function EmailThreadView({
   const addFiles = (
     setter: React.Dispatch<React.SetStateAction<File[]>>,
     current: File[],
-    picked: FileList | null,
+    // A FileList from the picker, or a plain array from a drop / paste.
+    picked: FileList | File[] | null,
   ) => {
     const incoming = Array.from(picked ?? []);
     if (incoming.length === 0) return;
 
     // Shared with InternalMessagesTab: enforces the file count, the per-file byte
     // ceiling, and de-dupes — the server rejects the same three things.
-    const { files, notice } = mergeAttachments(current, incoming, MAX_ATTACHMENTS);
+    // No cap: outbound email takes any number of attachments.
+    const { files, notice } = mergeAttachments(current, incoming);
     setter(files);
     setAttachmentNotice(notice);
   };
@@ -570,6 +571,7 @@ export function EmailThreadView({
                 files={replyFiles}
                 setFiles={setReplyFiles}
                 onPickFiles={(picked) => addFiles(setReplyFiles, replyFiles, picked)}
+                onDropFiles={(dropped) => addFiles(setReplyFiles, replyFiles, dropped)}
                 attachmentNotice={attachmentNotice}
                 cloudLabel={cloudLabel}
                 uploadProgress={sendMutation.uploadProgress}
@@ -667,6 +669,7 @@ export function EmailThreadView({
                 files={forward.files}
                 setFiles={forward.setFiles}
                 onPickFiles={(picked) => addFiles(forward.setFiles, forward.files, picked)}
+                onDropFiles={(dropped) => addFiles(forward.setFiles, forward.files, dropped)}
                 attachmentNotice={attachmentNotice}
                 attachNotices={
                   <>
@@ -680,7 +683,7 @@ export function EmailThreadView({
                     )}
                     {forward.skipped.length > 0 && (
                       <p className="text-xs text-amber-600">
-                        Not forwarded (too large or over the {MAX_ATTACHMENTS}-file limit): {forward.skipped.join(', ')}
+                        Not forwarded (too large): {forward.skipped.join(', ')}
                       </p>
                     )}
                     {forward.form.body.length > FORWARD_BODY_BUDGET && (

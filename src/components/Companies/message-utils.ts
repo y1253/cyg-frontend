@@ -315,11 +315,15 @@ export function buildForwardedBody(
 export const MAX_FILE_BYTES = 250 * 1024 * 1024;
 
 /**
- * How many files one message may carry. Must match the server cap —
- * FilesInterceptor('attachments', MAX_ATTACHMENTS) in gmail.controller.ts,
- * microsoft.controller.ts and internal-messages.controller.ts, which all agree.
- * Exceeding it made multer throw LIMIT_UNEXPECTED_FILE, which surfaced only as a
- * generic "Failed to send". (The per-file byte cap is MAX_FILE_BYTES above.)
+ * How many files an INTERNAL message may carry. Must match the server cap —
+ * FilesInterceptor('attachments', MAX_ATTACHMENTS) in
+ * internal-messages.controller.ts. Exceeding it made multer throw
+ * LIMIT_UNEXPECTED_FILE, which surfaced only as a generic "Failed to send".
+ * (The per-file byte cap is MAX_FILE_BYTES above.)
+ *
+ * Outbound EMAIL has no count cap — its composers call `mergeAttachments`
+ * without a `max`. Internal messages keep one because their attachments are
+ * written to our own disk and never deleted.
  */
 export const MAX_ATTACHMENTS = 10;
 
@@ -358,7 +362,8 @@ export function attachmentsToLink(files: File[]): Set<File> {
 export function mergeAttachments(
   existing: File[],
   incoming: File[],
-  max: number,
+  /** Omit for no count limit — outbound email is uncapped. */
+  max?: number,
   maxBytes: number = MAX_FILE_BYTES,
 ): { files: File[]; notice: string | null } {
   const seen = new Set(existing.map((f) => `${f.name}:${f.size}`));
@@ -378,7 +383,8 @@ export function mergeAttachments(
     seen.add(key);
     added.push(file);
   }
-  const room = Math.max(0, max - existing.length);
+  const capped = max !== undefined;
+  const room = capped ? Math.max(0, max - existing.length) : added.length;
   const overflow = added.length - room;
   const files = [...existing, ...added.slice(0, room)];
 
@@ -391,7 +397,7 @@ export function mergeAttachments(
       `${tooBig} file${tooBig > 1 ? 's are' : ' is'} over the ${formatBytes(maxBytes)} limit`,
     );
   }
-  if (overflow > 0) {
+  if (capped && overflow > 0) {
     parts.push(`only ${max} files can be attached`);
   }
   return { files, notice: parts.length ? `${parts.join('; ')}.` : null };

@@ -83,3 +83,18 @@ export function UploadProgressBar({ progress }: { progress: number | null }) {
     </div>
   );
 }
+
+/**
+ * Shown over a composer while files are being dragged onto it.
+ *
+ * `pointer-events-none` matters: the overlay sits above the drop target, and a
+ * hit-testable child would fire dragleave the instant it appeared, cancelling
+ * the very drop it is advertising.
+ */
+export function FileDropOverlay({ label = 'Drop files to attach' }: { label?: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-md border-2 border-dashed border-teal-500 bg-teal-50/85">
+      <span className="text-sm font-medium text-teal-700">{label}</span>
+    </div>
+  );
+}

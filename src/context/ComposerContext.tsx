@@ -13,8 +13,10 @@ import { useAuth } from './AuthContext';
 import { ComposerStack } from '@/components/Companies/ComposerStack';
 import {
   clampPos,
+  clampSize,
   maxExpanded,
   type ComposerPos,
+  type ComposerSize,
 } from '@/components/Companies/composer-layout';
 
 /** Gmail's own limit, and a real one: three concurrent 250 MB uploads already
@@ -48,6 +50,10 @@ interface DraftCommon {
   /** `null` = parked in its default bottom-right slot; set once the user drags it,
    *  so the window comes back where they left it. */
   pos: ComposerPos | null;
+  /** `null` = the default 480-wide window; set once the user drags the resize grip.
+   *  Resizing also sets `pos` (see `useResizable`), so a sized window is never a
+   *  parked one and never competes for a slot its new width wouldn't fit. */
+  size: ComposerSize | null;
   /** Reported up by the mounted body. The provider renders from it (a sending window
    *  stays on screen off its own page), so it is state and not a ref. */
   sending: boolean;
@@ -65,6 +71,7 @@ export interface ComposerActions {
   close: (id: string) => void;
   setMinimized: (id: string, on: boolean) => void;
   setPos: (id: string, pos: ComposerPos | null) => void;
+  setSize: (id: string, size: ComposerSize | null, pos?: ComposerPos) => void;
   setSending: (id: string, on: boolean) => void;
   /** Bring a window to the front — on any pointer press inside it. */
   raise: (id: string) => void;
@@ -183,6 +190,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
         ownerPath: path,
         minimized: false,
         pos: null,
+        size: null,
         sending: false,
         attention: 0,
       });
@@ -236,6 +244,14 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
     (id: string, pos: ComposerPos | null) => patch(id, { pos }),
     [patch],
   );
+  // Size and position land together: the resize gesture moves the corner it is
+  // dragging, so committing them separately would render the window once at the new
+  // size in the old place.
+  const setSize = useCallback(
+    (id: string, size: ComposerSize | null, pos?: ComposerPos) =>
+      patch(id, pos === undefined ? { size } : { size, pos }),
+    [patch],
+  );
   const setSending = useCallback(
     (id: string, on: boolean) => patch(id, { sending: on }),
     [patch],
@@ -247,9 +263,15 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
     const vh = window.innerHeight;
     const prev = draftsRef.current;
     let next = prev.map((d) => {
-      if (!d.pos) return d;
-      const p = clampPos(d.pos, d.minimized, vw, vh);
-      return p.x === d.pos.x && p.y === d.pos.y ? d : { ...d, pos: p };
+      // A window sized on a wider screen has to come back inside this one before
+      // its position is clamped, or it is clamped against a width it no longer has.
+      const size = d.size ? clampSize(d.size, vw, vh) : null;
+      const sizeChanged = size && d.size && (size.w !== d.size.w || size.h !== d.size.h);
+      if (!d.pos) return sizeChanged ? { ...d, size } : d;
+      const p = clampPos(d.pos, d.minimized, vw, vh, size);
+      const posChanged = p.x !== d.pos.x || p.y !== d.pos.y;
+      if (!posChanged && !sizeChanged) return d;
+      return { ...d, pos: p, ...(sizeChanged ? { size } : {}) };
     });
     if (routePathRef.current !== null) {
       next = fitToViewport(next, routePathRef.current, vw);
@@ -289,6 +311,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
       close,
       setMinimized,
       setPos,
+      setSize,
       setSending,
       raise,
       reflow,
@@ -302,6 +325,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
       close,
       setMinimized,
       setPos,
+      setSize,
       setSending,
       raise,
       reflow,
