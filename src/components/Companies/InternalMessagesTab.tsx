@@ -27,8 +27,8 @@ import {
 } from './ForwardPreviewCard';
 import {
   buildForwardedBody, dedupeById, escapeHtml, formatEmailDate, formatForwardTime,
-  htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
-  prefixReSubject, senderInitial, splitSignature, textToHtml,
+  htmlToText, joinPolishedBody, mergeAttachments, openPrintWindow, prefixFwdSubject,
+  prefixReSubject, senderInitial, splitSignature,
 } from './message-utils';
 import { RecipientDetails } from './RecipientDetails';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
@@ -977,8 +977,13 @@ export function InternalMessagesTab({ active }: Props) {
               error={sendError}
               polish={replyPolish}
               polishContext={POLISH_CONTEXT}
-              polishDraftPlain={htmlToText(replyBody)}
-              onPolishAccept={(t) => setReplyBody(textToHtml(t))}
+              polishDraftPlain={htmlToText(splitSignature(replyBody).body)}
+              onPolishAccept={(t) => {
+                // Same shape as the forward handler below, so the two can't drift
+                // if internal messages ever gain a signature or a quoted tail.
+                const { sig } = splitSignature(replyBody);
+                setReplyBody(joinPolishedBody(t, sig));
+              }}
               sendLabel="Send Reply"
               sendDisabled={
                 sendMutation.isPending ||
@@ -1063,9 +1068,7 @@ export function InternalMessagesTab({ active }: Props) {
               onPolishAccept={(t) => {
                 // Keep the quoted block; polish only rewrites the note above it.
                 const { sig } = splitSignature(forwardBody);
-                setForwardBody(
-                  sig ? `${textToHtml(t)}<div><br></div>${sig}` : textToHtml(t),
-                );
+                setForwardBody(joinPolishedBody(t, sig));
               }}
               sendLabel="Send"
               sendDisabled={

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
 import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
 import { useInternalUnreadCount } from '@/hooks/useInternalUncompletedCount';
@@ -36,6 +37,8 @@ export function useNewMessageNotifier({
   const counts = useGmailUncompletedCounts();
   const internalUnread = useInternalUnreadCount();
   const companies = useCompanies();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   // Anything cached from before this mount belongs to a previous session — possibly
   // a different user, since logout does not clear the query cache. Baselining off it
@@ -89,8 +92,26 @@ export function useNewMessageNotifier({
     const unsuppressed = rose.filter((id) => !isSuppressed(`company:${id}`));
     if (unsuppressed.length === 0) return;
 
+    // A popup only belongs to the person the company is assigned to. The rule is the
+    // same for admins: they can SEE every company (and keep every dashboard badge),
+    // but a mailbox someone else works is not theirs to be interrupted by.
+    //
+    // Filtering here rather than on the count endpoint is deliberate — the baseline
+    // above still tracks every company. Drop an id from the baseline and a later
+    // reassignment would replay that company's whole backlog as one giant rise.
+    //
+    // A company absent from the list also falls out here, which is what retires the
+    // anonymous "A client company" toast: it could only ever fire for a company the
+    // user had no access to in the first place.
+    const mine = unsuppressed.filter(
+      (id) =>
+        userId !== null &&
+        companiesRef.current?.find((c) => c.id === id)?.assignedUser?.id === userId,
+    );
+    if (mine.length === 0) return;
+
     onCompaniesRose(
-      unsuppressed.map((id) => ({
+      mine.map((id) => ({
         id,
         name: companiesRef.current?.find((c) => c.id === id)?.businessName ?? null,
       })),
@@ -101,6 +122,7 @@ export function useNewMessageNotifier({
     internalCompanyId,
     onCompaniesRose,
     isSuppressed,
+    userId,
   ]);
 
   const internalBaselineRef = useRef<number | null>(null);

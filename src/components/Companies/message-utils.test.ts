@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   displayName,
+  joinPolishedBody,
+  SIGNATURE_LEAD,
+  splitSignature,
+  textToHtml,
   extractEmail,
   mergeAttachments,
   parseAddressList,
@@ -165,5 +169,33 @@ describe('replyAllRecipients', () => {
   it('keeps everyone when the account address is unknown', () => {
     const r = replyAllRecipients('Alice <alice@x.com>', 'me@cyg.com', '', undefined);
     expect(r.cc).toEqual(['me@cyg.com']);
+  });
+});
+
+describe('joinPolishedBody', () => {
+  const SIG = '<div data-cyg-signature="1">Jane Doe</div>';
+
+  it('restores the four-blank-line gap the composer seeded above the signature', () => {
+    const out = joinPolishedBody('Hello there', SIG);
+    expect(out).toBe(`Hello there${SIGNATURE_LEAD}${SIG}`);
+    expect(out).toContain(SIGNATURE_LEAD);
+  });
+
+  it('adds no trailing blank lines when there is no signature or quote', () => {
+    expect(joinPolishedBody('Hello there', '')).toBe(textToHtml('Hello there'));
+  });
+
+  it('is idempotent across repeated accepts', () => {
+    const first = joinPolishedBody('draft one', SIG);
+    const second = joinPolishedBody('draft two', splitSignature(first).sig);
+    expect(splitSignature(second).body).toBe(`draft two${SIGNATURE_LEAD}`);
+    expect(second).toBe(`draft two${SIGNATURE_LEAD}${SIG}`);
+  });
+
+  it('keeps a forward quote below the polished note', () => {
+    const quote = '<div data-cyg-forward="1">original</div>';
+    expect(joinPolishedBody('see below', quote)).toBe(
+      `see below${SIGNATURE_LEAD}${quote}`,
+    );
   });
 });

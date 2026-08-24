@@ -18,9 +18,9 @@ import { AttachmentChips, FileDropOverlay, UploadProgressBar } from './ComposerB
 import {
   SIGNATURE_LEAD,
   htmlToText,
+  joinPolishedBody,
   mergeAttachments,
   splitSignature,
-  textToHtml,
   wrapBodyFont,
 } from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
@@ -505,9 +505,8 @@ function EmailComposerBody({
             // Re-attach the original (unpolished) signature after the polished
             // text — it was split off before the draft went to the model, and the
             // server no longer appends one, so dropping it here sends a bare mail.
-            const html = textToHtml(polished);
             const { sig } = splitSignature(body);
-            setBody(sig ? `${html}<div><br></div>${sig}` : html);
+            setBody(joinPolishedBody(polished, sig));
           }}
         />
       </div>
@@ -714,9 +713,8 @@ function InternalComposerBody({
             // Internal messages carry no signature today, so `sig` is always ''.
             // Kept in the same shape as the email composer above so the two can't
             // drift if one ever gains a signature or a quoted tail.
-            const html = textToHtml(polished);
             const { sig } = splitSignature(body);
-            setBody(sig ? `${html}<div><br></div>${sig}` : html);
+            setBody(joinPolishedBody(polished, sig));
           }}
         />
         {error && <p className="text-xs text-destructive">{error}</p>}

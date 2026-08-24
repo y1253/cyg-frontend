@@ -17,6 +17,8 @@ import { useMarkChatUncomplete } from '@/hooks/useMarkChatUncomplete';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { fetchAuthUrl } from '@/api/gmail';
+import { fetchLatestPreview } from '@/api/communications';
+import { messagePreview } from '@/lib/notificationText';
 import type { EmailProvider } from '@/api/gmail';
 import { useAttachmentViewer } from './AttachmentViewerContext';
 import { CompleteConfirmDialog } from './CompleteConfirmDialog';
@@ -43,6 +45,12 @@ interface Props {
   companyId: number;
   isAdmin: boolean;
   /**
+   * This company is assigned to the signed-in user. Gates the new-email popup only:
+   * a mailbox someone else works should not interrupt you, admin or not. The in-tab
+   * banner is unaffected — that is feedback on a screen you are already looking at.
+   */
+  assignedToMe: boolean;
+  /**
    * Communications is the visible tab. The component is kept mounted while hidden
    * (so the open message, folder, search and any in-progress draft survive a tab
    * switch), so anything that should only happen while the user is *looking* at the
@@ -61,10 +69,10 @@ interface Props {
  * actually renders it. Drafts belong to the view they are typed in, so they reset
  * by unmounting rather than by hand.
  */
-export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
+export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
-  const { notifyPush } = useNotifications();
+  const { notifyPush, suppressSource } = useNotifications();
   const { openEmail } = useComposer();
 
   const [connecting, setConnecting] = useState(false);
@@ -283,19 +291,41 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
           // the banner above and the alert are deliberately not exclusive. Stamping
           // the company as the source also stops the slower count poll from
           // announcing this same email a second time.
-          notifyPush({
-            source: `company:${companyId}`,
-            title: 'New email',
-            body: account?.emailAddress ?? account?.gmailAddress ?? 'New message',
-            tag: `cyg-company-${companyId}`,
-          });
+          if (assignedToMe) {
+            // Stamp the source NOW, not after the await below. notifyPush stamps it
+            // too, but the preview fetch can take seconds, and the 60s count poll
+            // landing inside that window would announce this same email twice.
+            suppressSource(`company:${companyId}`);
+            // Same preview fetch the cross-company poll uses, so a pushed popup and
+            // a polled one read identically. The body used to be the mailbox
+            // address, which said nothing about the message that just landed.
+            void (async () => {
+              const preview = await fetchLatestPreview(token, companyId);
+              notifyPush({
+                source: `company:${companyId}`,
+                title: 'New email',
+                body: preview ? messagePreview(preview) : 'New message',
+                tag: `cyg-company-${companyId}`,
+              });
+            })();
+          }
         }
       } catch {
         // ignore parse errors
       }
     };
     return () => es.close();
-  }, [active, account, companyId, token, qc, provider, notifyPush]);
+  }, [
+    active,
+    account,
+    assignedToMe,
+    companyId,
+    token,
+    qc,
+    provider,
+    notifyPush,
+    suppressSource,
+  ]);
 
   const handleConnect = useCallback(
     async (prov: EmailProvider = 'GOOGLE', kind: 'work' | 'personal' = 'work') => {

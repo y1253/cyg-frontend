@@ -9,6 +9,9 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
+import { fetchLatestPreview } from '@/api/communications';
+import { messagePreview } from '@/lib/notificationText';
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -42,6 +45,16 @@ const SUPPRESS_MS: Record<string, number> = {
   internal: 45_000,
   company: 90_000,
 };
+
+/**
+ * How old the newest message may be and still be treated as "what just arrived".
+ *
+ * The count map rises for reasons other than delivery — marking something
+ * uncompleted does it too — and the poll itself runs only once a minute. Beyond this
+ * window the newest inbox item probably isn't the cause, so the popup says the
+ * honest generic thing rather than quoting an email from last Tuesday.
+ */
+const PREVIEW_MAX_AGE_MS = 10 * 60 * 1000;
 
 interface Prefs {
   sound: boolean;
@@ -118,6 +131,7 @@ const NotificationCtx = createContext<NotificationValue | null>(null);
  */
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const { token } = useAuth();
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
   const [permission, setPermission] = useState<
     NotificationPermission | 'unsupported'
@@ -128,6 +142,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const lastChimeRef = useRef(0);
   const suppressRef = useRef(new Map<string, number>());
+
+  // Read through a ref for the same reason as prefs: a re-created callback would
+  // restart the debounce timers and re-run the count-diff effect.
+  const tokenRef = useRef(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   // Read prefs from a ref inside callbacks so they don't need to be dependencies —
   // a re-created callback would restart the debounce timers.
@@ -287,11 +308,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const workspaceId = internalWorkspaceId.current;
         notify({
           title: meta.from ?? 'New internal message',
+          // The sender is already the title here, so only subject + snippet go in
+          // the body — messagePreview skips the parts it isn't given.
           body: meta.from
-            ? [meta.subject || '(no subject)', meta.snippet]
-                .filter(Boolean)
-                .join(' — ')
-                .slice(0, 120)
+            ? messagePreview({ subject: meta.subject, snippet: meta.snippet })
             : 'You have a new message in Cyg Finance',
           tag: 'cyg-internal',
           onClick: workspaceId
@@ -312,12 +332,24 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     (risen: RisenCompany[]) => {
       if (risen.length === 1) {
         const only = risen[0];
-        notify({
-          title: only.name ?? 'A client company',
-          body: 'New message',
-          tag: `cyg-company-${only.id}`,
-          onClick: () => openCompany(only.id, 'communications'),
-        });
+        // The count map is integers only, so the message itself has to be fetched.
+        // Deliberately not awaited by anything: the popup fires a beat later, which
+        // is nothing next to the up-to-60s poll that detected the arrival, and a
+        // failed or stale preview still produces a popup with a generic body.
+        void (async () => {
+          const preview = tokenRef.current
+            ? await fetchLatestPreview(tokenRef.current, only.id)
+            : null;
+          const fresh =
+            preview &&
+            Date.now() - Date.parse(preview.receivedAt) < PREVIEW_MAX_AGE_MS;
+          notify({
+            title: only.name ?? 'A client company',
+            body: fresh ? messagePreview(preview) : 'New message',
+            tag: `cyg-company-${only.id}`,
+            onClick: () => openCompany(only.id, 'communications'),
+          });
+        })();
         return;
       }
 

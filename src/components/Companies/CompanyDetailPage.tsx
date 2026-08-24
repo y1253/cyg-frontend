@@ -3164,6 +3164,7 @@ export function CompanyDetailPage() {
               key={companyId}
               companyId={companyId}
               isAdmin={isAdmin}
+              assignedToMe={company.assignedUser?.id === user?.id}
               active={tab === 'communications'}
             />
           </div>

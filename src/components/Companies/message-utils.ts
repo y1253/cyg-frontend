@@ -247,6 +247,20 @@ export function textToHtml(text: string): string {
 }
 
 /**
+ * Rejoin an accepted AI-polished draft with the untouched tail `splitSignature` cut
+ * off (the signature, and on a forward the quoted block below it).
+ *
+ * Uses SIGNATURE_LEAD — the same four blank lines the composer seeds — rather than a
+ * single <br>. A one-line gap glued the signature to the last line of the polished
+ * prose, and because the gap came out of the *polished* side each time, accepting
+ * twice in a row shrank it further instead of being idempotent.
+ */
+export function joinPolishedBody(polished: string, sig: string): string {
+  const html = textToHtml(polished);
+  return sig ? `${html}${SIGNATURE_LEAD}${sig}` : html;
+}
+
+/**
  * Scrub untrusted message HTML before it is seeded into the RichTextEditor.
  *
  * Detail views render bodies inside a sandboxed <iframe srcDoc>, but the editor

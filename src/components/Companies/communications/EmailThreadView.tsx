@@ -15,12 +15,12 @@ import {
   SIGNATURE_LEAD,
   formatEmailDate,
   htmlToText,
+  joinPolishedBody,
   mergeAttachments,
   openPrintWindow,
   prefixReSubject,
   replyAllRecipients,
   splitSignature,
-  textToHtml,
   wrapBodyFont,
 } from '../message-utils';
 import { ThreadMessage } from './ThreadMessage';
@@ -630,9 +630,8 @@ export function EmailThreadView({
                 polishDraftPlain={htmlToText(splitSignature(replyForm.body).body)}
                 onPolishAccept={(polished) => {
                   // Re-attach the original (unpolished) signature after the polished text.
-                  const html = textToHtml(polished);
                   const { sig } = splitSignature(replyForm.body);
-                  setReplyForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
+                  setReplyForm((f) => ({ ...f, body: joinPolishedBody(polished, sig) }));
                 }}
                 sendLabel="Send Reply"
                 sendDisabled={
@@ -763,9 +762,8 @@ export function EmailThreadView({
                 onPolishAccept={(polished) => {
                   // `sig` carries the signature AND the quoted forwarded block below
                   // it — polish only ever rewrites the user's own text above it.
-                  const html = textToHtml(polished);
                   const { sig } = splitSignature(forward.form.body);
-                  forward.setForm((f) => ({ ...f, body: sig ? `${html}<div><br></div>${sig}` : html }));
+                  forward.setForm((f) => ({ ...f, body: joinPolishedBody(polished, sig) }));
                 }}
                 sendLabel="Send"
                 sendDisabled={
