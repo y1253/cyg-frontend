@@ -6,6 +6,10 @@ interface RecipientDetailsProps {
   from: EmailAddr;
   to: EmailAddr[];
   cc: EmailAddr[];
+  /** Only ever non-empty for the sender's own copy — the server hides it from
+   *  every other viewer. Absent for company mailboxes: no provider returns a Bcc
+   *  header on received mail. */
+  bcc?: EmailAddr[];
   date: string;
   /** The viewer's own address — rendered as "me", the way Gmail does. */
   selfEmail?: string;
@@ -26,7 +30,7 @@ function formatAddr(a: EmailAddr): string {
  * keyed by message id, so no parent-held Set is needed and the 15s inbox poll
  * can't collapse an open panel.
  */
-export function RecipientDetails({ from, to, cc, date, selfEmail }: RecipientDetailsProps) {
+export function RecipientDetails({ from, to, cc, bcc = [], date, selfEmail }: RecipientDetailsProps) {
   const [open, setOpen] = useState(false);
   const self = selfEmail?.trim().toLowerCase();
   const label = (a: EmailAddr) =>
@@ -59,6 +63,11 @@ export function RecipientDetails({ from, to, cc, date, selfEmail }: RecipientDet
           {cc.length > 0 && (
             <div className="break-words">
               <span className="font-medium">Cc:</span> {cc.map(label).join(', ')}
+            </div>
+          )}
+          {bcc.length > 0 && (
+            <div className="break-words">
+              <span className="font-medium">Bcc:</span> {bcc.map(label).join(', ')}
             </div>
           )}
           <div>

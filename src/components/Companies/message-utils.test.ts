@@ -5,6 +5,7 @@ import {
   mergeAttachments,
   parseAddressList,
   recipientSummary,
+  replyAllRecipients,
 } from './message-utils';
 
 describe('parseAddressList', () => {
@@ -74,7 +75,8 @@ describe('mergeAttachments', () => {
     expect(notice).toBeNull();
   });
 
-  // Internal messages still pass one, because their files live on our disk.
+  // No caller passes a cap any more (internal messages matched email), but the
+  // parameter stays supported — keep it honest.
   it('still truncates and explains when a cap is given', () => {
     const incoming = Array.from({ length: 12 }, (_, i) => f(`doc-${i}.pdf`));
     const { files, notice } = mergeAttachments([], incoming, 10);
@@ -93,5 +95,75 @@ describe('mergeAttachments', () => {
     const { files, notice } = mergeAttachments([], [f('huge.pdf', 100)], undefined, 50);
     expect(files).toHaveLength(0);
     expect(notice).toContain('limit');
+  });
+});
+
+const ME = 'me@cyg.com';
+
+describe('replyAllRecipients', () => {
+  it('answers the sender and copies everyone else', () => {
+    const r = replyAllRecipients(
+      'Alice <alice@x.com>',
+      'me@cyg.com, Bob <bob@x.com>',
+      'Carol <carol@x.com>',
+      ME,
+    );
+    expect(r.to).toEqual(['alice@x.com']);
+    expect(r.cc).toEqual(['bob@x.com', 'carol@x.com']);
+  });
+
+  it('never addresses the reply back at the account itself', () => {
+    const r = replyAllRecipients('Alice <alice@x.com>', 'me@cyg.com', '', ME);
+    expect(r.to).toEqual(['alice@x.com']);
+    expect(r.cc).toEqual([]);
+  });
+
+  it('is case-insensitive about the account address', () => {
+    const r = replyAllRecipients('Alice <alice@x.com>', 'ME@CYG.com', '', ME);
+    expect(r.cc).toEqual([]);
+  });
+
+  // The reason this helper exists instead of `detail.to.split(',')`: a display
+  // name may legitimately contain a comma.
+  it('does not split inside a quoted display name', () => {
+    const r = replyAllRecipients(
+      'Alice <alice@x.com>',
+      '"Doe, Jane" <jane@x.com>, bob@x.com',
+      undefined,
+      ME,
+    );
+    expect(r.cc).toEqual(['jane@x.com', 'bob@x.com']);
+  });
+
+  it('replies to the original recipients for a message the account sent', () => {
+    const r = replyAllRecipients(
+      'Me <me@cyg.com>',
+      'Alice <alice@x.com>, Bob <bob@x.com>',
+      'carol@x.com',
+      ME,
+    );
+    expect(r.to).toEqual(['alice@x.com', 'bob@x.com']);
+    expect(r.cc).toEqual(['carol@x.com']);
+  });
+
+  it('de-dupes across To and Cc, keeping the address in To only', () => {
+    const r = replyAllRecipients(
+      'Alice <alice@x.com>',
+      'Bob <bob@x.com>',
+      'ALICE@x.com, bob@x.com',
+      ME,
+    );
+    expect(r.to).toEqual(['alice@x.com']);
+    expect(r.cc).toEqual(['bob@x.com']);
+  });
+
+  it('tolerates a missing cc header', () => {
+    expect(replyAllRecipients('a@x.com', 'b@x.com', null, ME).cc).toEqual(['b@x.com']);
+    expect(replyAllRecipients('a@x.com', '', undefined, ME).cc).toEqual([]);
+  });
+
+  it('keeps everyone when the account address is unknown', () => {
+    const r = replyAllRecipients('Alice <alice@x.com>', 'me@cyg.com', '', undefined);
+    expect(r.cc).toEqual(['me@cyg.com']);
   });
 });

@@ -16,13 +16,12 @@ import { UserAutocomplete } from './UserAutocomplete';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { AttachmentChips, FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import {
-  MAX_ATTACHMENTS,
-  MAX_FILE_BYTES,
   SIGNATURE_LEAD,
   htmlToText,
   mergeAttachments,
   splitSignature,
   textToHtml,
+  wrapBodyFont,
 } from './message-utils';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useDraggable } from '@/hooks/useDraggable';
@@ -156,10 +155,11 @@ export function DockedComposer({
   const registerAddFiles = useCallback((fn: (incoming: File[]) => void) => {
     addFilesRef.current = fn;
   }, []);
+  // Both kinds: internal messages get the same drag-and-paste flow as email.
+  // `useFileDrop` returns onPaste alongside the drag handlers, so gating this
+  // would silently cost pasting a screenshot as well as dropping a file.
   const drop = useFileDrop({
     onFiles: (incoming) => addFilesRef.current?.(incoming),
-    // Email only, per the feature's scope; internal messages keep the button.
-    enabled: draft.kind === 'email',
   });
 
   // There is no draft autosave, so an accidental × is unrecoverable — unlike Gmail,
@@ -182,6 +182,7 @@ export function DockedComposer({
       />
     ) : (
       <InternalComposerBody
+        registerAddFiles={registerAddFiles}
         onDirtyChange={setDirty}
         onSendingChange={handleSendingChange}
         onSent={() => {
@@ -341,6 +342,10 @@ function EmailComposerBody({
 }) {
   const [to, setTo] = useState<string[]>([]);
   const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+  // Bcc is hidden until asked for, like Gmail — it's the rare case, and an always
+  // visible third row costs height in a small docked window.
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState(
     signatureHtml ? `${SIGNATURE_LEAD}${signatureHtml}` : '',
@@ -402,8 +407,9 @@ function EmailComposerBody({
         to: to.join(', '),
         subject,
         body: bodyText,
-        bodyHtml: body,
+        bodyHtml: wrapBodyFont(body),
         cc: cc.length ? cc.join(', ') : undefined,
+        bcc: bcc.length ? bcc.join(', ') : undefined,
         files,
       },
       { onSuccess: onSent },
@@ -425,7 +431,18 @@ function EmailComposerBody({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label className="text-xs">CC</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">CC</Label>
+            {!showBcc && (
+              <button
+                type="button"
+                onClick={() => setShowBcc(true)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Bcc
+              </button>
+            )}
+          </div>
           <RecipientAutocomplete
             value={cc}
             onChange={setCc}
@@ -433,6 +450,17 @@ function EmailComposerBody({
             placeholder="Optional"
           />
         </div>
+        {showBcc && (
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">BCC</Label>
+            <RecipientAutocomplete
+              value={bcc}
+              onChange={setBcc}
+              contacts={contacts ?? []}
+              placeholder="Hidden from other recipients"
+            />
+          </div>
+        )}
         <Input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
@@ -473,7 +501,14 @@ function EmailComposerBody({
         <PolishPanel
           polish={polish}
           context={polishContext}
-          onAccept={(polished) => setBody(textToHtml(polished))}
+          onAccept={(polished) => {
+            // Re-attach the original (unpolished) signature after the polished
+            // text — it was split off before the draft went to the model, and the
+            // server no longer appends one, so dropping it here sends a bare mail.
+            const html = textToHtml(polished);
+            const { sig } = splitSignature(body);
+            setBody(sig ? `${html}<div><br></div>${sig}` : html);
+          }}
         />
       </div>
 
@@ -511,18 +546,36 @@ function EmailComposerBody({
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 function InternalComposerBody({
+  registerAddFiles,
   onDirtyChange,
   onSendingChange,
   onSent,
-}: BodyProps) {
+}: BodyProps & {
+  /** Hands the window's drop target a way to add files to this list. */
+  registerAddFiles: (fn: (incoming: File[]) => void) => void;
+}) {
   const [to, setTo] = useState<number[]>([]);
   const [cc, setCc] = useState<number[]>([]);
+  const [bcc, setBcc] = useState<number[]>([]);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // One path for every way a file arrives — the paperclip, a drop, a paste — so
+  // the de-duping and per-file ceiling can't diverge between them.
+  const addFiles = useCallback((incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setFiles((prev) => {
+      const merged = mergeAttachments(prev, incoming);
+      setAttachmentNotice(merged.notice);
+      return merged.files;
+    });
+  }, []);
+  useEffect(() => registerAddFiles(addFiles), [registerAddFiles, addFiles]);
 
   const { data: directory = [] } = useUserDirectory(true);
   const polish = useDraftPolish();
@@ -565,6 +618,7 @@ function InternalComposerBody({
       {
         to,
         cc,
+        bcc,
         subject: subject.trim() || '(no subject)',
         body: bodyText,
         bodyHtml: body,
@@ -591,7 +645,18 @@ function InternalComposerBody({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label className="text-xs">Cc</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Cc</Label>
+            {!showBcc && (
+              <button
+                type="button"
+                onClick={() => setShowBcc(true)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Bcc
+              </button>
+            )}
+          </div>
           <UserAutocomplete
             value={cc}
             onChange={setCc}
@@ -599,6 +664,17 @@ function InternalComposerBody({
             placeholder="Optional"
           />
         </div>
+        {showBcc && (
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Bcc</Label>
+            <UserAutocomplete
+              value={bcc}
+              onChange={setBcc}
+              users={directory}
+              placeholder="Hidden from other recipients"
+            />
+          </div>
+        )}
         <Input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
@@ -620,14 +696,7 @@ function InternalComposerBody({
           multiple
           className="hidden"
           onChange={(e) => {
-            const merged = mergeAttachments(
-              files,
-              Array.from(e.target.files ?? []),
-              MAX_ATTACHMENTS,
-              MAX_FILE_BYTES,
-            );
-            setFiles(merged.files);
-            setAttachmentNotice(merged.notice);
+            addFiles(Array.from(e.target.files ?? []));
             e.target.value = '';
           }}
         />
@@ -641,7 +710,14 @@ function InternalComposerBody({
         <PolishPanel
           polish={polish}
           context={INTERNAL_POLISH_CONTEXT}
-          onAccept={(polished) => setBody(textToHtml(polished))}
+          onAccept={(polished) => {
+            // Internal messages carry no signature today, so `sig` is always ''.
+            // Kept in the same shape as the email composer above so the two can't
+            // drift if one ever gains a signature or a quoted tail.
+            const html = textToHtml(polished);
+            const { sig } = splitSignature(body);
+            setBody(sig ? `${html}<div><br></div>${sig}` : html);
+          }}
         />
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>

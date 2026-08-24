@@ -15,6 +15,7 @@ import {
   showDesktopNotification,
 } from '@/lib/desktopNotification';
 import { playMessageChime, unlockAudio } from '@/lib/notificationSound';
+import { Toaster, type AppToast } from '@/components/ui/toast';
 import {
   useInternalMessageStream,
   type InternalMessageEvent,
@@ -28,6 +29,9 @@ const PREFS_KEY = 'cyg-notify';
 
 /** Leading-edge: five messages landing together give one chime, immediately. */
 const CHIME_THROTTLE_MS = 3000;
+
+/** Visible at once. Beyond this the oldest drops off rather than stacking. */
+const MAX_TOASTS = 3;
 /** A burst of SSE events should produce one notification, not five. */
 const INTERNAL_DEBOUNCE_MS = 600;
 
@@ -161,6 +165,22 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     return Date.now() - at < span;
   }, []);
 
+  const [toasts, setToasts] = useState<AppToast[]>([]);
+  const toastSeq = useRef(0);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  /** Newest wins: keep the stack short enough to read at a glance. */
+  const pushToast = useCallback(
+    (input: { title: string; body: string; onClick?: () => void }) => {
+      const id = ++toastSeq.current;
+      setToasts((prev) => [...prev.slice(-(MAX_TOASTS - 1)), { id, ...input }]);
+    },
+    [],
+  );
+
   /**
    * The single funnel for every alert.
    *
@@ -179,6 +199,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       tag: string;
       onClick?: () => void;
     }) => {
+      // The in-app toast fires ABOVE the focus check on purpose. `whileActive` is
+      // there to stop a desktop notification interrupting someone who is already
+      // working — but a toast in exactly that situation is the whole point of it,
+      // and it is the only alert a focused user can actually see. The pref keeps
+      // gating the chime and the OS notification below.
+      pushToast({ title: input.title, body: input.body, onClick: input.onClick });
+
       if (document.hasFocus() && !prefsRef.current.whileActive) return;
 
       const now = Date.now();
@@ -200,7 +227,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [],
+    [pushToast],
   );
 
   const suppressSource = useCallback((source: string) => {
@@ -387,7 +414,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <NotificationCtx.Provider value={value}>{children}</NotificationCtx.Provider>
+    <NotificationCtx.Provider value={value}>
+      {children}
+      {/* Rendered by the provider itself rather than mounted separately in
+          AppLayout: the toast list is private state and nothing else needs it. */}
+      <Toaster toasts={toasts} onDismiss={dismissToast} />
+    </NotificationCtx.Provider>
   );
 }
 

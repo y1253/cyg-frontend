@@ -4,8 +4,18 @@ import { useAttachmentViewer, type ViewerItem } from './AttachmentViewerContext'
 
 // Kill the frame's own vertical scrollbar — the frame is sized to fit its content,
 // so the page scrolls instead. Horizontal scroll stays available for wide emails.
+//
+// The body font is Gmail's own default. It matters because this is a separate
+// document: nothing from index.css or Tailwind reaches inside it, so a message
+// whose HTML carries no font of its own would otherwise fall back to the UA
+// default and render in Times New Roman. Declaring it on `body` (rather than with
+// `*` or !important) means any email that DOES specify a font still wins, which is
+// exactly what Gmail does.
 const FRAME_RESET =
-  '<style>html{overflow-y:hidden}body{margin:0;padding:8px}img{cursor:zoom-in}</style>';
+  '<style>html{overflow-y:hidden}' +
+  'body{margin:0;padding:8px;font-family:Arial,Helvetica,sans-serif;' +
+  'font-size:14px;line-height:1.5;color:#222}' +
+  'img{cursor:zoom-in}</style>';
 
 const INITIAL_HEIGHT = 384;
 const HEIGHT_BUFFER = 24;

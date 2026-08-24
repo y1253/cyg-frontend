@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Forward, MailOpen, Printer, Reply } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Forward, MailOpen, Printer, Reply, ReplyAll } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EmailDetail, GmailAccount } from '@/api/gmail';
 import { emailAttachmentUrl } from '@/api/gmail';
@@ -13,21 +13,22 @@ import { InlineComposerPanel } from '../InlineComposerPanel';
 import { RecipientAutocomplete } from '../RecipientAutocomplete';
 import {
   SIGNATURE_LEAD,
-  extractEmail,
   formatEmailDate,
   htmlToText,
   mergeAttachments,
   openPrintWindow,
   prefixReSubject,
+  replyAllRecipients,
   splitSignature,
   textToHtml,
+  wrapBodyFont,
 } from '../message-utils';
 import { ThreadMessage } from './ThreadMessage';
 import { buildEmailThreadPrintHtml } from './print-html';
 import { FORWARD_BODY_BUDGET, useForwardDraft } from './useForwardDraft';
 import type { CompleteTarget } from './types';
 
-type ReplyForm = { to: string[]; subject: string; body: string; cc: string[] };
+type ReplyForm = { to: string[]; subject: string; body: string; cc: string[]; bcc: string[] };
 
 /**
  * An opened email conversation: the whole thread, with the message the user
@@ -91,11 +92,16 @@ export function EmailThreadView({
   // than recomputed at send time: the thread polls every 15s, and a message
   // arriving mid-compose must not move the target out from under the user.
   const [replyTarget, setReplyTarget] = useState<EmailDetail | null>(null);
-  const [replyForm, setReplyForm] = useState<ReplyForm>({ to: [], subject: '', body: '', cc: [] });
+  const [replyForm, setReplyForm] = useState<ReplyForm>({ to: [], subject: '', body: '', cc: [], bcc: [] });
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   // Feedback when a pick is rejected (already attached, or over the server's cap) —
   // otherwise the picker just closes and the file appears to vanish.
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+
+  // Bcc stays hidden until asked for, like Gmail. Reply and forward keep their
+  // own flag so revealing one doesn't expand the other.
+  const [replyShowBcc, setReplyShowBcc] = useState(false);
+  const [forwardShowBcc, setForwardShowBcc] = useState(false);
 
   const replyPolish = useDraftPolish();
   const forwardPolish = useDraftPolish();
@@ -273,31 +279,44 @@ export function EmailThreadView({
     replyPolish.reset();
   };
 
-  const handleOpenReply = (detail: EmailDetail) => {
+  /**
+   * Open the inline reply form. `all` is the difference between Reply and Reply
+   * all: both answer the same party, but Reply all also carries everyone who was
+   * on the original across to Cc.
+   */
+  const openReply = (detail: EmailDetail, all: boolean) => {
     // Reply and forward share the same inline slot below the message.
     forward.close();
-    // Replying to a message WE sent (common now that Reply targets the opened
-    // message, which may be one of ours) has to go to its recipients — addressing
-    // it back to ourselves is what Gmail avoids here too.
-    const isOwn =
-      !!accountAddress &&
-      extractEmail(detail.from).toLowerCase() === accountAddress.toLowerCase();
-    // `to` can be a comma-joined list — the first recipient is the one to answer.
-    const replyTo = extractEmail(isOwn ? (detail.to.split(',')[0] ?? '') : detail.from);
+    const recipients = replyAllRecipients(
+      detail.from,
+      detail.to,
+      detail.cc,
+      accountAddress,
+    );
     setReplyTarget(detail);
     setReplyForm({
-      to: replyTo ? [replyTo] : [],
+      // A plain reply answers one party. For a message we sent that is the first
+      // of its original recipients, which is what `to` already leads with.
+      to: all ? recipients.to : recipients.to.slice(0, 1),
       subject: prefixReSubject(detail.subject || ''),
       // Seed the editable signature a few lines below the caret (matches Gmail;
       // server no longer appends it).
       body: account.signatureHtml ? `${SIGNATURE_LEAD}${account.signatureHtml}` : '',
-      cc: [],
+      cc: all ? recipients.cc : [],
+      bcc: [],
     });
     setReplyFiles([]);
     setAttachmentNotice(null);
     setReplyOpen(true);
     replyPolish.reset();
   };
+
+  const handleOpenReply = (detail: EmailDetail) => openReply(detail, false);
+  const handleOpenReplyAll = (detail: EmailDetail) => openReply(detail, true);
+
+  /** Reply all only earns a button when it would actually add someone. */
+  const hasOthersToReplyTo = (detail: EmailDetail) =>
+    replyAllRecipients(detail.from, detail.to, detail.cc, accountAddress).cc.length > 0;
 
   const handleOpenForward = (detail: EmailDetail) => {
     // Reply and forward share the same inline slot below the message.
@@ -334,6 +353,11 @@ export function EmailThreadView({
     handleOpenReply(m);
   };
 
+  const handleNavigateToEmailMessageReplyAll = (m: EmailDetail) => {
+    reanchor(m);
+    handleOpenReplyAll(m);
+  };
+
   const handleNavigateToEmailMessageForward = (m: EmailDetail) => {
     reanchor(m);
     handleOpenForward(m);
@@ -349,8 +373,9 @@ export function EmailThreadView({
         to: replyForm.to.join(', '),
         subject: replyForm.subject,
         body: htmlToText(replyForm.body),
-        bodyHtml: replyForm.body,
+        bodyHtml: wrapBodyFont(replyForm.body),
         cc: replyForm.cc.length ? replyForm.cc.join(', ') : undefined,
+        bcc: replyForm.bcc.length ? replyForm.bcc.join(', ') : undefined,
         inReplyTo: target.messageId || undefined,
         references: target.references || undefined,
         threadId: target.threadId || undefined,
@@ -363,7 +388,7 @@ export function EmailThreadView({
         onSuccess: () => {
           setReplyOpen(false);
           setReplyTarget(null);
-          setReplyForm({ to: [], subject: '', body: '', cc: [] });
+          setReplyForm({ to: [], subject: '', body: '', cc: [], bcc: [] });
           setReplyFiles([]);
           setAttachmentNotice(null);
         },
@@ -380,8 +405,9 @@ export function EmailThreadView({
         to: forward.form.to.join(', '),
         subject: forward.form.subject,
         body: htmlToText(bodyHtml),
-        bodyHtml,
+        bodyHtml: wrapBodyFont(bodyHtml),
         cc: forward.form.cc.length ? forward.form.cc.join(', ') : undefined,
+        bcc: forward.form.bcc.length ? forward.form.bcc.join(', ') : undefined,
         // Record the original message id so the inbox shows a "forwarded" marker.
         // Kept to the opened message even for a whole-conversation forward, so the
         // banner appears once, on the message the user acted from.
@@ -440,6 +466,11 @@ export function EmailThreadView({
             <Button size="sm" variant="outline" className="gap-1" onClick={() => handleOpenReply(anchorEmail)}>
               <Reply size={14} /> Reply
             </Button>
+            {hasOthersToReplyTo(anchorEmail) && (
+              <Button size="sm" variant="outline" className="gap-1" onClick={() => handleOpenReplyAll(anchorEmail)}>
+                <ReplyAll size={14} /> Reply all
+              </Button>
+            )}
             <Button size="sm" variant="outline" className="gap-1" onClick={() => handleOpenForward(anchorEmail)}>
               <Forward size={14} /> Forward
             </Button>
@@ -528,6 +559,9 @@ export function EmailThreadView({
                   onToggle={toggleThreadMessage}
                   onToggleForwardPreview={toggleForwardPreview}
                   onReplyToThis={handleNavigateToEmailMessage}
+                  onReplyAllToThis={
+                    hasOthersToReplyTo(m) ? handleNavigateToEmailMessageReplyAll : undefined
+                  }
                   onForwardThis={handleNavigateToEmailMessageForward}
                 />
               ))}
@@ -559,6 +593,17 @@ export function EmailThreadView({
                     contacts={contacts ?? []}
                     placeholder="Optional"
                   />
+                }
+                onShowBcc={replyShowBcc ? undefined : () => setReplyShowBcc(true)}
+                bccField={
+                  replyShowBcc ? (
+                    <RecipientAutocomplete
+                      value={replyForm.bcc}
+                      onChange={(v) => setReplyForm((f) => ({ ...f, bcc: v }))}
+                      contacts={contacts ?? []}
+                      placeholder="Hidden from other recipients"
+                    />
+                  ) : undefined
                 }
                 subject={replyForm.subject}
                 onSubjectChange={(v) => setReplyForm((f) => ({ ...f, subject: v }))}
@@ -655,6 +700,17 @@ export function EmailThreadView({
                     contacts={contacts ?? []}
                     placeholder="Optional"
                   />
+                }
+                onShowBcc={forwardShowBcc ? undefined : () => setForwardShowBcc(true)}
+                bccField={
+                  forwardShowBcc ? (
+                    <RecipientAutocomplete
+                      value={forward.form.bcc}
+                      onChange={(v) => forward.setForm((f) => ({ ...f, bcc: v }))}
+                      contacts={contacts ?? []}
+                      placeholder="Hidden from other recipients"
+                    />
+                  ) : undefined
                 }
                 subject={forward.form.subject}
                 onSubjectChange={(v) => forward.setForm((f) => ({ ...f, subject: v }))}

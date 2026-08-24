@@ -40,6 +40,9 @@ export interface InternalMessageSummary {
   from: DirectoryUser;
   to: DirectoryUser[];
   cc: DirectoryUser[];
+  // Only ever populated for the sender, plus a BCC'd viewer seeing themselves —
+  // the server blanks it for everyone else.
+  bcc: DirectoryUser[];
   attachments: InternalAttachment[];
 }
 
@@ -96,10 +99,13 @@ export async function fetchInternalMessages(
   folder: InternalFolder,
   cursor?: number | null,
   q?: string,
+  /** Advanced-search fields from `filterParams`; email-only ones are ignored. */
+  filters?: Record<string, string>,
 ): Promise<InternalListResult> {
   const params = new URLSearchParams({ folder });
   if (cursor) params.set('cursor', String(cursor));
   if (q) params.set('q', q);
+  for (const [key, value] of Object.entries(filters ?? {})) params.set(key, value);
   return json(await fetchWithAuth(token, `${BASE}?${params.toString()}`));
 }
 
@@ -134,6 +140,7 @@ export async function sendInternalMessage(
   data: {
     to: number[];
     cc?: number[];
+    bcc?: number[];
     subject: string;
     body: string;
     bodyHtml?: string;
@@ -150,6 +157,7 @@ export async function sendInternalMessage(
   const form = new FormData();
   form.set('to', data.to.join(','));
   if (data.cc?.length) form.set('cc', data.cc.join(','));
+  if (data.bcc?.length) form.set('bcc', data.bcc.join(','));
   form.set('subject', data.subject);
   form.set('body', data.body);
   if (data.bodyHtml) form.set('bodyHtml', data.bodyHtml);

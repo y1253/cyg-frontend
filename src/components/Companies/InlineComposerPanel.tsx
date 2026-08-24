@@ -35,6 +35,8 @@ export function InlineComposerPanel({
   beforeFields,
   toField,
   ccField,
+  bccField,
+  onShowBcc,
   subject,
   onSubjectChange,
   subjectPlaceholder,
@@ -73,6 +75,10 @@ export function InlineComposerPanel({
   beforeFields?: ReactNode;
   toField: ReactNode;
   ccField: ReactNode;
+  /** Rendered under CC once the user reveals it; omit to hide the row entirely. */
+  bccField?: ReactNode;
+  /** Shows the "Bcc" reveal link beside the CC label. */
+  onShowBcc?: () => void;
   subject: string;
   onSubjectChange: (value: string) => void;
   subjectPlaceholder?: string;
@@ -133,9 +139,26 @@ export function InlineComposerPanel({
         {toField}
       </div>
       <div className="flex flex-col gap-1">
-        <Label className="text-xs">CC</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">CC</Label>
+          {onShowBcc && (
+            <button
+              type="button"
+              onClick={onShowBcc}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Bcc
+            </button>
+          )}
+        </div>
         {ccField}
       </div>
+      {bccField && (
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">BCC</Label>
+          {bccField}
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         <Label className="text-xs">Subject</Label>
         <Input

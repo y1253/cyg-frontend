@@ -19,6 +19,8 @@ import { MessageNotice } from '../MessageNotice';
 import { InboxNotices } from './InboxNotices';
 import { InboxRow } from './InboxRow';
 import { FOLDERS, KIND_FILTER_LABELS, type CompleteTarget, type KindFilter, type UnifiedItem } from './types';
+import { AdvancedSearchPanel } from './AdvancedSearchPanel';
+import type { SearchFilters } from './search-filters';
 
 /**
  * The message list: account header, status banners, folder tabs, the search and
@@ -43,6 +45,9 @@ export function InboxView({
   searchInput,
   onSearchInput,
   searchPlaceholder,
+  filters,
+  onFiltersChange,
+  relevanceOrderWarning,
   filter,
   onFilterChange,
   isInboxLike,
@@ -88,6 +93,10 @@ export function InboxView({
   searchInput: string;
   onSearchInput: (v: string) => void;
   searchPlaceholder: string;
+  filters: SearchFilters;
+  onFiltersChange: (next: SearchFilters) => void;
+  /** Outlook search is relevance-ordered — surfaced in the panel. */
+  relevanceOrderWarning?: boolean;
   filter: KindFilter;
   onFilterChange: (f: KindFilter) => void;
   isInboxLike: boolean;
@@ -300,6 +309,11 @@ export function InboxView({
             className="h-9"
           />
         </div>
+        <AdvancedSearchPanel
+          filters={filters}
+          onApply={onFiltersChange}
+          relevanceOrderWarning={relevanceOrderWarning}
+        />
         {isInboxLike && (
           <>
             <Select

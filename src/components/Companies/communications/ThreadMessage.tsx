@@ -1,4 +1,4 @@
-import { ChevronRight, Forward, Paperclip, Reply } from 'lucide-react';
+import { ChevronRight, Forward, Paperclip, Reply, ReplyAll } from 'lucide-react';
 import type { EmailDetail } from '@/api/gmail';
 import { emailAttachmentUrl } from '@/api/gmail';
 import { AttachmentPreview } from '../AttachmentPreview';
@@ -29,6 +29,7 @@ export function ThreadMessage({
   onToggle,
   onToggleForwardPreview,
   onReplyToThis,
+  onReplyAllToThis,
   onForwardThis,
 }: {
   message: EmailDetail;
@@ -43,6 +44,8 @@ export function ThreadMessage({
   onToggle: (id: string) => void;
   onToggleForwardPreview: (id: string) => void;
   onReplyToThis: (m: EmailDetail) => void;
+  /** Omitted when this message has nobody else on it — the button then hides. */
+  onReplyAllToThis?: (m: EmailDetail) => void;
   onForwardThis: (m: EmailDetail) => void;
 }) {
   const strip = (m.attachments ?? []).filter((a) => !a.isInline);
@@ -88,6 +91,16 @@ export function ThreadMessage({
             >
               <Reply size={14} />
             </button>
+            {onReplyAllToThis && (
+              <button
+                type="button"
+                title="Reply all to this message"
+                onClick={() => onReplyAllToThis(m)}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <ReplyAll size={14} />
+              </button>
+            )}
             <button
               type="button"
               title="Forward this message"
@@ -201,7 +214,7 @@ export function ThreadMessage({
                 )}
               />
             ) : (
-              <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+              <pre className="p-4 text-sm whitespace-pre-wrap font-[Arial,Helvetica,sans-serif]">
                 <Linkified text={m.bodyText ?? '(empty)'} />
               </pre>
             )}

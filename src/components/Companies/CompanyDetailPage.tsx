@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
+import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, GripVertical, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +50,7 @@ import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
-import { useLinks, useCreateLink, useUpdateLink, useDeleteLink } from '@/hooks/useLinks';
+import { useLinks, useCreateLink, useUpdateLink, useDeleteLink, useReorderLinks } from '@/hooks/useLinks';
 import { useNotes, useCreateNote, useUpdateNote, useDeleteNote } from '@/hooks/useNotes';
 import { useToggleSchedule, useUpdateSchedule, useToggleScheduleImportant, useUpdateScheduleUserNote, useDeleteSchedule } from '@/hooks/useTaskSchedules';
 import { useUpdateCompany } from '@/hooks/useUpdateCompany';
@@ -1135,11 +1152,72 @@ function LinkPasswordField({
   );
 }
 
+/**
+ * One draggable row in the links list.
+ *
+ * The drag listeners go on the grip handle passed to `children`, not on the row
+ * itself — the row is full of anchors, copy buttons and reveal toggles that must
+ * stay clickable. Dragging is disabled outright while any row is being edited, so
+ * a drag can't reorder the list out from under an open form.
+ */
+function SortableLinkRow({
+  id,
+  disabled,
+  children,
+}: {
+  id: number;
+  disabled: boolean;
+  children: (handle: React.ReactNode) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  const handle = disabled ? null : (
+    <button
+      type="button"
+      title="Drag to reorder"
+      aria-label="Drag to reorder link"
+      className="w-5 h-7 -ml-1.5 shrink-0 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted cursor-grab active:cursor-grabbing touch-none transition-colors"
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical size={14} />
+    </button>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? 'relative z-10 opacity-80' : undefined}
+    >
+      {children(handle)}
+    </div>
+  );
+}
+
 function LinksSection({ companyId }: { companyId: number }) {
   const { data: links = [], isLoading } = useLinks(companyId);
   const createMutation = useCreateLink(companyId);
   const updateMutation = useUpdateLink(companyId);
   const deleteMutation = useDeleteLink(companyId);
+  const reorderMutation = useReorderLinks(companyId);
+
+  // A small distance threshold keeps a click on the handle from registering as a
+  // zero-length drag; the keyboard sensor makes reordering reachable without a mouse.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = links.findIndex(l => l.id === active.id);
+    const newIndex = links.findIndex(l => l.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    reorderMutation.mutate(arrayMove(links, oldIndex, newIndex).map(l => l.id));
+  }
 
   const [addOpen, setAddOpen] = useState(false);
   const [addLabel, setAddLabel] = useState('');
@@ -1168,7 +1246,8 @@ function LinksSection({ companyId }: { companyId: number }) {
     });
   }
 
-  function faviconUrl(url: string) {
+  function faviconUrl(url: string | null) {
+    if (!url) return null;
     try {
       const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
       return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
@@ -1188,12 +1267,13 @@ function LinksSection({ companyId }: { companyId: number }) {
 
   function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!addLabel || !addUrl) return;
+    // URL is optional — a link row is often just a credential store.
+    if (!addLabel) return;
     createMutation.mutate(
       {
         companyId,
         label: addLabel,
-        url: addUrl,
+        url: addUrl.trim() || undefined,
         username: addUsername.trim() || undefined,
         password: addPassword || undefined,
         note: addNote.trim() || undefined,
@@ -1205,7 +1285,7 @@ function LinksSection({ companyId }: { companyId: number }) {
   function openEdit(link: CompanyLink) {
     setEditId(link.id);
     setEditLabel(link.label);
-    setEditUrl(link.url);
+    setEditUrl(link.url ?? '');
     setEditUsername(link.username ?? '');
     setEditPassword(link.password ?? '');
     setEditNote(link.note ?? '');
@@ -1254,7 +1334,7 @@ function LinksSection({ companyId }: { companyId: number }) {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-link-url">URL</Label>
+            <Label htmlFor="add-link-url">URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
               id="add-link-url"
               value={addUrl}
@@ -1294,7 +1374,7 @@ function LinksSection({ companyId }: { companyId: number }) {
           )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={resetAdd}>Cancel</Button>
-            <Button type="submit" size="sm" disabled={!addLabel || !addUrl || createMutation.isPending}>
+            <Button type="submit" size="sm" disabled={!addLabel || createMutation.isPending}>
               {createMutation.isPending ? 'Saving…' : 'Save'}
             </Button>
           </div>
@@ -1306,18 +1386,29 @@ function LinksSection({ companyId }: { companyId: number }) {
         <p className="text-sm text-muted-foreground">No links added yet.</p>
       )}
 
-      {/* Links list */}
-      {links.map(link => (
-        <div key={link.id}>
-          {editId === link.id ? (
+      {/* Links list — drag a row's grip handle to reorder. */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={links.map(l => l.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="flex flex-col gap-3">
+            {links.map(link => (
+              <SortableLinkRow key={link.id} id={link.id} disabled={editId !== null}>
+                {handle =>
+                  editId === link.id ? (
             <form onSubmit={handleUpdate} className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Label</Label>
                 <Input value={editLabel} onChange={e => setEditLabel(e.target.value)} autoFocus />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>URL</Label>
-                <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} maxLength={2048} />
+                <Label>URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Input value={editUrl} onChange={e => setEditUrl(e.target.value)} placeholder="https://..." maxLength={2048} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Username <span className="text-muted-foreground font-normal">(optional)</span></Label>
@@ -1346,6 +1437,7 @@ function LinksSection({ companyId }: { companyId: number }) {
           ) : (
             <div className="rounded-lg border bg-background px-4 py-3 flex flex-col gap-2">
               <div className="flex items-center gap-3">
+                {handle}
                 {faviconUrl(link.url) && (
                   <img
                     src={faviconUrl(link.url)!}
@@ -1355,15 +1447,21 @@ function LinksSection({ companyId }: { companyId: number }) {
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                   />
                 )}
-                <a
-                  href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 text-sm font-medium hover:underline flex items-center gap-1.5"
-                >
-                  {link.label}
-                  <ExternalLink size={12} className="text-muted-foreground" />
-                </a>
+                {/* No URL — the row is just a credential store, so the label is
+                    plain text rather than a link to nowhere. */}
+                {link.url ? (
+                  <a
+                    href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-sm font-medium hover:underline flex items-center gap-1.5"
+                  >
+                    {link.label}
+                    <ExternalLink size={12} className="text-muted-foreground" />
+                  </a>
+                ) : (
+                  <span className="flex-1 text-sm font-medium">{link.label}</span>
+                )}
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1424,9 +1522,13 @@ function LinksSection({ companyId }: { companyId: number }) {
                 </div>
               )}
             </div>
-          )}
-        </div>
-      ))}
+                  )
+                }
+              </SortableLinkRow>
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* Delete confirm dialog */}
       <Dialog open={deleteId !== null} onOpenChange={open => { if (!open) setDeleteId(null); }}>
@@ -1489,12 +1591,23 @@ function SchedulesSection({
   const [userNoteEditId, setUserNoteEditId] = useState<number | null>(null);
   const [userNoteInput, setUserNoteInput] = useState('');
   const [search, setSearch] = useState('');
+  // Schedules whose task description is expanded. Same shape as `revealed` in
+  // LinksSection — collapsed is the default, so an empty set is the right start.
+  const [expandedDesc, setExpandedDesc] = useState<Set<number>>(new Set());
+  const toggleDesc = (id: number) =>
+    setExpandedDesc(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const query = search.trim().toLowerCase();
   const filtered = query
     ? schedules.filter(
         s =>
           s.task.title.toLowerCase().includes(query) ||
+          (s.task.description ?? '').toLowerCase().includes(query) ||
           (s.note ?? '').toLowerCase().includes(query),
       )
     : schedules;
@@ -1764,6 +1877,28 @@ function SchedulesSection({
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Start date: {formatDate(s.startDate)}
                 </p>
+              )}
+              {/* Full task description, collapsed by default — mirrors the
+                  Details/Hide toggle on the Tasks tab. */}
+              {s.task.description && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => toggleDesc(s.id)}
+                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 mt-1"
+                  >
+                    {expandedDesc.has(s.id) ? (
+                      <><ChevronUp size={13} /> Hide</>
+                    ) : (
+                      <><ChevronDown size={13} /> Details</>
+                    )}
+                  </button>
+                  {expandedDesc.has(s.id) && (
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed border-t border-border/50 mt-1 pt-1.5">
+                      {s.task.description}
+                    </p>
+                  )}
+                </>
               )}
               {s.note && (
                 <p className={`text-xs rounded px-2 py-1 mt-1 whitespace-pre-wrap leading-relaxed border ${

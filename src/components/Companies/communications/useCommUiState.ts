@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { KindFilter } from './types';
+import type { SearchFilters } from './search-filters';
 
 // ── Persisted view state ──────────────────────────────────────────────────────
 // Where the user last was in this company's Communications tab, so a reload (or
@@ -17,6 +18,7 @@ export type CommUI = {
   openedChatMsgTime?: string | null;
   filter?: KindFilter;
   searchInput?: string;
+  filters?: SearchFilters;
 };
 
 const commKey = (companyId: number) => `cmp-comm-${companyId}`;

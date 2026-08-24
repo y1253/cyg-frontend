@@ -24,6 +24,7 @@ export function useSendEmail(companyId: number) {
       body: string;
       bodyHtml?: string;
       cc?: string;
+      bcc?: string;
       inReplyTo?: string;
       references?: string;
       threadId?: string;

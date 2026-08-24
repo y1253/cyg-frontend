@@ -8,12 +8,15 @@ export interface CompanyLink {
   id: number;
   companyId: number;
   label: string;
-  url: string;
+  // Null when the row is only a credential store — render the label as plain text
+  // rather than an anchor, and skip the favicon.
+  url: string | null;
   username: string | null;
   // Returned already DECRYPTED (plaintext) for the eye-reveal toggle. Any
   // authenticated user may view it. Sent back encrypted server-side on write.
   password: string | null;
   note: string | null;
+  sortOrder: number;
 }
 
 export async function fetchLinks(token: string, companyId: number): Promise<CompanyLink[]> {
@@ -29,7 +32,7 @@ export async function createLink(
   data: {
     companyId: number;
     label: string;
-    url: string;
+    url?: string;
     username?: string;
     password?: string;
     note?: string;
@@ -68,6 +71,24 @@ export async function updateLink(
     throw new Error(body.message ?? 'Failed to update link');
   }
   return res.json() as Promise<CompanyLink>;
+}
+
+/** Persist a drag-reorder. `ids` is the company's links in their new order. */
+export async function reorderLinks(
+  token: string,
+  companyId: number,
+  ids: number[],
+): Promise<CompanyLink[]> {
+  const res = await fetchWithAuth(token, `${API}/links/reorder`, {
+    method: 'PATCH',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ companyId, ids }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Failed to reorder links');
+  }
+  return res.json() as Promise<CompanyLink[]>;
 }
 
 export async function deleteLink(token: string, id: number): Promise<void> {

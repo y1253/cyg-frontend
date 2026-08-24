@@ -7,11 +7,16 @@ export function useGmailEmails(
   labelId: string = 'INBOX',
   q?: string,
   active: boolean = true,
+  /** Advanced-search params from `filterParams`, plus a stable key for the cache. */
+  filters?: Record<string, string>,
+  filterKey: string = '',
 ) {
   const { token } = useAuth();
   return useInfiniteQuery({
-    queryKey: ['gmail-emails', companyId, labelId, q ?? ''],
-    queryFn: ({ pageParam }) => fetchEmails(token!, companyId, pageParam, labelId, q),
+    // filterKey is part of the key or React Query serves another search's pages.
+    queryKey: ['gmail-emails', companyId, labelId, q ?? '', filterKey],
+    queryFn: ({ pageParam }) =>
+      fetchEmails(token!, companyId, pageParam, labelId, q, filters),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextPageToken ?? undefined,
     // The Communications tab stays mounted while hidden (so an open message and any

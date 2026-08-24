@@ -31,6 +31,13 @@ import {
   ALL_LABELS, FOLDERS, INBOX_TABS,
   type CompleteTarget, type KindFilter, type UnifiedItem,
 } from './communications/types';
+import {
+  EMPTY_FILTERS,
+  filterKey,
+  filterParams,
+  isStructuredSearch,
+  type SearchFilters,
+} from './communications/search-filters';
 
 interface Props {
   companyId: number;
@@ -93,6 +100,11 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // one unfiltered frame before catching up.
   const [searchQuery, setSearchQuery] = useState((restored.searchInput ?? '').trim());
   const [filter, setFilter] = useState<KindFilter>(restored.filter ?? 'all');
+  // Advanced-search fields. Committed as a unit when the panel's Search is pressed
+  // (the panel holds its own draft), so no debounce is needed here.
+  const [filters, setFilters] = useState<SearchFilters>(
+    restored.filters ?? EMPTY_FILTERS,
+  );
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 350);
     return () => clearTimeout(t);
@@ -106,6 +118,7 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     openedChatMsgTime,
     filter,
     searchInput,
+    filters,
   });
 
   // An open attachment preview pauses the thread polls. The overlay itself is
@@ -160,12 +173,26 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
   // Gated on `account` too so the very first fetch waits until the provider is
   // known (the api base is chosen from it), avoiding a stray /api/gmail hit for an
   // Outlook company on mount.
-  const emailQuery = useGmailEmails(companyId, emailLabel, activeSearch, active && !!account);
+  // Advanced filters override the folder's own label when a mail scope is picked
+  // ("All Mail", "Sent"…) — the server maps it onto the label both providers read.
+  const searchParams = filterParams(filters);
+  const searchKey = filterKey(filters);
+  const emailQuery = useGmailEmails(
+    companyId,
+    emailLabel,
+    activeSearch,
+    active && !!account,
+    searchParams,
+    searchKey,
+  );
   const chatQuery = useGmailChats(
     companyId,
     account,
-    isInboxLike ? activeSearch : undefined,
-    active && chatSupported,
+    // A structured query is Gmail/Graph operator syntax. Chat search is a plain
+    // substring scan over sender/space/text, so handing it one could only ever
+    // produce garbage matches — search chats by free text alone.
+    isInboxLike && !isStructuredSearch(filters) ? activeSearch : undefined,
+    active && chatSupported && !filters.excludeChats,
   );
 
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
@@ -436,6 +463,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
     // value too, or it drives the new folder's query for another 350ms.
     setSearchInput('');
     setSearchQuery('');
+    // Same reasoning for the advanced filters — and its scope would otherwise
+    // silently override the folder the user just picked.
+    setFilters(EMPTY_FILTERS);
   };
 
   // Mark-complete confirmation — shared across the inbox and both detail views
@@ -552,6 +582,9 @@ export function CommunicationsTab({ companyId, isAdmin, active }: Props) {
         searchInput={searchInput}
         onSearchInput={setSearchInput}
         searchPlaceholder={searchPlaceholder}
+        filters={filters}
+        onFiltersChange={setFilters}
+        relevanceOrderWarning={provider === 'MICROSOFT'}
         filter={filter}
         onFilterChange={setFilter}
         isInboxLike={isInboxLike}

@@ -249,11 +249,18 @@ export async function fetchEmails(
   pageToken?: string,
   labelId?: string,
   q?: string,
+  /**
+   * Advanced-search fields, from `filterParams`. Sent structured rather than as a
+   * query string because Gmail and Graph speak different query languages — the
+   * server compiles them per provider.
+   */
+  filters?: Record<string, string>,
 ): Promise<EmailListResult> {
   const params = new URLSearchParams();
   if (pageToken) params.set('pageToken', pageToken);
   if (labelId) params.set('labelIds', labelId);
   if (q) params.set('q', q);
+  for (const [key, value] of Object.entries(filters ?? {})) params.set(key, value);
   const res = await fetchWithAuth(
     token,
     `${base(companyId)}/companies/${companyId}/emails?${params.toString()}`,
@@ -470,6 +477,7 @@ export async function sendEmail(
     body: string;
     bodyHtml?: string;
     cc?: string;
+    bcc?: string;
     inReplyTo?: string;
     // References chain of the message being replied to — echoed back so long
     // conversations don't fragment at the recipient's end.
@@ -497,6 +505,7 @@ export async function sendEmail(
   form.set('body', data.body);
   if (data.bodyHtml) form.set('bodyHtml', data.bodyHtml);
   if (data.cc) form.set('cc', data.cc);
+  if (data.bcc) form.set('bcc', data.bcc);
   if (data.inReplyTo) form.set('inReplyTo', data.inReplyTo);
   if (data.references) form.set('references', data.references);
   if (data.threadId) form.set('threadId', data.threadId);

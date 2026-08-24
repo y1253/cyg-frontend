@@ -348,7 +348,7 @@ export function RichTextEditor({
           onMouseUp={() => { saveSelection(); refreshActive(); }}
           onBlur={saveSelection}
           style={{ minHeight, maxHeight }}
-          className="w-full overflow-y-auto px-3 py-2 text-sm outline-none [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground"
+          className="w-full overflow-y-auto px-3 py-2 text-sm font-[Arial,Helvetica,sans-serif] outline-none [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground"
         />
       </div>
     </div>

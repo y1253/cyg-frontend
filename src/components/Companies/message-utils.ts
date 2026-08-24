@@ -127,6 +127,52 @@ export function recipientSummary(
   return `to ${shown.join(', ')}${rest > 0 ? `, +${rest}` : ''}`;
 }
 
+/**
+ * Who a reply should be addressed to, split into To and Cc.
+ *
+ * `to` holds the one party being answered — the sender, or, for a message the
+ * account itself sent, its original recipients (addressing a reply back at
+ * yourself is what Gmail avoids here too). `cc` holds everyone else who was on
+ * the message. A plain Reply takes `to` alone; Reply all takes both.
+ *
+ * The account's own address never appears in either, entries are de-duped
+ * case-insensitively across both lists, and headers are split with
+ * `parseAddressList` rather than on commas — a display name like
+ * `"Doe, Jane" <j@x.com>` contains one.
+ */
+export function replyAllRecipients(
+  from: string,
+  to: string,
+  cc: string | undefined | null,
+  selfEmail?: string,
+): { to: string[]; cc: string[] } {
+  const self = selfEmail?.trim().toLowerCase();
+  const isSelf = (email: string) => !!self && email.toLowerCase() === self;
+
+  const fromEmail = extractEmail(from);
+  const toEmails = parseAddressList(to).map((a) => a.email);
+  const ccEmails = parseAddressList(cc).map((a) => a.email);
+  const isOwn = isSelf(fromEmail);
+
+  const seen = new Set<string>();
+  const take = (list: string[]) => {
+    const out: string[] = [];
+    for (const email of list) {
+      const key = email.toLowerCase();
+      if (!email || seen.has(key) || isSelf(email)) continue;
+      seen.add(key);
+      out.push(email);
+    }
+    return out;
+  };
+
+  // Order matters: To is claimed first so the same address can't also land in Cc.
+  return {
+    to: take(isOwn ? toEmails : [fromEmail]),
+    cc: take(isOwn ? ccEmails : [...toEmails, ...ccEmails]),
+  };
+}
+
 /** De-dupe a list by `id`, keeping first occurrence (guards against page overlap). */
 export function dedupeById<T extends { id: string | number }>(items: T[]): T[] {
   const seen = new Set<string | number>();
@@ -145,6 +191,27 @@ export function htmlToText(html: string): string {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   return (tmp.innerText || tmp.textContent || '').trim();
+}
+
+/**
+ * Gmail's own message-body font, and the single place it is defined.
+ *
+ * Used in three places that must agree or the illusion breaks: the read frame
+ * (EmailBodyFrame's injected reset), the compose editor, and `wrapBodyFont` below.
+ */
+export const BODY_FONT = 'Arial, Helvetica, sans-serif';
+
+/**
+ * Stamp the outgoing font onto a composed body.
+ *
+ * The editor uses execCommand('fontName'), which only emits a <font> tag when the
+ * user explicitly picks from the dropdown — so an untouched draft leaves with no
+ * font at all and the recipient's client chooses (Arial in Gmail, Aptos in Outlook,
+ * Helvetica in Apple Mail). Wrapping the whole body, quoted tail included, is what
+ * Gmail does, and it makes what you typed what they see.
+ */
+export function wrapBodyFont(html: string): string {
+  return `<div style="font-family:${BODY_FONT};font-size:14px">${html}</div>`;
 }
 
 /** Blank lines seeded above the signature so the caret starts well clear of it. */
@@ -314,18 +381,6 @@ export function buildForwardedBody(
  */
 export const MAX_FILE_BYTES = 250 * 1024 * 1024;
 
-/**
- * How many files an INTERNAL message may carry. Must match the server cap —
- * FilesInterceptor('attachments', MAX_ATTACHMENTS) in
- * internal-messages.controller.ts. Exceeding it made multer throw
- * LIMIT_UNEXPECTED_FILE, which surfaced only as a generic "Failed to send".
- * (The per-file byte cap is MAX_FILE_BYTES above.)
- *
- * Outbound EMAIL has no count cap — its composers call `mergeAttachments`
- * without a `max`. Internal messages keep one because their attachments are
- * written to our own disk and never deleted.
- */
-export const MAX_ATTACHMENTS = 10;
 
 /**
  * How many raw bytes ride inside the message itself. Must match
@@ -439,7 +494,7 @@ export function openPrintWindow(title: string, contentHtml: string): void {
 <style>
   @page { margin: 16mm; }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #111; margin: 0; padding: 24px; font-size: 13px; line-height: 1.5; }
+  body { font-family: ${BODY_FONT}; color: #111; margin: 0; padding: 24px; font-size: 13px; line-height: 1.5; }
   .print-header { border-bottom: 1px solid #ddd; padding-bottom: 12px; margin-bottom: 16px; }
   .print-header h1 { font-size: 18px; margin: 0 0 8px; }
   .print-meta { font-size: 12px; color: #444; }

@@ -11,7 +11,7 @@ import {
 } from '../message-utils';
 
 export type ForwardScope = 'message' | 'thread';
-export type ForwardForm = { to: string[]; subject: string; body: string; cc: string[] };
+export type ForwardForm = { to: string[]; subject: string; body: string; cc: string[]; bcc: string[] };
 
 // Same ceiling as a manually picked file — a large original is re-uploaded and
 // linked from Drive/OneDrive rather than dropped from the forward.
@@ -58,7 +58,7 @@ export function useForwardDraft({
   onResetPolish: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<ForwardForm>({ to: [], subject: '', body: '', cc: [] });
+  const [form, setForm] = useState<ForwardForm>({ to: [], subject: '', body: '', cc: [], bcc: [] });
   const [files, setFiles] = useState<File[]>([]);
   const [attLoading, setAttLoading] = useState(false);
   const [attError, setAttError] = useState(false);
@@ -80,7 +80,7 @@ export function useForwardDraft({
   const close = () => {
     reqRef.current++;
     setOpen(false);
-    setForm({ to: [], subject: '', body: '', cc: [] });
+    setForm({ to: [], subject: '', body: '', cc: [], bcc: [] });
     setFiles([]);
     setSkipped([]);
     setAttError(false);
@@ -172,6 +172,7 @@ export function useForwardDraft({
     setForm({
       to: [],
       cc: [],
+      bcc: [],
       subject: prefixFwdSubject(detail.subject || ''),
       body: nativeQuote
         ? signatureHtml

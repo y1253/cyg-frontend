@@ -15,11 +15,17 @@ import { Linkified } from './Linkified';
 import { AttachmentPreview } from './AttachmentPreview';
 import { CompleteConfirmDialog } from './CompleteConfirmDialog';
 import { InlineComposerPanel } from './InlineComposerPanel';
+import { AdvancedSearchPanel } from './communications/AdvancedSearchPanel';
+import {
+  EMPTY_FILTERS,
+  filterKey,
+  filterParams,
+  type SearchFilters,
+} from './communications/search-filters';
 import {
   ForwardPreviewCard, ForwardPreviewLoading, ForwardPreviewMissing,
 } from './ForwardPreviewCard';
 import {
-  MAX_ATTACHMENTS, MAX_FILE_BYTES,
   buildForwardedBody, dedupeById, escapeHtml, formatEmailDate, formatForwardTime,
   htmlToText, mergeAttachments, openPrintWindow, prefixFwdSubject,
   prefixReSubject, senderInitial, splitSignature, textToHtml,
@@ -136,6 +142,7 @@ export function InternalMessagesTab({ active }: Props) {
     stored.openThreadId ?? null,
   );
   const [banner, setBanner] = useState(false);
+  const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   // The message awaiting "mark complete" confirmation, mirroring the Communications
   // tab. `fromDetail` closes the thread afterwards. null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<
@@ -165,6 +172,8 @@ export function InternalMessagesTab({ active }: Props) {
   const [replyBody, setReplyBody] = useState('');
   const [replyTo, setReplyTo] = useState<number[]>([]);
   const [replyCc, setReplyCc] = useState<number[]>([]);
+  const [replyBcc, setReplyBcc] = useState<number[]>([]);
+  const [replyShowBcc, setReplyShowBcc] = useState(false);
   const [replySubject, setReplySubject] = useState('');
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [forwardOpen, setForwardOpen] = useState(false);
@@ -174,6 +183,8 @@ export function InternalMessagesTab({ active }: Props) {
   const [forwardBody, setForwardBody] = useState('');
   const [forwardTo, setForwardTo] = useState<number[]>([]);
   const [forwardCc, setForwardCc] = useState<number[]>([]);
+  const [forwardBcc, setForwardBcc] = useState<number[]>([]);
+  const [forwardShowBcc, setForwardShowBcc] = useState(false);
   const [forwardSubject, setForwardSubject] = useState('');
   const [forwardFiles, setForwardFiles] = useState<File[]>([]);
   const [forwardAttLoading, setForwardAttLoading] = useState(false);
@@ -192,7 +203,16 @@ export function InternalMessagesTab({ active }: Props) {
   const forwardReqRef = useRef(0);
   const threadInitKeyRef = useRef<string | null>(null);
 
-  const listQuery = useInternalMessages(folder, search || undefined, active);
+  // Advanced-search fields. Committed as a unit from the panel; the plain box
+  // above stays a free-text search.
+  const searchParams = filterParams(filters);
+  const listQuery = useInternalMessages(
+    folder,
+    search || undefined,
+    active,
+    searchParams,
+    filterKey(filters),
+  );
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
@@ -396,6 +416,8 @@ export function InternalMessagesTab({ active }: Props) {
     setReplyBody('');
     setReplyTo([]);
     setReplyCc([]);
+    setReplyBcc([]);
+    setReplyShowBcc(false);
     setReplySubject('');
     setReplyFiles([]);
     setAttachmentNotice(null);
@@ -410,6 +432,8 @@ export function InternalMessagesTab({ active }: Props) {
     setForwardBody('');
     setForwardTo([]);
     setForwardCc([]);
+    setForwardBcc([]);
+    setForwardShowBcc(false);
     setForwardSubject('');
     setForwardFiles([]);
     setForwardSkipped([]);
@@ -450,6 +474,8 @@ export function InternalMessagesTab({ active }: Props) {
     const reqId = ++forwardReqRef.current;
     setForwardTo([]);
     setForwardCc([]);
+    setForwardBcc([]);
+    setForwardShowBcc(false);
     setForwardSubject(prefixFwdSubject(target.subject));
     setForwardFiles([]);
     setForwardSkipped([]);
@@ -520,7 +546,7 @@ export function InternalMessagesTab({ active }: Props) {
     const skipped: string[] = [];
     const wanted: typeof source.attachments = [];
     for (const att of source.attachments) {
-      if (att.size > MAX_FORWARD_HYDRATE_BYTES || wanted.length >= MAX_ATTACHMENTS) {
+      if (att.size > MAX_FORWARD_HYDRATE_BYTES) {
         skipped.push(att.filename);
       } else {
         wanted.push(att);
@@ -544,9 +570,7 @@ export function InternalMessagesTab({ active }: Props) {
       // A newer forward was started while this was in flight — drop the result.
       if (reqId !== forwardReqRef.current) return;
       // Originals first, then anything attached manually while downloading.
-      setForwardFiles((manual) =>
-        [...files, ...manual].slice(0, MAX_ATTACHMENTS),
-      );
+      setForwardFiles((manual) => [...files, ...manual]);
     } catch {
       if (reqId !== forwardReqRef.current) return;
       setSendError(
@@ -558,17 +582,14 @@ export function InternalMessagesTab({ active }: Props) {
   };
 
   const pickFiles = (
-    incoming: FileList | null,
+    // FileList from the picker, File[] from a drop or paste.
+    incoming: FileList | File[] | null,
     current: File[],
     set: (files: File[]) => void,
   ) => {
-    if (!incoming?.length) return;
-    const { files, notice } = mergeAttachments(
-      current,
-      Array.from(incoming),
-      MAX_ATTACHMENTS,
-      MAX_FILE_BYTES,
-    );
+    if (!incoming || incoming.length === 0) return;
+    // No count cap — same as outbound email. Only the per-file ceiling applies.
+    const { files, notice } = mergeAttachments(current, Array.from(incoming));
     set(files);
     setAttachmentNotice(notice);
   };
@@ -587,6 +608,7 @@ export function InternalMessagesTab({ active }: Props) {
       {
         to: replyTo,
         cc: replyCc,
+        bcc: replyBcc,
         subject: replySubject,
         body: text,
         bodyHtml: replyBody,
@@ -614,6 +636,7 @@ export function InternalMessagesTab({ active }: Props) {
       {
         to: forwardTo,
         cc: forwardCc,
+        bcc: forwardBcc,
         subject: forwardSubject,
         body: text,
         bodyHtml: forwardBody,
@@ -764,6 +787,7 @@ export function InternalMessagesTab({ active }: Props) {
               from={{ name: m.from.name, email: m.from.email }}
               to={m.to.map((u) => ({ name: u.name, email: u.email }))}
               cc={m.cc.map((u) => ({ name: u.name, email: u.email }))}
+              bcc={m.bcc.map((u) => ({ name: u.name, email: u.email }))}
               date={m.date}
               selfEmail={user?.email}
             />
@@ -799,7 +823,7 @@ export function InternalMessagesTab({ active }: Props) {
               {m.bodyHtml ? (
                 <EmailBodyFrame html={m.bodyHtml} />
               ) : (
-                <pre className="p-4 text-sm whitespace-pre-wrap font-sans">
+                <pre className="p-4 text-sm whitespace-pre-wrap font-[Arial,Helvetica,sans-serif]">
                   <Linkified text={m.bodyText ?? '(empty)'} />
                 </pre>
               )}
@@ -922,16 +946,29 @@ export function InternalMessagesTab({ active }: Props) {
                   placeholder="Optional"
                 />
               }
+              onShowBcc={replyShowBcc ? undefined : () => setReplyShowBcc(true)}
+              bccField={
+                replyShowBcc ? (
+                  <UserAutocomplete
+                    value={replyBcc}
+                    onChange={setReplyBcc}
+                    users={directory}
+                    placeholder="Hidden from other recipients"
+                  />
+                ) : undefined
+              }
               subject={replySubject}
               onSubjectChange={setReplySubject}
               body={replyBody}
               onBodyChange={setReplyBody}
               bodyPlaceholder="Write your reply…"
+              messageLabel="Message"
               minHeight={140}
               maxHeight={320}
               files={replyFiles}
               setFiles={setReplyFiles}
               onPickFiles={(picked) => pickFiles(picked, replyFiles, setReplyFiles)}
+              onDropFiles={(dropped) => pickFiles(dropped, replyFiles, setReplyFiles)}
               attachmentNotice={attachmentNotice}
               // Internal attachments are stored by us at any size, never off-loaded
               // to Drive, so `null` suppresses the "sent as … link" badge.
@@ -980,16 +1017,29 @@ export function InternalMessagesTab({ active }: Props) {
                   placeholder="Optional"
                 />
               }
+              onShowBcc={forwardShowBcc ? undefined : () => setForwardShowBcc(true)}
+              bccField={
+                forwardShowBcc ? (
+                  <UserAutocomplete
+                    value={forwardBcc}
+                    onChange={setForwardBcc}
+                    users={directory}
+                    placeholder="Hidden from other recipients"
+                  />
+                ) : undefined
+              }
               subject={forwardSubject}
               onSubjectChange={setForwardSubject}
               body={forwardBody}
               onBodyChange={setForwardBody}
               bodyPlaceholder="Add a note…"
+              messageLabel="Message"
               minHeight={200}
               maxHeight={360}
               files={forwardFiles}
               setFiles={setForwardFiles}
               onPickFiles={(picked) => pickFiles(picked, forwardFiles, setForwardFiles)}
+              onDropFiles={(dropped) => pickFiles(dropped, forwardFiles, setForwardFiles)}
               attachmentNotice={attachmentNotice}
               attachNotices={
                 <>
@@ -998,8 +1048,8 @@ export function InternalMessagesTab({ active }: Props) {
                   )}
                   {forwardSkipped.length > 0 && (
                     <p className="text-xs text-amber-600">
-                      Not re-attached (too large to forward, or over the{' '}
-                      {MAX_ATTACHMENTS}-file limit): {forwardSkipped.join(', ')}
+                      Not re-attached (too large to forward):{' '}
+                      {forwardSkipped.join(', ')}
                     </p>
                   )}
                 </>
@@ -1083,6 +1133,13 @@ export function InternalMessagesTab({ active }: Props) {
             onChange={setSearch}
             placeholder="Search messages…"
             className="h-8 w-48"
+          />
+          {/* Size and mail-folder scope are hidden for this variant: internal
+              messages store no size and have no mail folders. */}
+          <AdvancedSearchPanel
+            filters={filters}
+            onApply={setFilters}
+            variant="internal"
           />
           <Button
             size="sm"
