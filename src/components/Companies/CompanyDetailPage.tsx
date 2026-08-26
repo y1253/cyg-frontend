@@ -57,6 +57,8 @@ import { useUpdateCompany } from '@/hooks/useUpdateCompany';
 import { useDeleteCompany } from '@/hooks/useDeleteCompany';
 import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeletedCompanies';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
+import { usePhoneNumber } from '@/hooks/usePhoneNumber';
+import { PhoneNumberSection } from './PhoneNumberSection';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
@@ -2191,6 +2193,8 @@ export function CompanyDetailPage() {
   const [disconnectGmailConfirmOpen, setDisconnectGmailConfirmOpen] = useState(false);
 
   const { data: gmailAccount } = useGmailAccount(companyId);
+  // Drives the read-only state of the manual Support Number field below.
+  const { data: managedNumber } = usePhoneNumber(companyId);
   const { data: uncompletedData } = useGmailUncompletedCount(companyId, gmailAccount);
   const disconnectGmailMutation = useDisconnectGmail(companyId);
 
@@ -2668,9 +2672,18 @@ export function CompanyDetailPage() {
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label className="text-xs">Support Number</Label>
+                      {/* Once SignalWire manages the number, this column is a mirror of the
+                            SupportNumber row, not an editable field. The server rejects a change
+                            either way; disabling it stops an admin typing into a field that 400s. */}
                       <Input className="h-8 text-sm" value={infoForm.supportNumber}
                         placeholder="+15141234567"
+                        disabled={!!managedNumber}
                         onChange={e => setInfoForm(f => ({ ...f, supportNumber: e.target.value }))} />
+                      {managedNumber && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Managed by SignalWire — disconnect the number to edit manually.
+                        </p>
+                      )}
                     </div>
                     <div className="col-span-2 flex flex-col gap-1">
                       <Label className="text-xs">Business Activity</Label>
@@ -2943,6 +2956,13 @@ export function CompanyDetailPage() {
                   )}
                 </CardContent>
               </Card>
+            )}
+
+            {isAdmin && !isArchived && (
+              <PhoneNumberSection
+                companyId={companyId}
+                companyCountry={company.country}
+              />
             )}
 
             {/* Assigned User (admin only) */}
