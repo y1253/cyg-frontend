@@ -292,6 +292,22 @@ function ConnectNumberDialog({
                   <span className="flex-1 text-sm font-medium">
                     {formatE164(n.phoneNumber)}
                   </span>
+                  {/*
+                    The server only ever returns numbers that do BOTH, so this badge is
+                    always shown — that is the point. The capability bar was invisible
+                    here, which made a later purchase failure read as "it offered me a
+                    number that cannot text". Rendered from n.voice/n.sms rather than
+                    hardcoded, so if the filter ever regresses the badge goes missing
+                    instead of lying.
+                  */}
+                  {n.voice && n.sms && (
+                    <Badge
+                      variant="outline"
+                      className="bg-teal-50 text-teal-700 border-teal-200 text-[10px] px-1.5 py-0"
+                    >
+                      Voice + SMS
+                    </Badge>
+                  )}
                   <span className="text-xs text-muted-foreground">
                     {[n.locality, n.rateCenter, n.region]
                       .filter(Boolean)
