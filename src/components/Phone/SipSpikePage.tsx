@@ -17,10 +17,9 @@ import {
  * the real feature — assignment routing, the company name, the global overlay — is
  * deliberately absent, because none of it can be designed until this works.
  *
- * Credentials come from the QUERY STRING, never from the bundle:
- *   /sip-spike?u=cyg_u16&p=<password>
- * A deployed bundle with a live SIP password baked in would be a real credential leak,
- * and this page is reachable without auth so the spike is easy to run.
+ * Credentials are TYPED (or seeded from `?u=&p=&d=`), never baked into the bundle — a
+ * deployed bundle carrying a live SIP password would be a real credential leak, and that
+ * constraint is also why this page needs no auth: there is nothing in it to protect.
  *
  * Everything is logged on screen. When this fails, WHERE it fails is the finding:
  * transport connect vs REGISTER vs no INVITE vs SDP/media.
@@ -30,6 +29,16 @@ export function SipSpikePage() {
   const [status, setStatus] = useState('idle');
   const [incoming, setIncoming] = useState<Invitation | null>(null);
   const [inCall, setInCall] = useState(false);
+
+  // Seeded from the query string, but typeable. The first version read the URL and did
+  // nothing when it was missing, so a link that lost its parameters produced a page that
+  // looked fine and silently could not register — which cost a whole test cycle.
+  const initial = new URLSearchParams(window.location.search);
+  const [username, setUsername] = useState(initial.get('u') ?? '');
+  const [password, setPassword] = useState(initial.get('p') ?? '');
+  const [domain, setDomain] = useState(
+    initial.get('d') ?? 'cygfinance.sip.signalwire.com',
+  );
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
@@ -85,14 +94,8 @@ export function SipSpikePage() {
   );
 
   const connect = useCallback(async () => {
-    const params = new URLSearchParams(window.location.search);
-    const username = params.get('u');
-    const password = params.get('p');
-    const domain =
-      params.get('d') ?? 'cygfinance.sip.signalwire.com';
-
     if (!username || !password) {
-      say('!! missing ?u=<username>&p=<password> in the URL');
+      say('!! enter a SIP username and password first');
       setStatus('missing credentials');
       return;
     }
@@ -156,7 +159,7 @@ export function SipSpikePage() {
       say(`!! REGISTER failed: ${String(e)}`);
       setStatus('register failed');
     }
-  }, [say, watchSession]);
+  }, [say, watchSession, username, password, domain]);
 
   useEffect(() => {
     return () => {
@@ -197,8 +200,6 @@ export function SipSpikePage() {
   const dial = async () => {
     const target = window.prompt('Number to call, E.164:', '+1');
     if (!target || !uaRef.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const domain = params.get('d') ?? 'cygfinance.sip.signalwire.com';
     const uri = UserAgent.makeURI(`sip:${target}@${domain}`);
     if (!uri) return say('!! bad target URI');
     const inviter = new Inviter(uaRef.current, uri, {
@@ -217,14 +218,35 @@ export function SipSpikePage() {
         SIP spike — throwaway
       </h1>
       <p className="mb-4 text-xs text-slate-400">
-        Open as <code>/sip-spike?u=cyg_u16&amp;p=&lt;password&gt;</code>, press Connect,
-        then call the company number.
+        Enter the SIP credentials, press Connect, then call the company number.
       </p>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="sip username"
+          className="w-44 rounded bg-slate-800 px-2 py-1.5 text-slate-100 outline-none ring-teal-500 focus:ring"
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="sip password"
+          className="w-64 rounded bg-slate-800 px-2 py-1.5 text-slate-100 outline-none ring-teal-500 focus:ring"
+        />
+        <input
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          placeholder="sip domain"
+          className="w-72 rounded bg-slate-800 px-2 py-1.5 text-slate-100 outline-none ring-teal-500 focus:ring"
+        />
+      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => void connect()}
-          className="rounded bg-teal-600 px-3 py-1.5 text-white hover:bg-teal-500"
+          disabled={!username || !password}
+          className="rounded bg-teal-600 px-3 py-1.5 text-white hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Connect &amp; register
         </button>
