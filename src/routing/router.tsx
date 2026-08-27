@@ -16,6 +16,8 @@ import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
 import { GmailErrorPage } from '../components/Gmail/GmailErrorPage';
 import { MicrosoftSuccessPage } from '../components/Microsoft/MicrosoftSuccessPage';
 import { MicrosoftErrorPage } from '../components/Microsoft/MicrosoftErrorPage';
+// PHASE 2a SPIKE — throwaway, remove with SipSpikePage.
+import { SipSpikePage } from '../components/Phone/SipSpikePage';
 
 export const router = createBrowserRouter([
   {
@@ -41,6 +43,12 @@ export const router = createBrowserRouter([
   {
     path: '/register',
     element: <RegisterPage />,
+  },
+  {
+    // PHASE 2a SPIKE — throwaway. Unauthenticated on purpose: it takes its SIP
+    // credentials from the query string, so there is nothing here to protect.
+    path: '/sip-spike',
+    element: <SipSpikePage />,
   },
   {
     path: '/privacy',
