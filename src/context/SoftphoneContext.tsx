@@ -67,6 +67,16 @@ const ActionsCtx = createContext<SoftphoneActions | null>(null);
 const MAX_BACKOFF_MS = 30_000;
 /** An SSE event older than this belongs to a call that has already gone. */
 const EVENT_STALE_MS = 60_000;
+/**
+ * How long an INVITE waits for its SSE event before being ignored.
+ *
+ * Distinct from EVENT_STALE_MS: that discards events from a finished call, this decides
+ * how long the two halves may arrive apart. Generous, because being late costs a held
+ * reference while being early costs a missed call.
+ */
+const PAIR_WINDOW_MS = 6_000;
+
+const log = (...args: unknown[]) => console.log('[softphone]', ...args);
 
 /**
  * Registers the browser as a phone the moment the app loads, and owns the in-call state.
@@ -102,6 +112,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** The newest SSE event, waiting for (or already paired with) an INVITE. */
   const pendingRef = useRef<IncomingCallInfo | null>(null);
+  /** An INVITE that has arrived but has no matching event YET. */
+  const unpairedRef = useRef<Invitation | null>(null);
+  const unpairedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  /** Current phase, readable from callbacks without making them a dependency. */
+  const phaseRef = useRef<CallPhase>('idle');
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // ── Media ─────────────────────────────────────────────────────────────────
   const attachRemoteAudio = useCallback((session: Session) => {
@@ -119,6 +139,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const endCall = useCallback(() => {
     stopRinging();
+    clearTimeout(unpairedTimerRef.current);
+    unpairedRef.current = null;
     invitationRef.current = null;
     pendingRef.current = null;
     setPhase('idle');
@@ -129,31 +151,63 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Incoming calls ────────────────────────────────────────────────────────
+  /**
+   * Shows the call once BOTH halves are in hand, whichever order they arrived in.
+   *
+   * A call needs two independent signals: the INVITE (the media, which every browser
+   * gets because they all share one SIP credential) and the SSE event (which company,
+   * and whether this user is a target). Nothing guarantees their order — the server
+   * pushes the event before returning the LaML, but they travel different connections.
+   *
+   * The previous version only handled event-then-INVITE and dropped the invitation
+   * outright in the other order, so the call rang for 30 seconds with no popup.
+   * Both callers now funnel through here.
+   */
+  const tryPair = useCallback(() => {
+    if (phaseRef.current !== 'idle') return;
+    const invitation = unpairedRef.current;
+    const pending = pendingRef.current;
+    if (!invitation || !pending) return;
+    if (Date.now() - pending.at > EVENT_STALE_MS) return;
+
+    clearTimeout(unpairedTimerRef.current);
+    unpairedRef.current = null;
+    invitationRef.current = invitation;
+    log('paired call', pending.companyName, pending.from);
+
+    setInfo(pending);
+    setPhase('ringing');
+    startRinging();
+
+    invitation.stateChange.addListener((state) => {
+      if (state === SessionState.Established) {
+        stopRinging();
+        setPhase('active');
+        setSeconds(0);
+        attachRemoteAudio(invitation);
+      }
+      if (state === SessionState.Terminated) endCall();
+    });
+  }, [attachRemoteAudio, endCall]);
+
   const onInvite = useCallback(
     (invitation: Invitation) => {
-      const pending = pendingRef.current;
-      const fresh = pending && Date.now() - pending.at < EVENT_STALE_MS;
+      log('INVITE received');
+      // ALWAYS hold it, even with no event yet — the event may still be in flight.
+      unpairedRef.current = invitation;
+      clearTimeout(unpairedTimerRef.current);
+      unpairedTimerRef.current = setTimeout(() => {
+        if (unpairedRef.current !== invitation) return;
+        // No event named us inside the window, so this call is somebody else's.
+        // Release it and do NOTHING: a reject on one forked branch can tear down a
+        // call another branch is about to answer. Ignoring lets ours simply time out.
+        unpairedRef.current = null;
+        log('INVITE released unpaired — not for this user');
+      }, PAIR_WINDOW_MS);
 
-      // Not for us: no SSE event named this user. Do NOT reject — see the class
-      // docblock. Leave the branch to time out so whoever IS the target can answer.
-      if (!fresh) return;
-
-      invitationRef.current = invitation;
-      setInfo(pending);
-      setPhase('ringing');
-      startRinging();
-
-      invitation.stateChange.addListener((state) => {
-        if (state === SessionState.Established) {
-          stopRinging();
-          setPhase('active');
-          setSeconds(0);
-          attachRemoteAudio(invitation);
-        }
-        if (state === SessionState.Terminated) endCall();
-      });
+      tryPair();
     },
-    [attachRemoteAudio, endCall],
+    [tryPair],
   );
 
   // Read the handler through a ref so a re-created callback never churns the UserAgent.
@@ -246,14 +300,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             type?: string;
           } & IncomingCallInfo;
           if (payload.type !== 'incoming-call') return; // ignores the 25s ping
+          log('SSE incoming-call', payload.companyName, payload.from);
           pendingRef.current = payload;
-          // The INVITE may already be here (it usually arrives a beat later, but the
-          // order is not guaranteed), in which case adopt it now.
-          if (invitationRef.current && !info) {
-            setInfo(payload);
-            setPhase('ringing');
-            startRinging();
-          }
+          // The INVITE may already be waiting; tryPair handles either order.
+          tryPair();
         } catch {
           /* malformed frame — ignore */
         }
@@ -277,7 +327,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       es?.close();
     };
-  }, [token, info]);
+    // `token` ONLY. Including call state here tore the stream down and reopened it on
+    // every change — visible in nginx as a run of `GET /api/phone/events … 200 6`.
+    // The stream must live as long as the session, like useInternalMessageStream.
+  }, [token, tryPair]);
 
   // ── Call timer ────────────────────────────────────────────────────────────
   useEffect(() => {
