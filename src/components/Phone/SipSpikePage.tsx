@@ -37,7 +37,12 @@ export function SipSpikePage() {
   const [username, setUsername] = useState(initial.get('u') ?? '');
   const [password, setPassword] = useState(initial.get('p') ?? '');
   const [domain, setDomain] = useState(
-    initial.get('d') ?? 'cygfinance.sip.signalwire.com',
+        // The SIP domain carries a PROJECT-ID SUFFIX — it is NOT {space}.sip.signalwire.com.
+    // The bare form resolves, serves valid TLS and answers SIP with a 401 challenge, so
+    // it looks right in every way except that no user exists there; a registrar answers
+    // 401 for unknown users rather than revealing they do not exist. That cost this
+    // whole increment. The real value is shown in the dashboard on the SIP Credential.
+    initial.get('d') ?? 'cygfinance-2b417c8365ac.sip.signalwire.com',
   );
 
   const uaRef = useRef<UserAgent | null>(null);
