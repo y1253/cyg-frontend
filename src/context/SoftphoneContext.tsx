@@ -18,7 +18,11 @@ import {
   type Session,
 } from 'sip.js';
 import { useAuth } from '@/context/AuthContext';
-import { fetchSipCredentials, phoneEventsUrl } from '@/api/phone';
+import {
+  fetchPendingCall,
+  fetchSipCredentials,
+  phoneEventsUrl,
+} from '@/api/phone';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
 
@@ -117,6 +121,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const unpairedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  /** Read from callbacks without making them depend on it. */
+  const tokenRef = useRef(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
   /** Current phase, readable from callbacks without making them a dependency. */
   const phaseRef = useRef<CallPhase>('idle');
   useEffect(() => {
@@ -193,19 +203,44 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const onInvite = useCallback(
     (invitation: Invitation) => {
       log('INVITE received');
-      // ALWAYS hold it, even with no event yet — the event may still be in flight.
+      // ALWAYS hold it, even with no context yet — it may still be on its way.
       unpairedRef.current = invitation;
       clearTimeout(unpairedTimerRef.current);
       unpairedTimerRef.current = setTimeout(() => {
         if (unpairedRef.current !== invitation) return;
-        // No event named us inside the window, so this call is somebody else's.
+        // Nothing named us inside the window, so this call is somebody else's.
         // Release it and do NOTHING: a reject on one forked branch can tear down a
         // call another branch is about to answer. Ignoring lets ours simply time out.
         unpairedRef.current = null;
         log('INVITE released unpaired — not for this user');
       }, PAIR_WINDOW_MS);
 
+      // Try the push first (instant where SSE works), then ASK.
       tryPair();
+
+      // The reliable path. A TLS-intercepting content filter on some networks buffers
+      // streaming responses until they complete, so SSE never delivers there while
+      // ordinary requests are fine. Poll briefly: the webhook records the pending call
+      // before returning its LaML, but the INVITE can still beat our request.
+      const tok = tokenRef.current;
+      if (!tok) return;
+      let attempt = 0;
+      const ask = () => {
+        if (unpairedRef.current !== invitation) return; // paired or released already
+        void fetchPendingCall(tok)
+          .then((call) => {
+            if (!call || unpairedRef.current !== invitation) return;
+            log('pending-call fetched', call.companyName, call.from);
+            pendingRef.current = call;
+            tryPair();
+          })
+          .finally(() => {
+            if (++attempt < 4 && unpairedRef.current === invitation) {
+              setTimeout(ask, 400);
+            }
+          });
+      };
+      ask();
     },
     [tryPair],
   );

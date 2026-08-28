@@ -131,3 +131,30 @@ export async function fetchSipCredentials(
 export function phoneEventsUrl(token: string): string {
   return `${API}/phone/events?token=${encodeURIComponent(token)}`;
 }
+
+/**
+ * The call ringing this user right now, or null.
+ *
+ * A plain request on purpose. The SSE stream is unreliable behind a TLS-intercepting
+ * content filter (it buffers streaming responses until they complete, which never
+ * happens), so the client fetches this when an INVITE arrives rather than waiting for
+ * a push that may never land.
+ */
+export async function fetchPendingCall(
+  token: string,
+): Promise<(IncomingCallPayload & { type: string }) | null> {
+  const res = await fetchWithAuth(token, `${API}/phone/pending-call`, {
+    headers: JSON_HEADERS,
+  });
+  if (!res.ok) return null;
+  const text = await res.text();
+  return text ? (JSON.parse(text) as IncomingCallPayload & { type: string }) : null;
+}
+
+export interface IncomingCallPayload {
+  companyId: number;
+  companyName: string;
+  from: string;
+  callSid: string;
+  at: number;
+}
