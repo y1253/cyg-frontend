@@ -5,7 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { NotificationBell } from '@/components/Layout/NotificationBell';
+import { SoftphoneStatus } from '@/components/Phone/SoftphoneStatus';
 import { ComposerRouteWatcher } from '@/components/Layout/ComposerRouteWatcher';
+import { SoftphoneProvider } from '@/context/SoftphoneContext';
 
 function SideNavLink({
   to,
@@ -43,7 +45,16 @@ export function AppLayout() {
       {/* Same reason as the provider above: it needs the router, so it can't live
           beside ComposerProvider in App.tsx. */}
       <ComposerRouteWatcher />
-      <AppShell />
+      {/* Registers the browser as a phone on mount — no button, nothing to type.
+          Here rather than in App.tsx for the same three reasons as the notification
+          provider: it needs the router (the call popup links to the company), it must
+          only run for authenticated routes, and unmounting on logout is what
+          deregisters it. Being a pathless layout route is also what keeps a live call
+          alive while the user navigates between companies — only the <Outlet /> below
+          is swapped. */}
+      <SoftphoneProvider>
+        <AppShell />
+      </SoftphoneProvider>
     </NotificationProvider>
   );
 }
@@ -66,6 +77,7 @@ function AppShell() {
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium">{user?.name}</span>
           <Badge variant="secondary" className="text-xs">{user?.role}</Badge>
+          <SoftphoneStatus />
           <NotificationBell />
           <Button
             variant="ghost"

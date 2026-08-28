@@ -101,3 +101,33 @@ export async function releaseSupportNumber(
   );
   if (!res.ok) throw await failure(res, 'Failed to disconnect the number');
 }
+
+/** Softphone credentials for the signed-in user. */
+export interface SipCredentials {
+  username: string;
+  password: string;
+  domain: string;
+  wsServer: string;
+}
+
+/**
+ * The credentials the softphone registers with, fetched on app load.
+ *
+ * Currently one shared credential for everyone — SIP passwords cannot be set through
+ * any SignalWire API, so a credential per user would need a manual dashboard entry per
+ * user. The endpoint is per-caller so that changing that later touches only the server.
+ */
+export async function fetchSipCredentials(
+  token: string,
+): Promise<SipCredentials> {
+  const res = await fetchWithAuth(token, `${API}/phone/sip-credentials`, {
+    headers: JSON_HEADERS,
+  });
+  if (!res.ok) throw await failure(res, 'Softphone is not available');
+  return res.json() as Promise<SipCredentials>;
+}
+
+/** SSE endpoint carrying incoming-call events. EventSource cannot send headers. */
+export function phoneEventsUrl(token: string): string {
+  return `${API}/phone/events?token=${encodeURIComponent(token)}`;
+}

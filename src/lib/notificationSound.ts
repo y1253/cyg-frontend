@@ -95,3 +95,77 @@ export function playMessageChime(volume = 0.22): boolean {
 
   return true;
 }
+
+// ── Ringtone ────────────────────────────────────────────────────────────────
+// A repeating two-tone ring for an incoming call. Unlike the chime this must be
+// STOPPABLE, so the nodes are held at module scope rather than being fire-and-forget.
+//
+// Scheduling is on the audio clock (`ctx.currentTime`), never `setTimeout` — a
+// backgrounded tab throttles timers to roughly once a minute, and a call arriving while
+// the tab is in the background is exactly the case this exists for.
+
+let ringNodes: { osc: OscillatorNode[]; gain: GainNode } | null = null;
+
+/** North-American ring cadence: 440+480 Hz, 2s on / 4s off. */
+const RING_HZ = [440, 480];
+const RING_ON = 2;
+const RING_CYCLE = 6;
+/** Rings before giving up, so a missed call cannot ring forever. */
+const RING_CYCLES = 10;
+
+/**
+ * Start ringing. Idempotent — a second call while already ringing is ignored, which
+ * matters because a re-INVITE or React StrictMode's double-effect would otherwise
+ * stack a second oscillator pair that `stopRinging` could not reach.
+ */
+export function startRinging(volume = 0.14): boolean {
+  if (!ctx || ctx.state !== 'running') {
+    void ctx?.resume();
+    return false;
+  }
+  if (ringNodes) return true;
+
+  const t0 = ctx.currentTime + 0.02;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, t0);
+  gain.connect(ctx.destination);
+
+  // Gate the whole cadence on the audio clock up front.
+  for (let i = 0; i < RING_CYCLES; i++) {
+    const on = t0 + i * RING_CYCLE;
+    gain.gain.setValueAtTime(0, on);
+    gain.gain.linearRampToValueAtTime(volume, on + 0.05);
+    gain.gain.setValueAtTime(volume, on + RING_ON - 0.05);
+    gain.gain.linearRampToValueAtTime(0, on + RING_ON);
+  }
+
+  const osc = RING_HZ.map((f) => {
+    const o = ctx!.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    o.connect(gain);
+    o.start(t0);
+    o.stop(t0 + RING_CYCLES * RING_CYCLE);
+    return o;
+  });
+
+  ringNodes = { osc, gain };
+  return true;
+}
+
+/** Stop ringing. Safe to call when not ringing. */
+export function stopRinging(): void {
+  if (!ringNodes) return;
+  const { osc, gain } = ringNodes;
+  ringNodes = null;
+  try {
+    // Ramp rather than cut, or the abrupt stop clicks.
+    const now = ctx?.currentTime ?? 0;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.05);
+    osc.forEach((o) => o.stop(now + 0.06));
+  } catch {
+    // Already stopped by its scheduled end. Nothing to do.
+  }
+}
