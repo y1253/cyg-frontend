@@ -8,19 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useSendSms } from '@/hooks/useSendSms';
-import { formatE164 } from '@/lib/phone';
-
-/** Digits typed by a person -> E.164, or null when it cannot be one. */
-function toE164(input: string): string | null {
-  const trimmed = input.trim();
-  if (/^\+[1-9]\d{7,14}$/.test(trimmed)) return trimmed;
-  const digits = trimmed.replace(/\D/g, '');
-  // A bare 10-digit number is NANP; 11 digits starting with 1 is the same number
-  // written out. Anything else needs the country code spelled with a +.
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  return null;
-}
+import { formatE164, toE164 } from '@/lib/phone';
 
 /**
  * Start a new text conversation.

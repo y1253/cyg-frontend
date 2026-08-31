@@ -21,6 +21,8 @@ import { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { usePhoneCounts } from '@/hooks/usePhoneCounts';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { useStartCall } from '@/hooks/useStartCall';
+import { useRingingCall } from '@/hooks/useRingingCall';
+import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
 import { unlockAudio } from '@/lib/notificationSound';
 import { fetchAuthUrl } from '@/api/gmail';
 import { fetchLatestPreview } from '@/api/communications';
@@ -34,6 +36,8 @@ import { EmailThreadView } from './communications/EmailThreadView';
 import { SmsThreadView } from './communications/SmsThreadView';
 import { CallDetailView } from './communications/CallDetailView';
 import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
+import { RingingCallBanner } from './communications/RingingCallBanner';
+import { DialCallDialog } from './communications/DialCallDialog';
 import { InboxView } from './communications/InboxView';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { useListScrollRestore } from './communications/useListScrollRestore';
@@ -91,6 +95,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // and to stay dismissed for the session rather than reappearing on every render.
   const [connectDismissed, setConnectDismissed] = useState(false);
   const [composeSmsOpen, setComposeSmsOpen] = useState(false);
+  const [dialOpen, setDialOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
@@ -278,6 +283,41 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const markPhoneComplete = useMarkPhoneItem(companyId, 'complete');
   const markPhoneUncomplete = useMarkPhoneItem(companyId, 'uncomplete');
   const startCallMutation = useStartCall(companyId);
+
+  // ── A call ringing THIS company, answerable from here ─────────────────────
+  // Gated on the softphone actually holding an unpaired INVITE. Every registered
+  // browser receives every INVITE (one shared SIP credential), but only a browser that
+  // has one can accept it — so with nothing held there is nothing to ask about, and the
+  // query stays idle. `phase !== 'idle'` means this browser is already showing the call
+  // in the floating overlay, or is on another call.
+  const { phase: callPhase, hasHeldInvite } = useSoftphone();
+  const { answerHeld } = useSoftphoneActions();
+  const [ignoredCallSid, setIgnoredCallSid] = useState<string | null>(null);
+
+  const { data: ringingCall } = useRingingCall(
+    companyId,
+    hasHeldInvite && callPhase === 'idle' && active && !!supportNumber,
+  );
+  const showRinging =
+    !!ringingCall &&
+    hasHeldInvite &&
+    callPhase === 'idle' &&
+    ringingCall.callSid !== ignoredCallSid;
+
+  /**
+   * Rendered in EVERY branch below, not just the inbox.
+   *
+   * The tab is an early-return router — loading, connect panel, four detail views, the
+   * inbox — so a banner wired only into `InboxView` would vanish the moment somebody
+   * opened an email, which is exactly when a call is most likely to arrive unnoticed.
+   */
+  const ringingBanner = showRinging ? (
+    <RingingCallBanner
+      call={ringingCall}
+      onAnswer={() => answerHeld(ringingCall)}
+      onDecline={() => setIgnoredCallSid(ringingCall.callSid)}
+    />
+  ) : null;
 
   /**
    * Dial a number from a row or a detail view.
@@ -604,9 +644,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
 
   if (accountLoading) {
     return (
-      <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
-        Loading…
-      </div>
+      <>
+        {ringingBanner}
+        <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
+          Loading…
+        </div>
+      </>
     );
   }
 
@@ -615,11 +658,14 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // texts instead, and the mailbox prompt becomes a banner above the list.
   if (!account && !supportNumber) {
     return (
-      <ConnectAccountPanel
-        isAdmin={isAdmin}
-        connecting={connecting}
-        onConnect={(prov, kind) => void handleConnect(prov, kind)}
-      />
+      <>
+        {ringingBanner}
+        <ConnectAccountPanel
+          isAdmin={isAdmin}
+          connecting={connecting}
+          onConnect={(prov, kind) => void handleConnect(prov, kind)}
+        />
+      </>
     );
   }
 
@@ -630,6 +676,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   if (selected?.kind === 'chat' && account) {
     return (
       <>
+        {ringingBanner}
         <ChatThreadView
           companyId={companyId}
           token={token}
@@ -667,6 +714,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   if (selected?.kind === 'email' && account) {
     return (
       <>
+        {ringingBanner}
         <EmailThreadView
           companyId={companyId}
           token={token}
@@ -698,6 +746,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     const row = phoneItems.find((i) => i.id === selected.msgId);
     return (
       <>
+        {ringingBanner}
         <SmsThreadView
           companyId={companyId}
           peer={selected.peer}
@@ -720,6 +769,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     const row = phoneItems.find((i) => i.id === selected.itemId);
     return (
       <>
+        {ringingBanner}
         <CallDetailView
           companyId={companyId}
           sid={selected.sid}
@@ -742,6 +792,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
 
   return (
     <>
+      {ringingBanner}
       <InboxView
         companyId={companyId}
         token={token}
@@ -805,6 +856,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         supportNumber={supportNumber}
         onCall={supportNumber ? handleCall : undefined}
         onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
+        onNewCall={supportNumber ? () => setDialOpen(true) : undefined}
         connecting={connecting}
         connectDismissed={connectDismissed}
         onDismissConnect={() => setConnectDismissed(true)}
@@ -817,6 +869,16 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onBulk={runBulk}
       />
       {completeConfirm}
+      {supportNumber && (
+        <DialCallDialog
+          open={dialOpen}
+          onOpenChange={setDialOpen}
+          supportNumber={supportNumber}
+          onDial={handleCall}
+          pending={startCallMutation.isPending}
+          error={(startCallMutation.error as Error)?.message ?? null}
+        />
+      )}
       {supportNumber && (
         <ComposeSmsDialog
           open={composeSmsOpen}

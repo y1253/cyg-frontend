@@ -63,12 +63,31 @@ interface SoftphoneState {
   muted: boolean;
   /** Seconds since the call was answered. */
   seconds: number;
+  /**
+   * This browser is holding a live INVITE it has not been told to display.
+   *
+   * True on every registered browser during a ring it is not the target of, because all
+   * of them share one SIP credential. It is what lets the Communications tab offer
+   * "Answer" to an admin: without a held invitation there is nothing to accept, however
+   * much the server knows about the call.
+   */
+  hasHeldInvite: boolean;
 }
 
 interface SoftphoneActions {
   answer: () => void;
   hangup: () => void;
   toggleMute: () => void;
+  /**
+   * Answer the held INVITE as the given call.
+   *
+   * Goes through the normal pairing path rather than calling `accept()` directly: it is
+   * pairing that sets `info` and `phase`, and therefore that raises the floating overlay
+   * which follows the user across every page for the rest of the call. A bare `accept()`
+   * would connect the audio and leave `phase` at 'idle' — a live call with no UI
+   * anywhere and no way to hang it up.
+   */
+  answerHeld: (info: IncomingCallInfo) => void;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -89,7 +108,17 @@ const EVENT_STALE_MS = 60_000;
  * how long the two halves may arrive apart. Generous, because being late costs a held
  * reference while being early costs a missed call.
  */
-const PAIR_WINDOW_MS = 6_000;
+/**
+ * Just past the `<Dial timeout="30">` the inbound webhook sends.
+ *
+ * It was 6s, which was enough for the routed target — their pending event arrives within
+ * about a second. But it also threw away the ONLY reference to the invitation five
+ * seconds into a thirty-second ring, so an admin who opened the ringing company at
+ * second 10 had nothing left to answer with even though the SIP branch was still live.
+ * Holding it for the whole ring is what makes answering from the tab possible; the
+ * `Terminated` listener attached in `onInvite` is what keeps that safe.
+ */
+const PAIR_WINDOW_MS = 33_000;
 
 const log = (...args: unknown[]) => console.log('[softphone]', ...args);
 
@@ -120,6 +149,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [info, setInfo] = useState<IncomingCallInfo | null>(null);
   const [muted, setMuted] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  // Mirrors `unpairedRef` into render, so the tab can offer Answer only when there is
+  // genuinely something to answer.
+  const [hasHeldInvite, setHasHeldInvite] = useState(false);
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
@@ -162,6 +194,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     stopRinging();
     clearTimeout(unpairedTimerRef.current);
     unpairedRef.current = null;
+    setHasHeldInvite(false);
     invitationRef.current = null;
     pendingRef.current = null;
     setPhase('idle');
@@ -193,6 +226,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     clearTimeout(unpairedTimerRef.current);
     unpairedRef.current = null;
+    setHasHeldInvite(false);
     invitationRef.current = invitation;
     log('paired call', pending.companyName, pending.from);
 
@@ -228,17 +262,36 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const onInvite = useCallback(
     (invitation: Invitation) => {
       log('INVITE received');
-      // ALWAYS hold it, even with no context yet — it may still be on its way.
+      // ALWAYS hold it, even with no context yet — it may still be on its way, and for
+      // a whole company's worth of admins it never will: the call is somebody else's to
+      // be shown, but any of them may still pick it up from that company's tab.
       unpairedRef.current = invitation;
+      setHasHeldInvite(true);
       clearTimeout(unpairedTimerRef.current);
       unpairedTimerRef.current = setTimeout(() => {
         if (unpairedRef.current !== invitation) return;
-        // Nothing named us inside the window, so this call is somebody else's.
-        // Release it and do NOTHING: a reject on one forked branch can tear down a
-        // call another branch is about to answer. Ignoring lets ours simply time out.
+        // The ring is over. Release it and do NOTHING: a reject on one forked branch can
+        // tear down a call another branch is about to answer. Ignoring lets ours simply
+        // time out.
         unpairedRef.current = null;
-        log('INVITE released unpaired — not for this user');
+        setHasHeldInvite(false);
+        log('INVITE released unpaired — ring window elapsed');
       }, PAIR_WINDOW_MS);
+
+      // Attached HERE, not only in tryPair. An unpaired invitation used to carry no
+      // listener at all, which was survivable while it was dropped after 6s. Now that it
+      // is held for the full ring, this is what notices SignalWire CANCELling our branch
+      // when another browser answers — without it the tab would keep offering "Answer"
+      // for a call that is already gone. Terminated is idempotent with the listener
+      // tryPair adds: whichever fires, `endCall` resets the same state.
+      invitation.stateChange.addListener((state) => {
+        if (state !== SessionState.Terminated) return;
+        if (unpairedRef.current === invitation) {
+          unpairedRef.current = null;
+          setHasHeldInvite(false);
+          log('held INVITE terminated — answered elsewhere or rang out');
+        }
+      });
 
       // Try the push first (instant where SSE works), then ASK.
       tryPair();
@@ -432,6 +485,27 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         }
         endCall();
       },
+      answerHeld: (call: IncomingCallInfo) => {
+        // Unlock audio on this click, while it is still a real user gesture.
+        unlockAudio();
+        // Feed the pairing path rather than accepting directly: pairing is what sets
+        // `info` and `phase`, and therefore what raises the overlay that follows the
+        // user for the rest of the call. `at` is refreshed so the staleness guard in
+        // tryPair cannot reject a call the user is deliberately picking up.
+        pendingRef.current = { ...call, at: Date.now(), direction: 'inbound' };
+        tryPair();
+        // Pairing an inbound call starts the ringtone and waits for Answer. The user
+        // just pressed Answer, so silence it in the same tick — before accept, or the
+        // oscillator gets a moment to sound.
+        stopRinging();
+        void invitationRef.current
+          ?.accept({
+            sessionDescriptionHandlerOptions: {
+              constraints: { audio: true, video: false },
+            },
+          })
+          .catch(() => endCall());
+      },
       toggleMute: () => {
         const pc = (
           invitationRef.current?.sessionDescriptionHandler as unknown as {
@@ -448,12 +522,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         });
       },
     }),
-    [endCall],
+    [endCall, tryPair],
   );
 
   const state = useMemo<SoftphoneState>(
-    () => ({ status, phase, info, muted, seconds }),
-    [status, phase, info, muted, seconds],
+    () => ({ status, phase, info, muted, seconds, hasHeldInvite }),
+    [status, phase, info, muted, seconds, hasHeldInvite],
   );
 
   return (

@@ -197,6 +197,8 @@ export interface CallItem extends PhoneItemBase {
   outcome: 'answered' | 'missed' | 'failed' | 'in-progress';
   durationSec: number;
   hasRecording: boolean;
+  /** The leg this is a child of. An outbound call's recording lives on its parent. */
+  parentCallSid: string | null;
 }
 
 export interface SmsItem extends PhoneItemBase {
@@ -351,6 +353,27 @@ export async function fetchPhoneCounts(
  */
 export function recordingUrl(recording: CallRecording): string {
   return `${API}/phone/recordings/${encodeURIComponent(recording.sid)}?token=${encodeURIComponent(recording.token)}`;
+}
+
+/**
+ * The call ringing this company right now, or null.
+ *
+ * Company-scoped on purpose. `fetchPendingCall` answers "is a call ringing for ME",
+ * which is empty for an admin the call was not routed to — even though their browser is
+ * holding the INVITE and could answer it.
+ */
+export async function fetchRingingCall(
+  token: string,
+  companyId: number,
+): Promise<IncomingCallPayload | null> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/ringing`,
+    { headers: JSON_HEADERS },
+  );
+  if (!res.ok) return null;
+  const text = await res.text();
+  return text ? (JSON.parse(text) as IncomingCallPayload) : null;
 }
 
 export type PhoneStateAction = 'read' | 'unread' | 'complete' | 'uncomplete';

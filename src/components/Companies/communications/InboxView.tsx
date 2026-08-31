@@ -86,6 +86,7 @@ export function InboxView({
   supportNumber,
   onCall,
   onComposeSms,
+  onNewCall,
   connecting,
   connectDismissed,
   onDismissConnect,
@@ -149,6 +150,8 @@ export function InboxView({
   onCall?: (number: string) => void;
   /** Start a new text message. */
   onComposeSms?: () => void;
+  /** Dial a number that is not already in the feed. */
+  onNewCall?: () => void;
   connecting: boolean;
   /** The "connect a mailbox" banner was dismissed for this company. */
   connectDismissed: boolean;
@@ -254,6 +257,16 @@ export function InboxView({
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
             >
               <Plus size={14} /> Compose
+            </Button>
+          )}
+          {supportNumber && onNewCall && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-green-300 text-green-700 hover:bg-green-50 gap-1"
+              onClick={onNewCall}
+            >
+              <Phone size={14} /> New call
             </Button>
           )}
           {supportNumber && onComposeSms && (
