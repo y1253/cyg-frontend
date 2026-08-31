@@ -34,11 +34,22 @@ export type SoftphoneStatus =
   | 'unavailable'
   | 'failed';
 
-/** What the SSE stream tells us about a call the INVITE cannot. */
+/**
+ * What the server tells us about a call the INVITE cannot.
+ *
+ * Covers both directions. A call PLACED from the app arrives here as an ordinary
+ * INVITE too: click-to-call asks SignalWire to ring the shared SIP credential first
+ * and only then dials the customer, so the INVITE alone cannot say whether the user
+ * is being called or is placing a call. `direction` is what separates them.
+ */
 export interface IncomingCallInfo {
   companyId: number;
   companyName: string;
   from: string;
+  /** The number being dialled. Outbound only. */
+  to?: string;
+  /** Absent on an event from an older build — treated as inbound. */
+  direction?: 'inbound' | 'outbound';
   callSid: string;
   at: number;
 }
@@ -187,7 +198,21 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     setInfo(pending);
     setPhase('ringing');
-    startRinging();
+
+    if (pending.direction === 'outbound') {
+      // The user already clicked "Call"; making them then click "Answer" to reach the
+      // person THEY dialled would be absurd. Accept immediately and let the overlay
+      // read "Calling…" until the far end picks up.
+      void invitation
+        .accept({
+          sessionDescriptionHandlerOptions: {
+            constraints: { audio: true, video: false },
+          },
+        })
+        .catch(() => endCall());
+    } else {
+      startRinging();
+    }
 
     invitation.stateChange.addListener((state) => {
       if (state === SessionState.Established) {
@@ -334,8 +359,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           const payload = JSON.parse(e.data as string) as {
             type?: string;
           } & IncomingCallInfo;
-          if (payload.type !== 'incoming-call') return; // ignores the 25s ping
-          log('SSE incoming-call', payload.companyName, payload.from);
+          // Both directions arrive on this stream; anything else (the 25s ping) is
+          // not a call.
+          if (
+            payload.type !== 'incoming-call' &&
+            payload.type !== 'outgoing-call'
+          ) {
+            return;
+          }
+          log('SSE', payload.type, payload.companyName, payload.from);
           pendingRef.current = payload;
           // The INVITE may already be waiting; tryPair handles either order.
           tryPair();

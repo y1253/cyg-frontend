@@ -16,6 +16,12 @@ import { useMarkChatComplete } from '@/hooks/useMarkChatComplete';
 import { useMarkChatUncomplete } from '@/hooks/useMarkChatUncomplete';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
+import { usePhoneNumber } from '@/hooks/usePhoneNumber';
+import { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
+import { usePhoneCounts } from '@/hooks/usePhoneCounts';
+import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
+import { useStartCall } from '@/hooks/useStartCall';
+import { unlockAudio } from '@/lib/notificationSound';
 import { fetchAuthUrl } from '@/api/gmail';
 import { fetchLatestPreview } from '@/api/communications';
 import { messagePreview } from '@/lib/notificationText';
@@ -25,13 +31,17 @@ import { CompleteConfirmDialog } from './CompleteConfirmDialog';
 import { ChatThreadView } from './communications/ChatThreadView';
 import { ConnectAccountPanel } from './communications/ConnectAccountPanel';
 import { EmailThreadView } from './communications/EmailThreadView';
+import { SmsThreadView } from './communications/SmsThreadView';
+import { CallDetailView } from './communications/CallDetailView';
+import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
 import { InboxView } from './communications/InboxView';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import {
   ALL_LABELS, FOLDERS, INBOX_TABS,
-  type CompleteTarget, type KindFilter, type UnifiedItem,
+  type CompleteTarget, type ItemKind, type KindFilter,
+  type Selection, type UnifiedItem,
 } from './communications/types';
 import {
   EMPTY_FILTERS,
@@ -77,6 +87,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
 
   const [connecting, setConnecting] = useState(false);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
+  // "Connect a mailbox" is a banner now, not a wall — so it needs to be dismissable,
+  // and to stay dismissed for the session rather than reappearing on every render.
+  const [connectDismissed, setConnectDismissed] = useState(false);
+  const [composeSmsOpen, setComposeSmsOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
@@ -84,23 +98,28 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // ── Which message / folder is open (the restore point) ─────────────────────
   const restored = useRestoredCommUi(companyId);
 
-  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(restored.selectedMsgId ?? null);
-  // Conversation id of the opened email, captured from the clicked list row so the
-  // whole thread loads in one request. Falls back to the opened message's own
-  // threadId when restored from storage (where only the message id is persisted).
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(restored.selectedSpaceId ?? null);
-  // The clicked chat message — its createTime freezes the thread at that moment,
-  // and its id is the per-message read/unread target for the open thread.
-  const [openedChatMsgId, setOpenedChatMsgId] = useState<string | null>(restored.openedChatMsgId ?? null);
-  const [openedChatMsgTime, setOpenedChatMsgTime] = useState<string | null>(restored.openedChatMsgTime ?? null);
+  /**
+   * Which detail view is open, if any — ONE discriminated union rather than a
+   * nullable id per kind.
+   *
+   * With four channels, "exactly one thing is open" maintained by hand across every
+   * open/close handler is quadratic and drifts; here the wrong combination cannot be
+   * constructed, and each render branch is narrowed to its own fields.
+   */
+  const [selected, setSelected] = useState<Selection | null>(restored.selected ?? null);
   const [selectedLabel, setSelectedLabel] = useState<string>(
     ALL_LABELS.includes(restored.selectedLabel ?? '') ? restored.selectedLabel! : 'INBOX',
   );
   // Gates the "Mark as unread" button. Opening an email always marks it read, so a
   // restored open email is read by definition — otherwise the button would silently
   // go missing from the toolbar after a reload. (Not worth persisting on its own.)
-  const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(!!restored.selectedMsgId);
+  const [selectedMsgIsRead, setSelectedMsgIsRead] = useState(
+    restored.selected?.kind === 'email',
+  );
+  // The email thread id, captured from the clicked row so the whole conversation
+  // loads in one request. Not persisted: a restored selection falls back to the
+  // opened message's own threadId.
+  const [restoredThreadId, setRestoredThreadId] = useState<string | null>(null);
   // Inbox search + filter. `searchInput` is the raw box; `searchQuery` is the
   // debounced/committed term sent to the server. `filter` narrows by kind/state.
   const [searchInput, setSearchInput] = useState(restored.searchInput ?? '');
@@ -120,10 +139,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
 
   usePersistCommUi(companyId, {
     selectedLabel,
-    selectedMsgId,
-    selectedSpaceId,
-    openedChatMsgId,
-    openedChatMsgTime,
+    selected,
     filter,
     searchInput,
     filters,
@@ -206,12 +222,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
   const { data: uncompletedData } = useGmailUncompletedCount(companyId, account);
 
+  // Phone lives beside the mailbox, not inside it: a company can have a support
+  // number and no mailbox, or the reverse. `hasNumber` gates the query so a company
+  // without one never pays for a request that can only ever return an empty page.
+  const { data: supportNumberRow } = usePhoneNumber(companyId);
+  const supportNumber = supportNumberRow?.phoneNumber ?? null;
+  const phoneQuery = usePhoneTimeline(companyId, !!supportNumber, active);
+  const { data: phoneCountData } = usePhoneCounts(companyId, !!supportNumber, active);
+
+  // Badges count every channel, so the phone contribution is added to the mailbox's.
+  const unreadCount = (unreadData?.count ?? 0) + (phoneCountData?.unread ?? 0);
+  const uncompletedCount =
+    (uncompletedData?.count ?? 0) + (phoneCountData?.uncompleted ?? 0);
+
   const {
-    emailItems, chatItems, visibleItems, loadMoreRef,
-    emailHasNext, chatHasNext, emailFetchingNext, chatFetchingNext,
+    emailItems, chatItems, phoneItems, visibleItems, loadMoreRef,
+    emailHasNext, emailFetchingNext, anyFetchingNext, allExhausted,
   } = useUnifiedInbox({
     emailQuery,
     chatQuery,
+    phoneQuery,
+    phoneEnabled: !!supportNumber,
     isInboxLike,
     isFilteredFolder,
     selectedLabel,
@@ -219,17 +250,18 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     filter,
     targetCount:
       selectedLabel === 'UNREAD'
-        ? unreadData?.count
+        ? unreadCount
         : selectedLabel === 'UNCOMPLETED'
-          ? uncompletedData?.count
+          ? uncompletedCount
           : undefined,
-    selectedMsgId,
-    selectedSpaceId,
+    // One key instead of one dep per kind: the observer only needs to know that the
+    // list unmounted and came back, not which view was open.
+    detailOpenKey: selected ? `${selected.kind}:${JSON.stringify(selected)}` : null,
   });
 
   const { listRootRef, saveListScroll } = useListScrollRestore({
     active,
-    listOpen: !selectedMsgId && !selectedSpaceId,
+    listOpen: selected === null,
   });
 
   // ── Per-message state mutations (shared by the list, both detail views and bulk) ──
@@ -241,6 +273,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const markEmailUncompleteMutation = useMarkEmailUncomplete(companyId);
   const markChatCompleteMutation = useMarkChatComplete(companyId);
   const markChatUncompleteMutation = useMarkChatUncomplete(companyId);
+  const markPhoneRead = useMarkPhoneItem(companyId, 'read');
+  const markPhoneUnread = useMarkPhoneItem(companyId, 'unread');
+  const markPhoneComplete = useMarkPhoneItem(companyId, 'complete');
+  const markPhoneUncomplete = useMarkPhoneItem(companyId, 'uncomplete');
+  const startCallMutation = useStartCall(companyId);
+
+  /**
+   * Dial a number from a row or a detail view.
+   *
+   * `unlockAudio()` runs HERE, synchronously inside the click, and not when the call
+   * connects: browsers only grant audio playback and microphone access off a real user
+   * gesture, and by the time SignalWire rings this browser back the click is seconds
+   * old. Skipping it produces a call that connects with no sound and no obvious cause.
+   */
+  const handleCall = useCallback(
+    (number: string) => {
+      unlockAudio();
+      startCallMutation.mutate(number);
+    },
+    [startCallMutation],
+  );
 
   // First error across the per-message state toggles. These calls silently ignored
   // non-OK responses until now, which is what made a failed "mark complete" look
@@ -411,60 +464,103 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   );
 
   // ── Open / close handlers ──────────────────────────────────────────────────
-  const closeEmail = () => setSelectedMsgId(null);
+  const closeDetail = () => setSelected(null);
 
-  const closeChat = () => {
-    setSelectedSpaceId(null);
-    setOpenedChatMsgId(null);
-    setOpenedChatMsgTime(null);
+  /**
+   * Per-kind state mutations, looked up rather than chained through `kind === 'x' ?`.
+   *
+   * Four channels × four actions is sixteen combinations; as nested ternaries that is
+   * unreadable, and every new channel would have to be threaded through five separate
+   * call sites. Adding a row to this table is the whole change instead.
+   */
+  const stateMutations: Record<
+    ItemKind,
+    { read: (id: string) => void; unread: (id: string) => void;
+      complete: (id: string) => void; uncomplete: (id: string) => void }
+  > = {
+    email: {
+      read: (id) => markReadMutation.mutate(id),
+      unread: (id) => markUnreadMutation.mutate(id),
+      complete: (id) => markEmailCompleteMutation.mutate(id),
+      uncomplete: (id) => markEmailUncompleteMutation.mutate(id),
+    },
+    chat: {
+      read: (id) => markChatReadMutation.mutate(id),
+      unread: (id) => markChatUnreadMutation.mutate(id),
+      complete: (id) => markChatCompleteMutation.mutate(id),
+      uncomplete: (id) => markChatUncompleteMutation.mutate(id),
+    },
+    call: {
+      read: (id) => markPhoneRead.mutate(id),
+      unread: (id) => markPhoneUnread.mutate(id),
+      complete: (id) => markPhoneComplete.mutate(id),
+      uncomplete: (id) => markPhoneUncomplete.mutate(id),
+    },
+    // Calls and texts share one endpoint and one set of mutations — the item id
+    // already carries which it is.
+    sms: {
+      read: (id) => markPhoneRead.mutate(id),
+      unread: (id) => markPhoneUnread.mutate(id),
+      complete: (id) => markPhoneComplete.mutate(id),
+      uncomplete: (id) => markPhoneUncomplete.mutate(id),
+    },
   };
 
   const handleOpenItem = (item: UnifiedItem) => {
     saveListScroll();
-    if (item.kind === 'email') {
-      const msg = item.data;
-      if (!msg.isRead) markReadMutation.mutate(msg.id);
-      setSelectedMsgId(msg.id);
-      setSelectedThreadId(msg.threadId || null);
-      setSelectedMsgIsRead(true); // always read after opening (auto-marked or was already read)
-      setSelectedSpaceId(null);
-    } else {
-      const msg = item.data;
-      if (!msg.isRead) markChatReadMutation.mutate(msg.id); // mark THIS message read, not the whole space
-      setSelectedSpaceId(msg.spaceId);
-      setOpenedChatMsgId(msg.id);
-      setOpenedChatMsgTime(msg.createTime); // anchor: messages after this are dimmed
-      setSelectedMsgId(null);
+    if (!item.data.isRead) stateMutations[item.kind].read(item.data.id);
+    switch (item.kind) {
+      case 'email':
+        setRestoredThreadId(item.data.threadId || null);
+        // Always read after opening (auto-marked, or was already read).
+        setSelectedMsgIsRead(true);
+        setSelected({
+          kind: 'email',
+          msgId: item.data.id,
+          threadId: item.data.threadId || null,
+        });
+        break;
+      case 'chat':
+        setSelected({
+          kind: 'chat',
+          spaceId: item.data.spaceId,
+          msgId: item.data.id,
+          // Anchor: messages after this are dimmed.
+          msgTime: item.data.createTime,
+        });
+        break;
+      case 'sms':
+        setSelected({
+          kind: 'sms',
+          peer: item.data.counterparty,
+          msgId: item.data.id,
+          msgTime: item.data.at,
+        });
+        break;
+      case 'call':
+        setSelected({ kind: 'call', sid: item.data.sid, itemId: item.data.id });
+        break;
     }
   };
 
   const handleToggleRead = (item: UnifiedItem) => {
     const { isRead, id } = item.data;
-    if (item.kind === 'email') {
-      (isRead ? markUnreadMutation : markReadMutation).mutate(id);
-    } else {
-      (isRead ? markChatUnreadMutation : markChatReadMutation).mutate(id);
-    }
+    const m = stateMutations[item.kind];
+    (isRead ? m.unread : m.read)(id);
   };
 
   // Marking complete asks for confirmation first; un-completing is a direct toggle.
-  const uncomplete = (kind: 'email' | 'chat', id: string) => {
-    if (kind === 'email') markEmailUncompleteMutation.mutate(id);
-    else markChatUncompleteMutation.mutate(id);
-  };
+  const uncomplete = (kind: ItemKind, id: string) =>
+    stateMutations[kind].uncomplete(id);
 
   const confirmComplete = () => {
     if (!completeTarget) return;
     const { kind, id, fromDetail } = completeTarget;
-    if (kind === 'email') markEmailCompleteMutation.mutate(id);
-    else markChatCompleteMutation.mutate(id);
+    stateMutations[kind].complete(id);
     setCompleteTarget(null);
     // If confirmed from inside an open message, also exit back to the inbox
     // (so we don't re-prompt on the row).
-    if (fromDetail) {
-      if (kind === 'chat') closeChat();
-      else closeEmail();
-    }
+    if (fromDetail) closeDetail();
   };
 
   // Fan a single action out over the selected messages, dispatching the matching
@@ -476,19 +572,14 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     action: 'read' | 'unread' | 'complete' | 'uncomplete',
     items: UnifiedItem[],
   ) => {
-    for (const it of items) {
-      const email = it.kind === 'email';
-      if (action === 'read') (email ? markReadMutation : markChatReadMutation).mutate(it.data.id);
-      else if (action === 'unread') (email ? markUnreadMutation : markChatUnreadMutation).mutate(it.data.id);
-      else if (action === 'complete') (email ? markEmailCompleteMutation : markChatCompleteMutation).mutate(it.data.id);
-      else if (action === 'uncomplete') (email ? markEmailUncompleteMutation : markChatUncompleteMutation).mutate(it.data.id);
-    }
+    // Dispatched off each item's own `kind`, which the caller already carries — the
+    // id shape is never inspected to work out what a row is.
+    for (const it of items) stateMutations[it.kind][action](it.data.id);
   };
 
   const handleSelectFolder = (folderId: string) => {
     setSelectedLabel(folderId);
-    setSelectedMsgId(null);
-    setSelectedSpaceId(null);
+    setSelected(null);
     // Drop the term rather than carry it into the new folder. Clear the debounced
     // value too, or it drives the new folder's query for another 350ms.
     setSearchInput('');
@@ -519,7 +610,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     );
   }
 
-  if (!account) {
+  // Nothing connected AND no number: there is genuinely nothing to show, so the
+  // full-page panel is still right. With a support number the tab renders calls and
+  // texts instead, and the mailbox prompt becomes a banner above the list.
+  if (!account && !supportNumber) {
     return (
       <ConnectAccountPanel
         isAdmin={isAdmin}
@@ -529,9 +623,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     );
   }
 
-  // ── Chat conversation view ────────────────────────────────────────────────
+  // ── Detail views ──────────────────────────────────────────────────────────
+  // A switch over `selected.kind` rather than a chain of "if (someId)". Each branch
+  // is narrowed to its own fields, so it cannot read another kind's.
 
-  if (selectedSpaceId) {
+  if (selected?.kind === 'chat' && account) {
     return (
       <>
         <ChatThreadView
@@ -543,17 +639,23 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           providerLabels={providerLabels}
           connecting={connecting}
           onConnect={(prov) => void handleConnect(prov)}
-          spaceId={selectedSpaceId}
-          openedChatMsgId={openedChatMsgId}
-          openedChatMsgTime={openedChatMsgTime}
-          inboxRow={chatItems.find((m) => m.id === openedChatMsgId) ?? null}
+          spaceId={selected.spaceId}
+          openedChatMsgId={selected.msgId}
+          openedChatMsgTime={selected.msgTime}
+          inboxRow={chatItems.find((m) => m.id === selected.msgId) ?? null}
           active={active}
           pollEnabled={active && !viewerItem}
-          onClose={closeChat}
-          onAnchorChange={(m) => {
-            setOpenedChatMsgId(m.id);
-            setOpenedChatMsgTime(m.createTime);
-          }}
+          onClose={closeDetail}
+          onAnchorChange={(m) =>
+            setSelected({
+              kind: 'chat',
+              // The space cannot change by re-anchoring within it, and the callback
+              // only carries the message.
+              spaceId: selected.spaceId,
+              msgId: m.id,
+              msgTime: m.createTime,
+            })
+          }
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
         />
@@ -562,9 +664,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     );
   }
 
-  // ── Email detail view ─────────────────────────────────────────────────────
-
-  if (selectedMsgId) {
+  if (selected?.kind === 'email' && account) {
     return (
       <>
         <EmailThreadView
@@ -575,13 +675,58 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           provider={provider}
           active={active}
           pollEnabled={active && !viewerItem}
-          selectedMsgId={selectedMsgId}
-          selectedThreadId={selectedThreadId}
+          selectedMsgId={selected.msgId}
+          selectedThreadId={selected.threadId ?? restoredThreadId}
           selectedMsgIsRead={selectedMsgIsRead}
-          inboxIsCompleted={emailItems.find((m) => m.id === selectedMsgId)?.isCompleted ?? false}
+          inboxIsCompleted={
+            emailItems.find((m) => m.id === selected.msgId)?.isCompleted ?? false
+          }
           cloudLabel={cloudLabel}
-          onAnchorChange={setSelectedMsgId}
-          onClose={closeEmail}
+          onAnchorChange={(msgId) =>
+            setSelected({ kind: 'email', msgId, threadId: selected.threadId })
+          }
+          onClose={closeDetail}
+          onRequestComplete={setCompleteTarget}
+          onUncomplete={uncomplete}
+        />
+        {completeConfirm}
+      </>
+    );
+  }
+
+  if (selected?.kind === 'sms') {
+    const row = phoneItems.find((i) => i.id === selected.msgId);
+    return (
+      <>
+        <SmsThreadView
+          companyId={companyId}
+          peer={selected.peer}
+          anchorMsgId={selected.msgId}
+          anchorTime={selected.msgTime}
+          supportNumber={supportNumber}
+          isCompleted={row?.isCompleted ?? false}
+          active={active}
+          onClose={closeDetail}
+          onCall={handleCall}
+          onRequestComplete={setCompleteTarget}
+          onUncomplete={uncomplete}
+        />
+        {completeConfirm}
+      </>
+    );
+  }
+
+  if (selected?.kind === 'call') {
+    const row = phoneItems.find((i) => i.id === selected.itemId);
+    return (
+      <>
+        <CallDetailView
+          companyId={companyId}
+          sid={selected.sid}
+          itemId={selected.itemId}
+          call={row?.kind === 'call' ? row : null}
+          onClose={closeDetail}
+          onCall={handleCall}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
         />
@@ -601,7 +746,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         companyId={companyId}
         token={token}
         isAdmin={isAdmin}
-        account={account}
+        account={account ?? null}
         accountAddress={accountAddress}
         provider={provider}
         providerLabels={providerLabels}
@@ -621,20 +766,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         // Whether the inbox is currently narrowed by search/kind.
         isFiltering={filter !== 'all' || activeSearch != null}
         activeSearch={activeSearch}
-        isLoading={isInboxLike ? (emailQuery.isLoading || chatQuery.isLoading) : emailQuery.isLoading}
+        // A DISABLED query in TanStack v5 reports isPending:true / isFetching:false,
+        // so isLoading is false — which is what lets a phone-only company render
+        // instead of sitting on "Loading…" forever. Do not swap this for isPending.
+        isLoading={
+          isInboxLike
+            ? emailQuery.isLoading || chatQuery.isLoading || phoneQuery.isLoading
+            : emailQuery.isLoading
+        }
         visibleItems={visibleItems}
         emailItems={emailItems}
         emailHasNext={emailHasNext}
-        chatHasNext={chatHasNext}
         emailFetchingNext={emailFetchingNext}
-        chatFetchingNext={chatFetchingNext}
+        anyFetchingNext={anyFetchingNext}
+        allExhausted={allExhausted}
         emailNeedsReconnect={!!emailFirst?.needsReconnect}
         chatNeedsReconnect={!!chatFirst?.needsReconnect}
         chatStatus={chatFirst?.chatStatus}
         chatsFailed={!!chatQuery.error && !chatFirst}
         chatItemCount={chatItems.length}
-        unreadCount={unreadData?.count ?? 0}
-        uncompletedCount={uncompletedData?.count ?? 0}
+        unreadCount={unreadCount}
+        uncompletedCount={uncompletedCount}
         newEmailBanner={newEmailBanner}
         onDismissNewEmailBanner={() => setNewEmailBanner(false)}
         stateError={stateError}
@@ -642,6 +794,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onConnect={(prov) => void handleConnect(prov)}
         onRetryChats={() => void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] })}
         onCompose={() =>
+          account &&
           openEmail({
             companyId,
             fromAddress: accountAddress,
@@ -649,6 +802,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
             signatureHtml: account.signatureHtml,
           })
         }
+        supportNumber={supportNumber}
+        onCall={supportNumber ? handleCall : undefined}
+        onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
+        connecting={connecting}
+        connectDismissed={connectDismissed}
+        onDismissConnect={() => setConnectDismissed(true)}
         onOpenItem={handleOpenItem}
         onToggleRead={handleToggleRead}
         onToggleComplete={(target, isCompleted) => {
@@ -658,6 +817,20 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onBulk={runBulk}
       />
       {completeConfirm}
+      {supportNumber && (
+        <ComposeSmsDialog
+          open={composeSmsOpen}
+          onOpenChange={setComposeSmsOpen}
+          companyId={companyId}
+          supportNumber={supportNumber}
+          onSent={(peer, at) => {
+            setComposeSmsOpen(false);
+            // Drop straight into the conversation just started, the way sending an
+            // email opens nothing but sending a chat leaves you in the thread.
+            setSelected({ kind: 'sms', peer, msgId: '', msgTime: at });
+          }}
+        />
+      )}
     </>
   );
 }

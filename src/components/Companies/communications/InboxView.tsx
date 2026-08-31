@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  CheckCircle2, Circle, ListChecks, Mail, MailOpen, Plus, Trash2, X,
+  CheckCircle2, Circle, ListChecks, Mail, MailOpen, MessageSquareText,
+  Phone, Plus, Trash2, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,11 @@ import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { MessageNotice } from '../MessageNotice';
 import { InboxNotices } from './InboxNotices';
 import { InboxRow } from './InboxRow';
-import { FOLDERS, KIND_FILTER_LABELS, type CompleteTarget, type KindFilter, type UnifiedItem } from './types';
+import { formatE164 } from '@/lib/phone';
+import {
+  FOLDERS, KIND_FILTER_LABELS, MAILBOX_ONLY_FOLDERS,
+  type CompleteTarget, type KindFilter, type UnifiedItem,
+} from './types';
 import { AdvancedSearchPanel } from './AdvancedSearchPanel';
 import type { SearchFilters } from './search-filters';
 
@@ -57,9 +62,9 @@ export function InboxView({
   visibleItems,
   emailItems,
   emailHasNext,
-  chatHasNext,
   emailFetchingNext,
-  chatFetchingNext,
+  anyFetchingNext,
+  allExhausted,
   emailNeedsReconnect,
   chatNeedsReconnect,
   chatStatus,
@@ -78,11 +83,18 @@ export function InboxView({
   onToggleRead,
   onToggleComplete,
   onBulk,
+  supportNumber,
+  onCall,
+  onComposeSms,
+  connecting,
+  connectDismissed,
+  onDismissConnect,
 }: {
   companyId: number;
   token: string | null;
   isAdmin: boolean;
-  account: GmailAccount;
+  /** Null when no mailbox is connected — the tab still renders phone activity. */
+  account: GmailAccount | null;
   accountAddress: string;
   provider: EmailProvider;
   providerLabels: { name: string; chat: string };
@@ -108,9 +120,11 @@ export function InboxView({
   /** The email-only folders (Sent/Spam/Trash) render straight off this. */
   emailItems: EmailSummary[];
   emailHasNext: boolean;
-  chatHasNext: boolean;
   emailFetchingNext: boolean;
-  chatFetchingNext: boolean;
+  /** Any source mid-page. Derived in the hook so adding a source changes nothing here. */
+  anyFetchingNext: boolean;
+  /** Every source exhausted — drives "You're all caught up". */
+  allExhausted: boolean;
   emailNeedsReconnect: boolean;
   chatNeedsReconnect: boolean;
   chatStatus: string | undefined;
@@ -122,21 +136,34 @@ export function InboxView({
   onDismissNewEmailBanner: () => void;
   stateError: string | null;
   onResetStateError: () => void;
-  onConnect: (provider: EmailProvider) => void;
+  onConnect: (provider: EmailProvider, kind?: 'work' | 'personal') => void;
   onRetryChats: () => void;
   onCompose: () => void;
   onOpenItem: (item: UnifiedItem) => void;
   onToggleRead: (item: UnifiedItem) => void;
   onToggleComplete: (target: CompleteTarget, isCompleted: boolean) => void;
   onBulk: (action: 'read' | 'unread' | 'complete' | 'uncomplete', items: UnifiedItem[]) => void;
+  /** The company's support number, or null. Labels the channel and gates texting. */
+  supportNumber: string | null;
+  /** Dial a number from a row. Absent when no support number is attached. */
+  onCall?: (number: string) => void;
+  /** Start a new text message. */
+  onComposeSms?: () => void;
+  connecting: boolean;
+  /** The "connect a mailbox" banner was dismissed for this company. */
+  connectDismissed: boolean;
+  onDismissConnect: () => void;
 }) {
   const disconnectMutation = useDisconnectGmail(companyId);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
 
   // Bulk multi-select (admin, inbox only). `selectionMode` swaps row clicks from
-  // "open" to "toggle select"; `selectedIds` holds the picked message ids (email
-  // ids have no "/", chat ids do, so the kind is re-derived at action time). A
-  // pending bulk complete/uncomplete is parked in `bulkAction` for confirmation.
+  // "open" to "toggle select"; `selectedIds` holds the picked ids. Those ids are
+  // globally unique across all four channels — Gmail ids are hex, Chat resource names
+  // contain "/", and phone ids are explicitly namespaced `swcall:`/`swsms:` — so the
+  // bare-id Set cannot collide. (The kind is NOT re-derived from the id shape: the
+  // bulk handler is handed whole `UnifiedItem`s, which already carry `.kind`.)
+  // A pending bulk complete/uncomplete is parked in `bulkAction` for confirmation.
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'complete' | 'uncomplete' | null>(null);
@@ -191,6 +218,7 @@ export function InboxView({
       onToggleComplete={() =>
         onToggleComplete({ kind: item.kind, id: item.data.id }, !!item.data.isCompleted)
       }
+      onCall={onCall}
     />
   );
 
@@ -198,21 +226,47 @@ export function InboxView({
     <div ref={listRootRef} className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Mail size={16} className="text-teal-600" />
-          <Badge variant="outline" className="text-teal-700 border-teal-200 bg-teal-50">
-            {accountAddress}
-          </Badge>
+        <div className="flex items-center gap-2 flex-wrap">
+          {account && (
+            <>
+              <Mail size={16} className="text-teal-600" />
+              <Badge variant="outline" className="text-teal-700 border-teal-200 bg-teal-50">
+                {accountAddress}
+              </Badge>
+            </>
+          )}
+          {supportNumber && (
+            <>
+              <Phone size={16} className="text-green-600" />
+              <Badge variant="outline" className="text-green-700 border-green-200 bg-green-50">
+                {formatE164(supportNumber)}
+              </Badge>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={onCompose}
-            className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-          >
-            <Plus size={14} /> Compose
-          </Button>
-          {isAdmin && (
+          {/* Compose needs a mailbox; texting needs a number. A company can have
+              either, both, or (before this tab is set up) neither. */}
+          {account && (
+            <Button
+              size="sm"
+              onClick={onCompose}
+              className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
+            >
+              <Plus size={14} /> Compose
+            </Button>
+          )}
+          {supportNumber && onComposeSms && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-300 text-amber-700 hover:bg-amber-50 gap-1"
+              onClick={onComposeSms}
+            >
+              <MessageSquareText size={14} /> New text
+            </Button>
+          )}
+          {isAdmin && account && (
             <Button
               size="sm"
               variant="outline"
@@ -268,11 +322,19 @@ export function InboxView({
         isAdmin={isAdmin}
         onReconnect={() => onConnect(provider)}
         onRetryChats={onRetryChats}
+        onConnect={onConnect}
+        connecting={connecting}
+        connectDismissed={connectDismissed}
+        onDismissConnect={onDismissConnect}
       />
 
       {/* Folder tabs */}
       <div className="flex items-center gap-1 border-b">
-        {FOLDERS.map(({ id, label, icon: Icon }) => {
+        {FOLDERS.filter(
+          // Sent / Spam / Trash are mailbox folders. With no mailbox they would render
+          // as tabs that are permanently empty and can never fill.
+          (f) => account || !MAILBOX_ONLY_FOLDERS.includes(f.id),
+        ).map(({ id, label, icon: Icon }) => {
           const badge =
             id === 'UNCOMPLETED' ? uncompletedCount : id === 'UNREAD' ? unreadCount : 0;
           return (
@@ -433,9 +495,11 @@ export function InboxView({
       {/* Infinite-scroll sentinel + status (shown for both inbox and folders) */}
       {!isLoading && (
         <div ref={loadMoreRef} className="flex items-center justify-center py-4">
-          {emailFetchingNext || chatFetchingNext ? (
+          {/* Outside the unified inbox only email pages, so a background chat/phone
+              page must not read as "loading more" in Sent/Spam/Trash. */}
+          {(isInboxLike ? anyFetchingNext : emailFetchingNext) ? (
             <span className="text-xs text-muted-foreground">Loading more…</span>
-          ) : (isInboxLike ? (!emailHasNext && !chatHasNext) : !emailHasNext) && rows.length > 0 ? (
+          ) : (isInboxLike ? allExhausted : !emailHasNext) && rows.length > 0 ? (
             <span className="text-xs text-muted-foreground/70">You're all caught up</span>
           ) : null}
         </div>

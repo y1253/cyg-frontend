@@ -27,6 +27,9 @@ export function CallOverlay() {
 
   if (phase === 'idle') return null;
   const ringing = phase === 'ringing';
+  // A call we placed: it is connecting, not asking to be answered.
+  const outgoing = info?.direction === 'outbound';
+  const otherParty = outgoing ? info?.to : info?.from;
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
@@ -50,10 +53,14 @@ export function CallOverlay() {
 
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {ringing ? 'Incoming call' : `On call · ${mmss(seconds)}`}
+              {ringing
+                ? outgoing
+                  ? 'Calling…'
+                  : 'Incoming call'
+                : `On call · ${mmss(seconds)}`}
             </p>
             <p className="truncate text-sm font-semibold">
-              {formatE164(info?.from) || 'Unknown caller'}
+              {formatE164(otherParty) || (outgoing ? 'Dialling' : 'Unknown caller')}
             </p>
             {info && (
               <button
@@ -69,7 +76,7 @@ export function CallOverlay() {
         </div>
 
         <div className="flex gap-2 border-t p-3">
-          {ringing ? (
+          {ringing && !outgoing ? (
             <>
               <button
                 onClick={answer}
@@ -86,6 +93,15 @@ export function CallOverlay() {
                 Decline
               </button>
             </>
+          ) : ringing && outgoing ? (
+            // No Answer button on a call we placed — only a way to give up on it.
+            <button
+              onClick={hangup}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+            >
+              <PhoneOff size={14} />
+              Cancel
+            </button>
           ) : (
             <>
               <button

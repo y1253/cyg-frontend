@@ -1,15 +1,20 @@
-import { Mail, MessageSquare } from 'lucide-react';
+import { Mail, MessageSquare, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EmailProvider, GmailAccount } from '@/api/gmail';
 import { MessageNotice } from '../MessageNotice';
 
 /**
- * The strip of status banners above the message list: mailbox rejected, Chat not
- * granted / not enabled / unlicensed, Chat app misconfigured, no spaces, and the
- * "chat request failed outright" retry.
+ * The strip of status banners above the message list: no mailbox connected, mailbox
+ * rejected, Chat not granted / not enabled / unlicensed, Chat app misconfigured, no
+ * spaces, and the "chat request failed outright" retry.
  *
  * Every one of these was written out longhand with its own copy of the palette
  * classes; they now differ only in tone, icon and text.
+ *
+ * `account` is nullable because a company can have a support number and no mailbox.
+ * That case used to be a full-page panel INSTEAD of the inbox, which is why phone
+ * controls originally had to live on the Details tab; now it is the first banner
+ * below and the list underneath still renders calls and texts.
  */
 export function InboxNotices({
   emailNeedsReconnect,
@@ -24,6 +29,10 @@ export function InboxNotices({
   isAdmin,
   onReconnect,
   onRetryChats,
+  onConnect,
+  connecting,
+  connectDismissed,
+  onDismissConnect,
 }: {
   emailNeedsReconnect: boolean;
   chatNeedsReconnect: boolean;
@@ -32,12 +41,18 @@ export function InboxNotices({
   chatsFailed: boolean;
   chatItemCount: number;
   isInboxLike: boolean;
-  account: GmailAccount;
+  /** Null when nothing is connected — the phone-only case. */
+  account: GmailAccount | null;
   provider: EmailProvider;
   providerLabels: { name: string; chat: string };
   isAdmin: boolean;
   onReconnect: () => void;
   onRetryChats: () => void;
+  onConnect: (provider: EmailProvider, kind?: 'work' | 'personal') => void;
+  connecting: boolean;
+  /** Remembered per company, so the banner does not nag on every visit. */
+  connectDismissed: boolean;
+  onDismissConnect: () => void;
 }) {
   const reconnectButton = (
     <Button
@@ -57,6 +72,49 @@ export function InboxNotices({
 
   return (
     <>
+      {/* No mailbox at all. The list below still shows calls and texts, so this is a
+          banner rather than the full-page panel it used to be. */}
+      {!account && !connectDismissed && (
+        <MessageNotice
+          tone="teal"
+          icon={<Mail size={14} className="shrink-0 text-teal-600" />}
+          action={
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <>
+                  <Button
+                    size="sm"
+                    className="bg-teal-600 hover:bg-teal-700 text-white text-xs"
+                    disabled={connecting}
+                    onClick={() => onConnect('GOOGLE')}
+                  >
+                    {connecting ? 'Opening…' : 'Gmail'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-teal-300 text-teal-700 hover:bg-teal-100 text-xs"
+                    disabled={connecting}
+                    onClick={() => onConnect('MICROSOFT', 'work')}
+                  >
+                    {connecting ? 'Opening…' : 'Outlook'}
+                  </Button>
+                </>
+              )}
+              <button
+                onClick={onDismissConnect}
+                title="Dismiss"
+                className="text-teal-600 hover:text-teal-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          }
+        >
+          No email account connected — showing calls and texts only.
+        </MessageNotice>
+      )}
+
       {/* Re-connect notice when the mailbox itself was rejected (401/403) */}
       {emailNeedsReconnect && (
         <MessageNotice
@@ -76,7 +134,7 @@ export function InboxNotices({
       )}
 
       {/* Personal Outlook account — Teams isn't available via Microsoft Graph */}
-      {provider === 'MICROSOFT' && account.hasChatScope === false && isInboxLike && (
+      {provider === 'MICROSOFT' && account?.hasChatScope === false && isInboxLike && (
         <MessageNotice tone="muted" icon={<MessageSquare size={13} className="shrink-0" />}>
           Teams messages aren't available for this Outlook account. Email is fully supported.
         </MessageNotice>

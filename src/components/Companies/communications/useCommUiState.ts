@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { KindFilter } from './types';
+import type { KindFilter, Selection } from './types';
 import type { SearchFilters } from './search-filters';
 
 // ── Persisted view state ──────────────────────────────────────────────────────
@@ -11,24 +11,69 @@ import type { SearchFilters } from './search-filters';
 // those survive via keep-alive only — a tab switch here, and, for the docked compose
 // windows, navigating to another company and back (see ComposerContext).
 export type CommUI = {
+  /**
+   * Schema version. v1 stored five correlated id fields; a half-restored combination
+   * (a space id with no anchor time, say) produced a thread frozen at nothing. v2
+   * stores one `selected` object instead, so the invalid combinations are
+   * unrepresentable — and a v1 blob left in a browser from before the deploy is
+   * restored for its folder and search only, never for its open item.
+   */
+  v?: number;
   selectedLabel?: string;
-  selectedMsgId?: string | null;
-  selectedSpaceId?: string | null;
-  openedChatMsgId?: string | null;
-  openedChatMsgTime?: string | null;
+  selected?: Selection | null;
   filter?: KindFilter;
   searchInput?: string;
   filters?: SearchFilters;
 };
 
+const CURRENT_VERSION = 2;
+
+/**
+ * Is this a `Selection` we can actually render?
+ *
+ * Storage is not a trusted input: it survives deploys, and a shape from an older
+ * build (or a hand-edited value) would otherwise open a detail view missing the very
+ * field it needs.
+ */
+function isValidSelection(value: unknown): value is Selection {
+  if (!value || typeof value !== 'object') return false;
+  const s = value as Record<string, unknown>;
+  const str = (k: string) => typeof s[k] === 'string' && s[k] !== '';
+  switch (s.kind) {
+    case 'email':
+      return str('msgId');
+    case 'chat':
+      return str('spaceId') && str('msgId') && str('msgTime');
+    case 'sms':
+      return str('peer') && str('msgId') && str('msgTime');
+    case 'call':
+      return str('sid') && str('itemId');
+    default:
+      return false;
+  }
+}
+
 const commKey = (companyId: number) => `cmp-comm-${companyId}`;
 
 function readCommUI(companyId: number): CommUI {
+  let raw: CommUI;
   try {
-    return JSON.parse(localStorage.getItem(commKey(companyId)) ?? '{}') as CommUI;
+    raw = JSON.parse(localStorage.getItem(commKey(companyId)) ?? '{}') as CommUI;
   } catch {
     return {};
   }
+  // Anything older than the current schema keeps its folder and search but drops the
+  // open item, rather than being coerced into a shape it was never written in.
+  if (raw.v !== CURRENT_VERSION) {
+    return {
+      selectedLabel: raw.selectedLabel,
+      filter: raw.filter,
+      searchInput: raw.searchInput,
+      filters: raw.filters,
+      selected: null,
+    };
+  }
+  return { ...raw, selected: isValidSelection(raw.selected) ? raw.selected : null };
 }
 
 /**
@@ -49,25 +94,17 @@ export function useRestoredCommUi(companyId: number): CommUI {
 
 /** Remember where the user is, so a reload / revisit reopens the same place. */
 export function usePersistCommUi(companyId: number, current: CommUI): void {
-  const {
-    selectedLabel,
-    selectedMsgId,
-    selectedSpaceId,
-    openedChatMsgId,
-    openedChatMsgTime,
-    filter,
-    searchInput,
-  } = current;
+  const { selectedLabel, selected, filter, searchInput } = current;
+  // The object identity changes on every render; its CONTENT is what matters.
+  const selectedKey = selected ? JSON.stringify(selected) : '';
   useEffect(() => {
     try {
       localStorage.setItem(
         commKey(companyId),
         JSON.stringify({
+          v: CURRENT_VERSION,
           selectedLabel,
-          selectedMsgId,
-          selectedSpaceId,
-          openedChatMsgId,
-          openedChatMsgTime,
+          selected: selectedKey ? (JSON.parse(selectedKey) as Selection) : null,
           filter,
           searchInput,
         } satisfies CommUI),
@@ -75,14 +112,5 @@ export function usePersistCommUi(companyId: number, current: CommUI): void {
     } catch {
       // storage full / disabled — losing the restore point is not worth breaking on
     }
-  }, [
-    companyId,
-    selectedLabel,
-    selectedMsgId,
-    selectedSpaceId,
-    openedChatMsgId,
-    openedChatMsgTime,
-    filter,
-    searchInput,
-  ]);
+  }, [companyId, selectedLabel, selectedKey, filter, searchInput]);
 }

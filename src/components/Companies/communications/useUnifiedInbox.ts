@@ -1,15 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
+import type { PhoneItem } from '@/api/phone';
 import type { useGmailEmails } from '@/hooks/useGmailEmails';
 import type { useGmailChats } from '@/hooks/useGmailChats';
+import type { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { dedupeById } from '../message-utils';
-import { getItemTimestamp, type KindFilter, type UnifiedItem } from './types';
+import {
+  getItemTimestamp,
+  type KindFilter,
+  type SourceKind,
+  type UnifiedItem,
+} from './types';
 
 type EmailQuery = ReturnType<typeof useGmailEmails>;
 type ChatQuery = ReturnType<typeof useGmailChats>;
+type PhoneQuery = ReturnType<typeof usePhoneTimeline>;
 
 /**
- * Merges the independently-paged email and chat streams into one time-ordered
+ * One independently-paged stream feeding the merged inbox.
+ *
+ * Built INSIDE this hook rather than taken as a prop. `loadMore` is a `useCallback`
+ * over these flags and the IntersectionObserver effect depends on its identity, so an
+ * un-memoised array arriving from the caller would give `loadMore` a new identity every
+ * render → the observer disconnects and reconnects every render → it fires on connect →
+ * runaway paging. Deriving them here keeps the dependency list made of primitives.
+ */
+interface InboxSource {
+  kind: SourceKind;
+  items: UnifiedItem[];
+  hasNext: boolean;
+  fetchingNext: boolean;
+  fetchNext: () => void;
+  /** A source with nothing connected is skipped entirely rather than pinning. */
+  enabled: boolean;
+}
+
+/**
+ * Merges the independently-paged email, chat and phone streams into one time-ordered
  * inbox, and drives the pagination that keeps it honest.
  *
  * Three separate mechanisms live here, and they are easier to reason about
@@ -19,21 +46,28 @@ type ChatQuery = ReturnType<typeof useGmailChats>;
  *     the clamp;
  *  3. the badge-driven AUTO-FILL for the filtered folders, which pages to
  *     completion so the list matches the count on the tab.
+ *
+ * Written over an ARRAY of sources rather than named pairs. Calls and texts share one
+ * source because they arrive from one endpoint with one cursor — see `SourceKind`.
  */
 export function useUnifiedInbox({
   emailQuery,
   chatQuery,
+  phoneQuery,
+  phoneEnabled,
   isInboxLike,
   isFilteredFolder,
   selectedLabel,
   activeSearch,
   filter,
   targetCount,
-  selectedMsgId,
-  selectedSpaceId,
+  detailOpenKey,
 }: {
   emailQuery: EmailQuery;
   chatQuery: ChatQuery;
+  phoneQuery: PhoneQuery;
+  /** False when the company has no support number — hides the source completely. */
+  phoneEnabled: boolean;
   isInboxLike: boolean;
   /** UNREAD / UNCOMPLETED — the clamp is relaxed and auto-fill runs. */
   isFilteredFolder: boolean;
@@ -43,12 +77,11 @@ export function useUnifiedInbox({
   /** The badge total to page towards in a filtered folder. */
   targetCount: number | undefined;
   /**
-   * The open message/space. Not used for filtering — they re-arm the scroll
-   * observer, whose sentinel node unmounts with the list while a detail view is
-   * open and is a different element when the user comes back.
+   * Identifies the open message/thread. Not used for filtering — it re-arms the
+   * scroll observer, whose sentinel node unmounts with the list while a detail view
+   * is open and is a different element when the user comes back.
    */
-  selectedMsgId: string | null;
-  selectedSpaceId: string | null;
+  detailOpenKey: string | null;
 }) {
   // Flattened, de-duped items across all loaded pages.
   const emailItems: EmailSummary[] = dedupeById(
@@ -57,76 +90,129 @@ export function useUnifiedInbox({
   const chatItems: ChatInboxMessage[] = dedupeById(
     (chatQuery.data?.pages ?? []).flatMap((p) => p.messages),
   );
+  const phoneItems: PhoneItem[] = dedupeById(
+    (phoneQuery.data?.pages ?? []).flatMap((p) => p.items),
+  );
 
   const emailHasNext = emailQuery.hasNextPage;
   const emailFetchingNext = emailQuery.isFetchingNextPage;
   const chatHasNext = chatQuery.hasNextPage;
   const chatFetchingNext = chatQuery.isFetchingNextPage;
+  const phoneHasNext = phoneEnabled && phoneQuery.hasNextPage;
+  const phoneFetchingNext = phoneQuery.isFetchingNextPage;
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Build unified sorted list for INBOX (emails + one row per incoming chat msg),
-  // newest first. Because emails and chats page independently, the visible tail is
-  // clamped to a watermark — the newest "oldest-loaded" boundary among sources that
-  // still have more — so the list never shows a half-loaded (out-of-order) tail.
-  // `clampSource` is whichever source's tail == the cutoff (the one PINNING the
-  // list); advancing it is the only way to lower the cutoff and reveal more.
+  // ORDER IS LOAD-BEARING. The clamp's tie-break keeps the FIRST maximum, so email
+  // first reproduces the original `emailTail >= chatTail ? 'email' : 'chat'` exactly,
+  // and `loadMore`'s fallback walks the array in this order — which is what preserved
+  // "walk email, then chat" when neither pins the list.
+  const sources: InboxSource[] = useMemo(
+    () => [
+      {
+        kind: 'email',
+        items: emailItems.map((data) => ({ kind: 'email', data })),
+        hasNext: emailHasNext,
+        fetchingNext: emailFetchingNext,
+        fetchNext: () => void emailQuery.fetchNextPage(),
+        enabled: true,
+      },
+      {
+        kind: 'chat',
+        items: chatItems.map((data) => ({ kind: 'chat', data })),
+        hasNext: chatHasNext,
+        fetchingNext: chatFetchingNext,
+        fetchNext: () => void chatQuery.fetchNextPage(),
+        enabled: true,
+      },
+      {
+        kind: 'phone',
+        items: phoneItems.map((data) =>
+          data.kind === 'call'
+            ? ({ kind: 'call', data } as UnifiedItem)
+            : ({ kind: 'sms', data } as UnifiedItem),
+        ),
+        hasNext: phoneHasNext,
+        fetchingNext: phoneFetchingNext,
+        fetchNext: () => void phoneQuery.fetchNextPage(),
+        enabled: phoneEnabled,
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      emailItems.length, chatItems.length, phoneItems.length,
+      emailHasNext, chatHasNext, phoneHasNext,
+      emailFetchingNext, chatFetchingNext, phoneFetchingNext,
+      phoneEnabled, emailQuery, chatQuery, phoneQuery,
+    ],
+  );
+
+  // Build unified sorted list for INBOX, newest first. Because the sources page
+  // independently, the visible tail is clamped to a watermark — the newest
+  // "oldest-loaded" boundary among sources that still have more — so the list never
+  // shows a half-loaded (out-of-order) tail. `clampSource` is whichever source's tail
+  // == the cutoff (the one PINNING the list); advancing it is the only way to lower
+  // the cutoff and reveal more.
   const { visible: unifiedItems, hiddenCount, clampSource } = useMemo(() => {
     if (!isInboxLike)
-      return { visible: [] as UnifiedItem[], hiddenCount: 0, clampSource: null as 'email' | 'chat' | null };
-    const emailUnified = emailItems.map((e): UnifiedItem => ({ kind: 'email', data: e }));
-    const chatUnified = chatItems.map((c): UnifiedItem => ({ kind: 'chat', data: c }));
-    const merged = [...emailUnified, ...chatUnified].sort(
-      (a, b) => getItemTimestamp(b) - getItemTimestamp(a),
-    );
+      return { visible: [] as UnifiedItem[], hiddenCount: 0, clampSource: null as SourceKind | null };
+
+    const active = sources.filter((s) => s.enabled);
+    const merged = active
+      .flatMap((s) => s.items)
+      .sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a));
 
     // Filtered folders (UNREAD/UNCOMPLETED) intend to show EVERY matching row so the
     // list backs up the badge, so skip the clamp — it would hide already-loaded matches
     // older than the oldest-loaded chat. Chat matches are all on page 1, so showing the
     // full merged set can't drop a badge-counted item. Plain INBOX keeps the clamp.
     if (isFilteredFolder)
-      return { visible: merged, hiddenCount: 0, clampSource: null as 'email' | 'chat' | null };
+      return { visible: merged, hiddenCount: 0, clampSource: null as SourceKind | null };
 
     // True oldest-loaded timestamp of a source (arrays aren't globally sorted).
     const minTs = (arr: UnifiedItem[]) =>
       arr.length ? Math.min(...arr.map(getItemTimestamp)) : -Infinity;
-    const emailTail = emailQuery.hasNextPage ? minTs(emailUnified) : -Infinity;
-    const chatTail = chatQuery.hasNextPage ? minTs(chatUnified) : -Infinity;
-    const cutoff = Math.max(emailTail, chatTail);
+    // A source that is exhausted can never reveal older rows, so it cannot pin.
+    const tails = active.map((s) => ({
+      kind: s.kind,
+      tail: s.hasNext ? minTs(s.items) : -Infinity,
+    }));
+    const cutoff = tails.length
+      ? Math.max(...tails.map((t) => t.tail))
+      : -Infinity;
     const visible =
       cutoff === -Infinity
         ? merged
         : merged.filter((it) => getItemTimestamp(it) >= cutoff);
-    const clampSource: 'email' | 'chat' | null =
-      cutoff === -Infinity ? null : emailTail >= chatTail ? 'email' : 'chat';
+    // STRICT `>` keeps the FIRST maximum, which with email first in `sources`
+    // reproduces the original two-source tie-break. `>=` would flip it and silently
+    // change which stream advances.
+    const clampSource: SourceKind | null =
+      cutoff === -Infinity
+        ? null
+        : tails.reduce((a, b) => (b.tail > a.tail ? b : a)).kind;
     return { visible, hiddenCount: merged.length - visible.length, clampSource };
-  }, [isInboxLike, isFilteredFolder, emailItems, chatItems, emailQuery.hasNextPage, chatQuery.hasNextPage]);
+  }, [isInboxLike, isFilteredFolder, sources]);
 
-  // Advance the PINNING source only (advancing the other loads pages that stay
+  // Advance the PINNING source only (advancing another loads pages that stay
   // clamped out of view). Each successful page strictly lowers the cutoff, so the
   // list provably grows and the observer loop below terminates.
   const loadMore = useCallback(() => {
+    const advance = (s: InboxSource | undefined): boolean => {
+      if (!s?.enabled || !s.hasNext || s.fetchingNext) return false;
+      s.fetchNext();
+      return true;
+    };
     if (!isInboxLike) {
-      if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
+      // The email-only folders (Sent/Spam/Trash) page email and nothing else.
+      advance(sources.find((s) => s.kind === 'email'));
       return;
     }
-    if (clampSource === 'chat') {
-      if (chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
-    } else {
-      // 'email' or null (the other side is exhausted) — walk email, then chat.
-      if (emailHasNext && !emailFetchingNext) void emailQuery.fetchNextPage();
-      else if (chatHasNext && !chatFetchingNext) void chatQuery.fetchNextPage();
-    }
-  }, [
-    isInboxLike,
-    clampSource,
-    emailHasNext,
-    emailFetchingNext,
-    chatHasNext,
-    chatFetchingNext,
-    emailQuery,
-    chatQuery,
-  ]);
+    if (advance(sources.find((s) => s.kind === clampSource))) return;
+    // Nothing pins the list, or the pinning source is mid-flight: walk the rest in
+    // array order (email first, as before).
+    for (const s of sources) if (advance(s)) return;
+  }, [isInboxLike, clampSource, sources]);
 
   // Runaway guard for the auto-fill loop: the observer re-fires while the sentinel
   // stays inside rootMargin, so a bottomless pinning chat space (or a page that
@@ -136,6 +222,20 @@ export function useUnifiedInbox({
   useEffect(() => {
     if (hiddenCount === 0) fillGuard.current = { lastTotal: -1, stalls: 0, fetches: 0 };
   }, [hiddenCount]);
+
+  // Summed across EVERY source. Leave one out and the pages that only advance it look
+  // like stalls — two of those stop the observer and that source never pages again.
+  const loadedTotal = sources.reduce((n, s) => n + s.items.length, 0);
+  const anyFetchingNext = sources.some((s) => s.enabled && s.fetchingNext);
+  const allExhausted = !sources.some((s) => s.enabled && s.hasNext);
+
+  // A single string over every source's paging flags. The observer effect below is
+  // eslint-disabled for exhaustive-deps, so a per-source flag list would silently go
+  // stale the next time a source is added — leaving the observer holding an old
+  // `loadMore` that pages the wrong stream forever.
+  const flagKey = sources
+    .map((s) => `${s.kind}:${s.enabled}:${s.hasNext}:${s.fetchingNext}`)
+    .join('|');
 
   // Infinite scroll: when the bottom sentinel nears the scroll container, load the
   // next (older) page of the pinning source. `rootMargin` prefetches slightly early.
@@ -147,9 +247,8 @@ export function useUnifiedInbox({
       ([entry]) => {
         if (!entry.isIntersecting) return;
         const g = fillGuard.current;
-        const total = emailItems.length + chatItems.length;
-        if (total !== g.lastTotal) {
-          g.lastTotal = total;
+        if (loadedTotal !== g.lastTotal) {
+          g.lastTotal = loadedTotal;
           g.stalls = 0;
         } else {
           g.stalls++;
@@ -163,24 +262,18 @@ export function useUnifiedInbox({
     );
     obs.observe(el);
     return () => obs.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isInboxLike,
-    selectedLabel,
-    selectedMsgId,
-    selectedSpaceId,
-    loadMore,
-    emailHasNext,
-    emailFetchingNext,
-    chatHasNext,
-    chatFetchingNext,
-  ]);
+    // No eslint-disable here any more, and that is the point: this effect used to
+    // suppress exhaustive-deps and name each source's two paging flags by hand, so
+    // adding a source silently left it holding a stale `loadMore` that paged the
+    // wrong stream forever. `flagKey` and `loadedTotal` fold every source into two
+    // primitives, so the list is complete and stays complete.
+  }, [isInboxLike, selectedLabel, detailOpenKey, loadMore, flagKey, loadedTotal]);
 
   // Apply the kind/state filter dropdown over the merged inbox. Search itself is
-  // already applied server-side (Gmail `q` for email, text match for chat).
+  // already applied server-side (Gmail `q` for email, text match for chat) — phone has
+  // no server-side search at all, which the caller handles by not passing it one.
   const visibleItems = unifiedItems.filter((it) => {
-    if (filter === 'email' && it.kind !== 'email') return false;
-    if (filter === 'chat' && it.kind !== 'chat') return false;
+    if (filter !== 'all' && it.kind !== filter) return false;
     // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
     if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
     if (selectedLabel === 'UNREAD' && it.data.isRead) return false;
@@ -189,7 +282,7 @@ export function useUnifiedInbox({
 
   // Filtered folders show EVERY matching row so the list backs up the badge count.
   // Count matches across the whole loaded set (ignore the kind dropdown — the badge
-  // counts email+chat regardless) and auto-load pages until we reach the badge total.
+  // counts every channel regardless) and auto-load pages until we reach the total.
   const matchedCount = unifiedItems.filter((it) =>
     selectedLabel === 'UNREAD'
       ? !it.data.isRead
@@ -210,8 +303,8 @@ export function useUnifiedInbox({
   useEffect(() => {
     if (!isFilteredFolder || activeSearch) return;
     if (targetCount == null || matchedCount >= targetCount) return;
-    if (emailFetchingNext || chatFetchingNext) return; // wait for the in-flight page
-    if (!emailHasNext && !chatHasNext) return;
+    if (anyFetchingNext) return; // wait for the in-flight page
+    if (allExhausted) return;
     const g = autoFillGuard.current;
     // Only settled rounds reach here, so an unchanged count means the last page
     // yielded no new matches — two such rounds and we stop (badge may over-count).
@@ -223,30 +316,32 @@ export function useUnifiedInbox({
     if (g.stalls >= 2) return;
     if (g.fetches >= 20) return; // hard page cap
     g.fetches++;
-    // Prioritise email (the diverging source); fall back to chat once it's exhausted.
-    if (emailHasNext) void emailQuery.fetchNextPage();
-    else void chatQuery.fetchNextPage();
+    // Prioritise email (the diverging source); fall through to the rest in order.
+    for (const s of sources) {
+      if (s.enabled && s.hasNext && !s.fetchingNext) {
+        s.fetchNext();
+        return;
+      }
+    }
   }, [
     isFilteredFolder,
     activeSearch,
     targetCount,
     matchedCount,
-    emailHasNext,
-    emailFetchingNext,
-    chatHasNext,
-    chatFetchingNext,
-    emailQuery,
-    chatQuery,
+    anyFetchingNext,
+    allExhausted,
+    sources,
   ]);
 
   return {
     emailItems,
     chatItems,
+    phoneItems,
     visibleItems,
     loadMoreRef,
     emailHasNext,
-    chatHasNext,
     emailFetchingNext,
-    chatFetchingNext,
+    anyFetchingNext,
+    allExhausted,
   };
 }
