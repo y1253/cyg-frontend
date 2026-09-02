@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Archive, ClipboardList, LayoutDashboard, LogOut, Users2 } from 'lucide-react';
+import { Archive, ClipboardList, LayoutDashboard, LogOut, Settings, Users2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
@@ -111,6 +111,11 @@ function AppShell() {
                   to="/admin/users"
                   icon={<Users2 size={16} />}
                   label="Users"
+                />
+                <SideNavLink
+                  to="/admin/company-settings"
+                  icon={<Settings size={16} />}
+                  label="Company Settings"
                 />
                 <SideNavLink
                   to="/admin/archived"

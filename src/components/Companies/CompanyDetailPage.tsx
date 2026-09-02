@@ -59,6 +59,7 @@ import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeleted
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { usePhoneNumber } from '@/hooks/usePhoneNumber';
 import { PhoneNumberSection } from './PhoneNumberSection';
+import { PhoneSettingsSection } from './PhoneSettingsSection';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
@@ -2963,6 +2964,10 @@ export function CompanyDetailPage() {
                 companyId={companyId}
                 companyCountry={company.country}
               />
+            )}
+
+            {isAdmin && !isArchived && (
+              <PhoneSettingsSection companyId={companyId} />
             )}
 
             {/* Assigned User (admin only) */}
