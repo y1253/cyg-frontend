@@ -1,5 +1,5 @@
 import { Camera } from 'lucide-react';
-import type { AppUser } from '../../api/users';
+import { roleBadgeVariant, type AppUser } from '../../api/users';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,7 +57,7 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
                 <TableCell>
-                  <Badge variant={u.role === 'ADMIN' ? 'default' : 'secondary'}>
+                  <Badge variant={roleBadgeVariant(u.role)}>
                     {u.role}
                   </Badge>
                 </TableCell>

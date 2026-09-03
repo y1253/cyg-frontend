@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { canManage } from '@/lib/roles';
 import { useCompanies } from '@/hooks/useCompanies';
 import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
 import { CompanyListSkeleton } from './CompanyListSkeleton';
@@ -13,7 +14,7 @@ import type { AssignedUser } from '@/api/companies';
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate  = useNavigate();
-  const isAdmin   = user?.role === 'ADMIN';
+  const isAdmin   = canManage(user);   // ADMIN or MANAGER -- both see all companies
 
   const { data: allCompanies = [], isLoading } = useCompanies();
   // Resolves after the company list — badges fill in once it lands.

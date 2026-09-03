@@ -1,11 +1,11 @@
 import {
   CheckCircle2, Forward, Paperclip,
-  PhoneIncoming, PhoneOutgoing, PhoneMissed,
+  PhoneIncoming, PhoneOutgoing, PhoneMissed, Voicemail,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
-import { emailAttachmentUrl } from '@/api/gmail';
+import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import type { CallItem, SmsItem } from '@/api/phone';
 import { formatE164 } from '@/lib/phone';
 import { AttachmentChip } from '../AttachmentPreview';
@@ -229,6 +229,11 @@ function RowTitle({ item }: { item: UnifiedItem }) {
  * somebody still has to do something.
  */
 function CallDirectionIcon({ item }: { item: CallItem }) {
+  // Before the missed branch, because every voicemail is ALSO a miss — that is how it is
+  // derived. Checked second and this is dead code.
+  if (item.hasVoicemail) {
+    return <Voicemail size={11} className="text-red-500 shrink-0" />;
+  }
   if (item.outcome === 'missed' || item.outcome === 'failed') {
     return <PhoneMissed size={11} className="text-red-500 shrink-0" />;
   }
@@ -323,26 +328,38 @@ function CallRowBody({
   onCall?: (number: string) => void;
 }) {
   const label =
-    call.outcome === 'missed'
-      ? 'Missed call'
-      : call.outcome === 'failed'
-        ? 'Call failed'
-        : call.outcome === 'in-progress'
-          ? 'In progress'
-          : `${call.direction === 'inbound' ? 'Incoming' : 'Outgoing'} · ${duration(call.durationSec)}`;
+    call.hasVoicemail
+      ? 'Voicemail'
+      : call.outcome === 'missed'
+        ? 'Missed call'
+        : call.outcome === 'failed'
+          ? 'Call failed'
+          : call.outcome === 'in-progress'
+            ? 'In progress'
+            : `${call.direction === 'inbound' ? 'Incoming' : 'Outgoing'} · ${duration(call.durationSec)}`;
+
+  // "Recorded" is what a CONVERSATION has. A voicemail already says so in its label, and
+  // appending "· Recorded" to it would read as though the message itself were taped.
+  const suffix = call.hasVoicemail
+    ? ' · Tap to listen'
+    : call.hasRecording
+      ? ' · Recorded'
+      : '';
 
   return (
     <div className="flex items-center justify-between gap-2">
       <span
         className={[
           'text-xs truncate',
-          call.outcome === 'missed' || call.outcome === 'failed'
+          call.hasVoicemail ||
+          call.outcome === 'missed' ||
+          call.outcome === 'failed'
             ? 'font-medium text-red-600'
             : 'text-muted-foreground',
         ].join(' ')}
       >
         {label}
-        {call.hasRecording && ' · Recorded'}
+        {suffix}
       </span>
       <CallBackButton number={call.counterparty} onCall={onCall} />
     </div>
@@ -432,9 +449,12 @@ function EmailAttachmentChips({
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {shown.map((att) => (
         <AttachmentChip
-          key={att.attachmentId}
-          url={emailAttachmentUrl(token ?? '', companyId, msg.id, att, 'inline')}
-          downloadUrl={emailAttachmentUrl(token ?? '', companyId, msg.id, att, 'attachment')}
+          // The file's identity, not Gmail's ephemeral attachmentId, which changes on
+          // every 15s inbox poll and remounted every chip in the list. Same reason the
+          // urls are frozen — see lib/attachment-url.ts.
+          key={`${msg.id}:${att.filename}:${att.size ?? 0}`}
+          url={stableEmailAttachmentUrl(token ?? '', companyId, msg.id, att, 'inline')}
+          downloadUrl={stableEmailAttachmentUrl(token ?? '', companyId, msg.id, att, 'attachment')}
           mimeType={att.mimeType}
           filename={att.filename}
         />

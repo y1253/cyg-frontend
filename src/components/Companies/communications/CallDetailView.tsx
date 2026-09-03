@@ -1,6 +1,6 @@
 import {
   ArrowLeft, CheckCircle2, MailOpen, Phone,
-  PhoneIncoming, PhoneMissed, PhoneOutgoing,
+  PhoneIncoming, PhoneMissed, PhoneOutgoing, Voicemail,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -64,8 +64,12 @@ export function CallDetailView({
   const markUnread = useMarkPhoneItem(companyId, 'unread');
 
   const outcome = call?.outcome ?? 'answered';
-  const DirectionIcon =
-    outcome === 'missed' || outcome === 'failed'
+  // A voicemail is a missed call that left something behind, so it is checked FIRST --
+  // every one of them also satisfies `outcome === 'missed'`.
+  const isVoicemail = call?.hasVoicemail ?? false;
+  const DirectionIcon = isVoicemail
+    ? Voicemail
+    : outcome === 'missed' || outcome === 'failed'
       ? PhoneMissed
       : call?.direction === 'outbound'
         ? PhoneOutgoing
@@ -148,7 +152,7 @@ export function CallDetailView({
             </p>
           </div>
           <Badge variant="outline" className={`ml-auto ${OUTCOME_STYLE[outcome]}`}>
-            {OUTCOME_LABEL[outcome]}
+            {isVoicemail ? 'Voicemail' : OUTCOME_LABEL[outcome]}
           </Badge>
         </div>
 
@@ -161,18 +165,25 @@ export function CallDetailView({
           </dl>
         )}
 
-        {/* Recording */}
+        {/* Recording, or the message the caller left */}
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Recording
+            {isVoicemail ? 'Voicemail' : 'Recording'}
           </p>
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : !recordings || recordings.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              {/* Truthful about WHY: a call nobody answered has nothing to record, and
-                  a call from before recording was switched on never will. */}
-              No recording for this call.
+              {/*
+                Truthful about WHY, and the reason depends on which call this is.
+                A conversation has no audio if recording was off when it happened.
+                A voicemail row exists BECAUSE audio was found, so an empty list here
+                means the fetch disagreed with the inbox -- worth saying plainly rather
+                than reporting a flat "no recording" the row already contradicts.
+              */}
+              {isVoicemail
+                ? 'The message could not be loaded. It may still be processing — try again in a moment.'
+                : 'No recording for this call.'}
             </p>
           ) : (
             recordings.map((r) => (

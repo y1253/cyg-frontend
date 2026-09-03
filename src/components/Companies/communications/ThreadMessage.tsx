@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { ChevronRight, Forward, Paperclip, Reply, ReplyAll } from 'lucide-react';
 import type { EmailDetail } from '@/api/gmail';
-import { emailAttachmentUrl } from '@/api/gmail';
+import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import { AttachmentPreview } from '../AttachmentPreview';
 import { EmailBodyFrame } from '../EmailBodyFrame';
 import { Linkified } from '../Linkified';
@@ -49,6 +50,33 @@ export function ThreadMessage({
   onForwardThis: (m: EmailDetail) => void;
 }) {
   const strip = (m.attachments ?? []).filter((a) => !a.isInline);
+
+  // Memoised because it feeds the iframe's `srcDoc`. Recomputing it inline handed
+  // EmailBodyFrame a NEW STRING on every 15s poll, which reloads the whole iframe
+  // document, re-runs its resize effect and resets the height — the body flashing,
+  // a more visible version of the same bug as the attachment tiles. With
+  // stableEmailAttachmentUrl the rewritten html is byte-identical anyway; this
+  // removes the identity churn that made React hand it over regardless.
+  //
+  // `m.attachments` is a fresh array on every refetch, so it cannot be a dependency —
+  // it would invalidate the memo exactly when the memo is meant to hold. The signature
+  // below is what actually determines the output: which files, in which order.
+  const attachments = m.attachments ?? [];
+  const attachmentSig = attachments
+    .map((a) => `${a.contentId ?? ''}:${a.filename}:${a.size ?? 0}`)
+    .join('|');
+  const bodyHtml = useMemo(
+    () =>
+      m.bodyHtml
+        ? injectBaseTarget(
+            rewriteInlineImages(m.bodyHtml, attachments, (att) =>
+              stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline'),
+            ),
+          )
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- attachmentSig, above, deliberately stands in for the unstable `attachments` array.
+    [m.bodyHtml, attachmentSig, m.id, companyId, token],
+  );
 
   return (
     <div
@@ -192,10 +220,14 @@ export function ThreadMessage({
                   // Keyed on the file's own identity, NOT `att.attachmentId` —
                   // Gmail regenerates that id on every threads.get, so keying on
                   // it remounted (and reset) every attachment on each 15s poll.
+                  // The url has to be frozen for the same reason and is a SEPARATE
+                  // fix: a stable key keeps the element, but a mutating `src` still
+                  // makes the browser re-download and blink. Hence
+                  // stableEmailAttachmentUrl.
                   <AttachmentPreview
                     key={`${m.id}:${att.filename}:${att.size ?? 0}`}
-                    url={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
-                    downloadUrl={emailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
+                    url={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
+                    downloadUrl={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
                     mimeType={att.mimeType}
                     filename={att.filename}
                     size={att.size}
@@ -205,14 +237,8 @@ export function ThreadMessage({
             </div>
           )}
           <div className="border rounded-md overflow-hidden">
-            {m.bodyHtml ? (
-              <EmailBodyFrame
-                html={injectBaseTarget(
-                  rewriteInlineImages(m.bodyHtml, m.attachments ?? [], (att) =>
-                    emailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline'),
-                  ),
-                )}
-              />
+            {bodyHtml ? (
+              <EmailBodyFrame html={bodyHtml} />
             ) : (
               <pre className="p-4 text-sm whitespace-pre-wrap font-[Arial,Helvetica,sans-serif]">
                 <Linkified text={m.bodyText ?? '(empty)'} />

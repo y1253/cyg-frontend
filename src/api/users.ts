@@ -27,6 +27,17 @@ export function roleLabel(role: string): string {
   return role.charAt(0) + role.slice(1).toLowerCase();
 }
 
+/**
+ * Badge tone per role. MANAGER needs its own tone: it is an admin-tier role, so
+ * letting it fall into the same `secondary` as USER would read as "not staff" at a
+ * glance -- exactly the distinction the badge exists to make.
+ */
+export function roleBadgeVariant(role: string): 'default' | 'outline' | 'secondary' {
+  if (role === 'ADMIN') return 'default';
+  if (role === 'MANAGER') return 'outline';
+  return 'secondary';
+}
+
 export async function fetchRoles(token: string): Promise<string[]> {
   const res = await fetchWithAuth(token, `${API}/users/roles`, { headers: JSON_HEADERS });
   if (!res.ok) throw new Error('Failed to fetch roles');

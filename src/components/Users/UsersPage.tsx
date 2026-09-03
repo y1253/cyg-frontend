@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useUsers } from '../../hooks/useUsers';
 import { useDeleteUser } from '../../hooks/useDeleteUser';
-import type { AppUser } from '../../api/users';
+import { roleLabel, type AppUser } from '../../api/users';
+import { useRoles } from '../../hooks/useRoles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -23,14 +24,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-type RoleFilter = 'ALL' | 'ADMIN' | 'USER';
-
-/** Also the Select's `items`, so the trigger reads "Admin" not `ADMIN`. */
-const ROLE_FILTER_LABELS: Record<RoleFilter, string> = {
-  ALL: 'All roles',
-  ADMIN: 'Admin',
-  USER: 'User',
-};
+/** 'ALL', or any value of the server's Role enum. */
+type RoleFilter = string;
 
 export function UsersPage() {
   const navigate = useNavigate();
@@ -42,7 +37,19 @@ export function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
 
   const { data: users = [], isLoading } = useUsers();
+  const { data: roles = [] } = useRoles();
   const deleteMutation = useDeleteUser();
+
+  // Built from GET /users/roles rather than a literal union, so adding a role to the
+  // Prisma enum shows up here with no client edit. Also the Select's `items`, so the
+  // trigger reads "Admin" not `ADMIN`.
+  const roleFilterLabels = useMemo<Record<string, string>>(
+    () => ({
+      ALL: 'All roles',
+      ...Object.fromEntries(roles.map(r => [r, roleLabel(r)])),
+    }),
+    [roles],
+  );
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -91,15 +98,15 @@ export function UsersPage() {
             />
           </div>
           <Select
-            items={ROLE_FILTER_LABELS}
+            items={roleFilterLabels}
             value={roleFilter}
-            onValueChange={v => setRoleFilter((v ?? 'ALL') as RoleFilter)}
+            onValueChange={v => setRoleFilter(v ?? 'ALL')}
           >
-            <SelectTrigger className="w-32">
+            <SelectTrigger className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(ROLE_FILTER_LABELS).map(([value, label]) => (
+              {Object.entries(roleFilterLabels).map(([value, label]) => (
                 <SelectItem key={value} value={value}>{label}</SelectItem>
               ))}
             </SelectContent>

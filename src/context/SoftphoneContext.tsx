@@ -45,6 +45,22 @@ function audioSenderOf(session: Session | null): RTCRtpSender | undefined {
   return pc?.getSenders().find((sender) => sender.track?.kind === 'audio');
 }
 
+/**
+ * The X-Cyg-Call marker on an INVITE, or null.
+ *
+ * sip.js exposes the raw INVITE as `invitation.request`, and SignalWire delivers the
+ * `?X-Cyg-Call=…` parameter we put on the <Sip> noun as a SIP header of that name.
+ */
+function markerOf(invitation: Invitation): string | null {
+  try {
+    return invitation.request.getHeader('X-Cyg-Call') ?? null;
+  } catch {
+    // Never let header parsing break call pairing — a missing marker just means this
+    // INVITE is treated as an ordinary (company) leg.
+    return null;
+  }
+}
+
 /** Where the SIP registration currently stands. Surfaced so it is never a mystery. */
 export type SoftphoneStatus =
   | 'idle'
@@ -71,6 +87,14 @@ export interface IncomingCallInfo {
   direction?: 'inbound' | 'outbound';
   callSid: string;
   at: number;
+  /**
+   * INTERNAL (staff-to-staff) calls only: the X-Cyg-Call header expected on OUR leg.
+   *
+   * An internal call has two legs, and both fork to every registered browser because
+   * every browser shares one SIP credential. Absent on company calls, which have one
+   * leg per browser and need no marker. See markerOf().
+   */
+  token?: string;
 }
 
 export type CallPhase = 'idle' | 'ringing' | 'active';
@@ -281,6 +305,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const pending = pendingRef.current;
     if (!invitation || !pending) return;
     if (Date.now() - pending.at > EVENT_STALE_MS) return;
+
+    // ── WHICH LEG IS THIS? ────────────────────────────────────────────────────────
+    // An internal call rings the shared SIP address TWICE — once to reach the caller,
+    // once to reach the callee — and every registered browser receives both. Nothing
+    // else here distinguishes them: this function pairs whatever INVITE it is holding
+    // with whatever event it has, and never matches on call sid.
+    //
+    // So without this the callee can answer the CALLER's own leg, and whether it
+    // happens depends on arrival timing — it would pass a first test and fail later.
+    // The callee's event carries the token that its leg's header must match; the
+    // caller's event carries none, so it pairs only an unmarked INVITE.
+    //
+    // Company calls have neither, so `null === null` and this is a no-op for them.
+    if ((pending.token ?? null) !== markerOf(invitation)) return;
 
     clearTimeout(unpairedTimerRef.current);
     unpairedRef.current = null;

@@ -197,6 +197,19 @@ export interface CallItem extends PhoneItemBase {
   outcome: 'answered' | 'missed' | 'failed' | 'in-progress';
   durationSec: number;
   hasRecording: boolean;
+  /**
+   * This row is a VOICEMAIL rather than a recorded conversation.
+   *
+   * A voicemail is the call row, not a second row: the missed call and the message it
+   * left are one event, so reusing the call's id keeps read/completed state, bulk select
+   * and the badges working unchanged.
+   *
+   * Derived on the server, not stored, because the two are mutually exclusive —
+   * `record-from-answer-dual` only starts once the dialled party answers, so a call
+   * nobody answered has no conversation to record. A recording on an unanswered call is
+   * therefore a message somebody left.
+   */
+  hasVoicemail: boolean;
   /** The leg this is a child of. An outbound call's recording lives on its parent. */
   parentCallSid: string | null;
 }

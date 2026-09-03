@@ -599,6 +599,10 @@ export function emailAttachmentUrl(
     token,
     mimeType: att.mimeType,
     filename: att.filename,
+    // filename + size identify the file independently of Gmail's ephemeral
+    // attachmentId, so the server can re-resolve a stale id rather than 404. That is
+    // what makes `stableEmailAttachmentUrl` (lib/attachment-url.ts) safe to freeze.
+    size: String(att.size ?? 0),
   });
   if (disposition) params.set('disposition', disposition);
   // Both ids are encoded for the same reason `emailStateUrl` encodes its own:

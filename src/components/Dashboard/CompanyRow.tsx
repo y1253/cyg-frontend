@@ -10,8 +10,12 @@ export function CompanyRow({
   onClick,
 }: {
   company: CompanySummary;
-  // Undefined when the company has no Gmail account connected — no count exists,
-  // which is different from a count of zero, so no badge is rendered.
+  // Summed across every channel the company has — mailbox, calls and texts. A company
+  // with only a support number still gets a count; it used to get nothing, which drew
+  // no badge and hid a phone backlog entirely.
+  //
+  // Undefined means UNKNOWN (no channel connected, or every one of them failed), which
+  // is different from a count of zero, so no badge is rendered.
   uncompleted: number | undefined;
   // The user's own internal "Cyg Finance" workspace: teal treatment, pinned to the
   // top of the dashboard, and none of the task counts apply (it holds messages and

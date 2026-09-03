@@ -10,6 +10,7 @@ import {
   User,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { roleBadgeVariant } from "@/api/users";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -153,7 +154,7 @@ export function UserDetailPage() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold">{user.name}</h1>
-            <Badge variant={user.role === "ADMIN" ? "default" : "secondary"}>
+            <Badge variant={roleBadgeVariant(user.role)}>
               {user.role}
             </Badge>
             <Badge
@@ -201,7 +202,7 @@ export function UserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-0.5">Role</p>
-            <Badge variant={user.role === "ADMIN" ? "default" : "secondary"} className="text-xs">
+            <Badge variant={roleBadgeVariant(user.role)} className="text-xs">
               {user.role}
             </Badge>
           </div>

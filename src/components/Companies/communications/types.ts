@@ -44,9 +44,26 @@ export const KIND_FILTER_LABELS: Record<string, string> = {
   chat: 'Chat',
   call: 'Calls',
   sms: 'Texts',
+  voicemail: 'Voicemail',
 };
 
-export type KindFilter = 'all' | ItemKind;
+/**
+ * `'voicemail'` is a PSEUDO-KIND, not an `ItemKind`.
+ *
+ * A voicemail row is still `kind: 'call'` — the missed call and the message it left are
+ * one event sharing one id, which is what keeps read/completed state and bulk select
+ * working. So it cannot be matched by comparing `it.kind`, and `matchesKindFilter` is
+ * where that difference is expressed, once.
+ */
+export type KindFilter = 'all' | ItemKind | 'voicemail';
+
+/** Does this row survive the kind dropdown? */
+export function matchesKindFilter(item: UnifiedItem, filter: KindFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'voicemail')
+    return item.kind === 'call' && item.data.hasVoicemail;
+  return item.kind === filter;
+}
 
 export type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }

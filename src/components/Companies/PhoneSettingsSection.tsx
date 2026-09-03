@@ -26,6 +26,7 @@ import {
   OverrideField,
   SegmentedChoice,
 } from '@/components/CompanySettings/OverrideField';
+import { VOICEMAIL_SECONDS, voicemailLengthLabel } from '@/lib/voicemail';
 
 const RING_SECONDS = [15, 20, 30, 45, 60];
 
@@ -90,6 +91,16 @@ export function PhoneSettingsSection({ companyId }: { companyId: number }) {
 
   const { defaults, effective, overrides, placeholders } = data;
   const overrideCount = Object.values(overrides).filter((v) => v !== null).length;
+
+  /**
+   * Whether this company will actually take a message, for labelling the after-hours
+   * choice ("Hang up" vs "Take a message").
+   *
+   * Read from the UNSAVED draft when it holds an override, else from `effective` — NOT
+   * from `defaults`. `??` rather than `||`, because `false` is a value an admin chose and
+   * `||` would silently show them the inherited label instead of their own.
+   */
+  const voicemailOn = draft.voicemailEnabled ?? effective.voicemailEnabled;
 
   const set = <K extends keyof PhoneSettingsOverrides>(
     key: K,
@@ -333,14 +344,19 @@ export function PhoneSettingsSection({ companyId }: { companyId: number }) {
               inherited={defaults.afterHoursHangUp}
               value={draft.afterHoursHangUp}
               onChange={(v) => set('afterHoursHangUp', v)}
-              renderInherited={(v) => (v ? 'Hang up' : 'Ring anyway')}
+              renderInherited={(v) =>
+                v ? (voicemailOn ? 'Take a message' : 'Hang up') : 'Ring anyway'
+              }
             >
               {(value, setValue) => (
                 <SegmentedChoice
                   value={value}
                   onChange={setValue}
                   options={[
-                    { value: true, label: 'Hang up' },
+                    {
+                      value: true,
+                      label: voicemailOn ? 'Take a message' : 'Hang up',
+                    },
                     { value: false, label: 'Ring anyway' },
                   ]}
                 />
@@ -385,6 +401,76 @@ export function PhoneSettingsSection({ companyId }: { companyId: number }) {
                     {RING_SECONDS.map((s) => (
                       <SelectItem key={s} value={String(s)}>
                         {s} seconds
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </OverrideField>
+
+            <OverrideField
+              label="Voicemail"
+              inherited={defaults.voicemailEnabled}
+              value={draft.voicemailEnabled}
+              onChange={(v) => set('voicemailEnabled', v)}
+              renderInherited={(v) => (v ? 'Take a message' : 'Off')}
+            >
+              {(value, setValue) => (
+                <SegmentedChoice
+                  value={value}
+                  onChange={setValue}
+                  options={[
+                    { value: true, label: 'Take a message' },
+                    { value: false, label: 'Off' },
+                  ]}
+                />
+              )}
+            </OverrideField>
+
+            {/* Both only matter when a message can actually be left -- but they are shown
+                regardless, because an inherited-on company has no override to read here
+                and hiding them would make the inherited wording invisible. */}
+            <OverrideField
+              label="Voicemail prompt"
+              inherited={defaults.voicemailPrompt}
+              value={draft.voicemailPrompt}
+              onChange={(v) => set('voicemailPrompt', v)}
+            >
+              {(value, setValue) => (
+                <MessageField
+                  value={value}
+                  onChange={setValue}
+                  placeholders={placeholders}
+                  preview={previewVars}
+                />
+              )}
+            </OverrideField>
+
+            <OverrideField
+              label="Longest message"
+              inherited={defaults.voicemailMaxSeconds}
+              value={draft.voicemailMaxSeconds}
+              onChange={(v) => set('voicemailMaxSeconds', v)}
+              renderInherited={(v) => voicemailLengthLabel(v)}
+            >
+              {(value, setValue) => (
+                <Select
+                  items={Object.fromEntries(
+                    VOICEMAIL_SECONDS.map((s) => [
+                      String(s),
+                      voicemailLengthLabel(s),
+                    ]),
+                  )}
+                  value={String(value)}
+                  onValueChange={(v) => setValue(Number(v ?? 120))}
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VOICEMAIL_SECONDS.map((s) => (
+                      <SelectItem key={s} value={String(s)}>
+                        {voicemailLengthLabel(s)}
                       </SelectItem>
                     ))}
                   </SelectContent>

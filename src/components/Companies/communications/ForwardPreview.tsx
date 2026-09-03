@@ -1,5 +1,5 @@
 import { useGmailEmail } from '@/hooks/useGmailEmail';
-import { emailAttachmentUrl } from '@/api/gmail';
+import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import { AttachmentPreview } from '../AttachmentPreview';
 import {
   ForwardPreviewCard,
@@ -38,7 +38,7 @@ export function ForwardPreview({
         fwd.bodyHtml
           ? injectBaseTarget(
               rewriteInlineImages(fwd.bodyHtml, fwd.attachments ?? [], (att) =>
-                emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline'),
+                stableEmailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline'),
               ),
             )
           : null
@@ -48,9 +48,12 @@ export function ForwardPreview({
         strip.length > 0
           ? strip.map((att) => (
               <AttachmentPreview
-                key={att.attachmentId}
-                url={emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline')}
-                downloadUrl={emailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'attachment')}
+                // The file's own identity, not Gmail's ephemeral attachmentId —
+                // same reason as ThreadMessage. `useGmailEmail` does not poll,
+                // but any cache invalidation would otherwise remount these.
+                key={`${fwd.id}:${att.filename}:${att.size ?? 0}`}
+                url={stableEmailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'inline')}
+                downloadUrl={stableEmailAttachmentUrl(token ?? '', companyId, fwd.id, att, 'attachment')}
                 mimeType={att.mimeType}
                 filename={att.filename}
                 size={att.size}

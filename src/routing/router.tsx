@@ -11,6 +11,7 @@ import { ArchivedPage } from '../components/Archive/ArchivedPage';
 import { AppLayout } from '../components/Layout/AppLayout';
 import { PrivateRoute } from './PrivateRoute';
 import { AdminRoute } from './AdminRoute';
+import { SuperAdminRoute } from './SuperAdminRoute';
 import { PrivacyPage } from '../components/Legal/PrivacyPage';
 import { TermsPage } from '../components/Legal/TermsPage';
 import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
@@ -70,11 +71,19 @@ export const router = createBrowserRouter([
           {
             element: <AdminRoute />,
             children: [
-              { path: '/admin/tasks', element: <TasksPage /> },
               { path: '/admin/users', element: <UsersPage /> },
-              { path: '/admin/company-settings', element: <CompanySettingsPage /> },
               { path: '/admin/users/:id', element: <UserDetailPage /> },
               { path: '/admin/archived', element: <ArchivedPage /> },
+            ],
+          },
+          // ADMIN only. A manager reaching these by typing the URL is bounced to
+          // the dashboard, which is what makes hiding the two sidebar links a
+          // presentation detail rather than the access control itself.
+          {
+            element: <SuperAdminRoute />,
+            children: [
+              { path: '/admin/tasks', element: <TasksPage /> },
+              { path: '/admin/company-settings', element: <CompanySettingsPage /> },
             ],
           },
         ],

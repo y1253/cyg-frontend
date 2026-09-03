@@ -3,6 +3,7 @@ import { Archive, ClipboardList, LayoutDashboard, LogOut, Settings, Users2 } fro
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
+import { canManage, isSuperAdmin } from '@/lib/roles';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { NotificationBell } from '@/components/Layout/NotificationBell';
 import { SoftphoneStatus } from '@/components/Phone/SoftphoneStatus';
@@ -62,7 +63,11 @@ export function AppLayout() {
 function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'ADMIN';
+  // Two tiers: managers get Users and Archived, admins additionally get the
+  // firm-wide Tasks and Company Settings pages. Mirrors router.tsx's
+  // AdminRoute / SuperAdminRoute split, which is the real gate.
+  const showAdminNav = canManage(user);
+  const showSuperAdminNav = isSuperAdmin(user);
 
   function handleLogout() {
     logout();
@@ -100,29 +105,33 @@ function AppShell() {
               icon={<LayoutDashboard size={16} />}
               label="Dashboard"
             />
-            {isAdmin && (
-              <>
-                <SideNavLink
-                  to="/admin/tasks"
-                  icon={<ClipboardList size={16} />}
-                  label="Tasks"
-                />
-                <SideNavLink
-                  to="/admin/users"
-                  icon={<Users2 size={16} />}
-                  label="Users"
-                />
-                <SideNavLink
-                  to="/admin/company-settings"
-                  icon={<Settings size={16} />}
-                  label="Company Settings"
-                />
-                <SideNavLink
-                  to="/admin/archived"
-                  icon={<Archive size={16} />}
-                  label="Archived"
-                />
-              </>
+            {showSuperAdminNav && (
+              <SideNavLink
+                to="/admin/tasks"
+                icon={<ClipboardList size={16} />}
+                label="Tasks"
+              />
+            )}
+            {showAdminNav && (
+              <SideNavLink
+                to="/admin/users"
+                icon={<Users2 size={16} />}
+                label="Users"
+              />
+            )}
+            {showSuperAdminNav && (
+              <SideNavLink
+                to="/admin/company-settings"
+                icon={<Settings size={16} />}
+                label="Company Settings"
+              />
+            )}
+            {showAdminNav && (
+              <SideNavLink
+                to="/admin/archived"
+                icon={<Archive size={16} />}
+                label="Archived"
+              />
             )}
           </nav>
         </aside>

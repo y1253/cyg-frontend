@@ -7,6 +7,7 @@ import type { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { dedupeById } from '../message-utils';
 import {
   getItemTimestamp,
+  matchesKindFilter,
   type KindFilter,
   type SourceKind,
   type UnifiedItem,
@@ -273,7 +274,9 @@ export function useUnifiedInbox({
   // already applied server-side (Gmail `q` for email, text match for chat) — phone has
   // no server-side search at all, which the caller handles by not passing it one.
   const visibleItems = unifiedItems.filter((it) => {
-    if (filter !== 'all' && it.kind !== filter) return false;
+    // Not `it.kind !== filter`: 'voicemail' is a pseudo-kind whose rows are still
+    // `kind: 'call'`. See matchesKindFilter.
+    if (!matchesKindFilter(it, filter)) return false;
     // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
     if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
     if (selectedLabel === 'UNREAD' && it.data.isRead) return false;

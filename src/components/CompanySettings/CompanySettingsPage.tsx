@@ -19,6 +19,7 @@ import { MessageField } from './MessageField';
 import { AudioLibrary } from './AudioLibrary';
 import { usePhoneAudio } from '@/hooks/usePhoneAudio';
 import { SegmentedChoice } from './OverrideField';
+import { VOICEMAIL_SECONDS, voicemailLengthLabel } from '@/lib/voicemail';
 
 const RING_SECONDS = [15, 20, 30, 45, 60];
 
@@ -259,14 +260,25 @@ export function CompanySettingsPage() {
               <div>
                 <Label className="text-sm font-medium">After hours</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  What happens once the closed message has played.
+                  {/*
+                    These two switches interact, so the helper text says what will REALLY
+                    happen rather than describing this one in isolation. "Don't ring" plus
+                    voicemail on is the normal setup, and reading it as "hang up" is how an
+                    admin ends up believing voicemail is broken.
+                  */}
+                  {draft.voicemailEnabled
+                    ? 'What happens once the closed message has played. With voicemail on, callers are invited to leave a message instead of being hung up on.'
+                    : 'What happens once the closed message has played.'}
                 </p>
               </div>
               <SegmentedChoice
                 value={draft.afterHoursHangUp}
                 onChange={(v) => set('afterHoursHangUp', v)}
                 options={[
-                  { value: true, label: 'Hang up' },
+                  {
+                    value: true,
+                    label: draft.voicemailEnabled ? 'Take a message' : 'Hang up',
+                  },
                   { value: false, label: 'Ring anyway' },
                 ]}
                 disabled={!draft.hoursEnabled}
@@ -314,6 +326,77 @@ export function CompanySettingsPage() {
                   {Object.entries(holdOptions).map(([value, label]) => (
                     <SelectItem key={value} value={value}>
                       {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* ── Voicemail ─────────────────────────────────────────────────
+                Offered whenever a caller reaches nobody: after hours, when the ring
+                goes unanswered, when no browser is registered, or when the company has
+                nobody to ring. A caller who dialled a number we do not recognise still
+                just hangs up -- with no company, the message could never be filed or
+                shown to anyone. */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <Label className="text-sm font-medium">Voicemail</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  When nobody answers, let the caller leave a message. Messages appear in
+                  the company&rsquo;s Communications tab and play like a recording.
+                </p>
+              </div>
+              <SegmentedChoice
+                value={draft.voicemailEnabled}
+                onChange={(v) => set('voicemailEnabled', v)}
+                options={[
+                  { value: true, label: 'Take a message' },
+                  { value: false, label: 'Off' },
+                ]}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-sm font-medium">
+                Voicemail prompt
+              </Label>
+              <p className="text-xs text-muted-foreground -mt-1">
+                Said just before the beep.
+              </p>
+              <MessageField
+                value={draft.voicemailPrompt}
+                onChange={(v) => set('voicemailPrompt', v)}
+                placeholders={placeholders}
+                preview={previewVars}
+                disabled={!draft.voicemailEnabled}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <Label className="text-sm font-medium">Longest message</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Recording is billed per minute and stored by the phone provider.
+                </p>
+              </div>
+              <Select
+                items={Object.fromEntries(
+                  VOICEMAIL_SECONDS.map((s) => [
+                    String(s),
+                    voicemailLengthLabel(s),
+                  ]),
+                )}
+                value={String(draft.voicemailMaxSeconds)}
+                onValueChange={(v) => set('voicemailMaxSeconds', Number(v ?? 120))}
+                disabled={!draft.voicemailEnabled}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {VOICEMAIL_SECONDS.map((s) => (
+                    <SelectItem key={s} value={String(s)}>
+                      {voicemailLengthLabel(s)}
                     </SelectItem>
                   ))}
                 </SelectContent>

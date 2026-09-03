@@ -48,6 +48,8 @@ import { useUsers } from '@/hooks/useUsers';
 import { useAssignCompany } from '@/hooks/useAssignCompany';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
+import { canManage } from '@/lib/roles';
+import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink, useReorderLinks } from '@/hooks/useLinks';
@@ -68,6 +70,7 @@ import { AddTaskDialog } from './AddTaskDialog';
 import { CopyButton } from './CopyButton';
 import { CommunicationsTab } from './CommunicationsTab';
 import { InternalMessagesTab } from './InternalMessagesTab';
+import { InternalCallsTab } from './InternalCallsTab';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
@@ -859,7 +862,15 @@ function FiscalYearPicker({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'details' | 'tasks' | 'resolved' | 'links' | 'schedules' | 'communications' | 'messages';
+type Tab =
+  | 'details'
+  | 'tasks'
+  | 'resolved'
+  | 'links'
+  | 'schedules'
+  | 'communications'
+  | 'messages'
+  | 'calls';
 
 // ─── Company Notes section ────────────────────────────────────────────────────
 
@@ -1088,6 +1099,7 @@ function TabBar({
   const tabs: { key: Tab; label: string }[] = isInternal
     ? [
         { key: 'messages' as Tab, label: 'Messages' },
+        { key: 'calls' as Tab, label: 'Calls' },
         { key: 'links', label: 'Links' },
       ]
     : [
@@ -2107,7 +2119,10 @@ function SchedulesSection({
 export function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user, token } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
+  // Admin-tier: ADMIN or MANAGER. The prop is still called `isAdmin` all the way
+  // down (CommunicationsTab, SchedulesSection, CompanyNotesSection) -- only the
+  // source of truth moved. A manager is an admin everywhere inside a company.
+  const isAdmin = canManage(user);
   const companyId = Number(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -2321,7 +2336,11 @@ export function CompanyDetailPage() {
   if (isLoading) return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
 
-  const regularUsers = users.filter(u => u.role === 'USER');
+  // Every role is assignable -- admins and managers included. Assignment is not a
+  // permission grant (a manager already sees every company); it is what routes an
+  // inbound call and fires the new-message popup, so it has to be able to name the
+  // person actually running the account. The server has always accepted any user id.
+  const assignableUsers = users;
   const now = new Date();
   function isSnoozedNow(todo: TodoItem): boolean {
     return !!todo.snoozedUntil && new Date(todo.snoozedUntil) > now;
@@ -2426,7 +2445,10 @@ export function CompanyDetailPage() {
   // The workspace only has two tabs, but `tab` is restored from localStorage and
   // may hold a client-company tab ('tasks', 'details', …). Coerce instead of
   // syncing state, so there is no flash of an invalid tab on first render.
-  const internalTab: Tab = tab === 'links' ? 'links' : 'messages';
+  // Anything unrecognised falls back to Messages, so a stale URL cannot render a blank
+  // workspace.
+  const internalTab: Tab =
+    tab === 'links' || tab === 'calls' ? tab : 'messages';
 
   // ── Internal "Cyg Finance" workspace ──────────────────────────────────────
   // A per-user container for internal messaging + that user's private links, not
@@ -2457,7 +2479,10 @@ export function CompanyDetailPage() {
           <div className={internalTab === 'messages' ? 'contents' : 'hidden'}>
             <InternalMessagesTab active={internalTab === 'messages'} />
           </div>
-          {internalTab === 'links' && <LinksSection companyId={companyId} />}
+          {internalTab === 'calls' && (
+              <InternalCallsTab active={internalTab === 'calls'} />
+            )}
+            {internalTab === 'links' && <LinksSection companyId={companyId} />}
         </div>
       </div>
     );
@@ -2984,8 +3009,10 @@ export function CompanyDetailPage() {
                     disabled={assignMutation.isPending}
                   >
                     <option value="">— Unassigned —</option>
-                    {regularUsers.map(u => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                    {assignableUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.email}) — {roleLabel(u.role)}
+                      </option>
                     ))}
                   </select>
                   {assignMutation.isPending && <span className="text-xs text-muted-foreground">Saving…</span>}
