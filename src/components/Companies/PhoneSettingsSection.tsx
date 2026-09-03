@@ -18,6 +18,7 @@ import {
 } from '@/hooks/usePhoneSettings';
 import type { PhoneSettingsOverrides, WeeklyHours } from '@/api/phoneSettings';
 import { PhoneHoursEditor } from '@/components/CompanySettings/PhoneHoursEditor';
+import { usePhoneAudio } from '@/hooks/usePhoneAudio';
 import { summariseWeek } from '@/lib/weekly-hours';
 import { MessageField } from '@/components/CompanySettings/MessageField';
 import { renderPreview } from '@/lib/message-preview';
@@ -43,6 +44,15 @@ function errorText(error: unknown): string {
  */
 export function PhoneSettingsSection({ companyId }: { companyId: number }) {
   const { data, isLoading } = useCompanyPhoneSettings(companyId);
+  const { data: audioTracks } = usePhoneAudio();
+  // "0" is always present: without a None option a company that has been given hold
+  // music could never be put back to silence.
+  const holdOptions: Record<string, string> = {
+    '0': 'None (silence)',
+    ...Object.fromEntries((audioTracks ?? []).map((t) => [String(t.id), t.name])),
+  };
+  const holdLabel = (id: number) =>
+    holdOptions[String(id)] ?? 'Unavailable track';
   const save = useUpdateCompanyPhoneSettings(companyId);
   const reset = useResetCompanyPhoneSettings(companyId);
 
@@ -194,6 +204,34 @@ export function PhoneSettingsSection({ companyId }: { companyId: number }) {
                     { value: true, label: 'On' },
                   ]}
                 />
+              )}
+            </OverrideField>
+
+            <OverrideField
+              label="Hold music"
+              inherited={defaults.holdAudioId}
+              value={draft.holdAudioId}
+              onChange={(v) => set('holdAudioId', v)}
+              renderInherited={(id) => holdLabel(id)}
+              hint="Played on a loop while an agent has a caller on hold."
+            >
+              {(value, setValue) => (
+                <Select
+                  items={holdOptions}
+                  value={String(value)}
+                  onValueChange={(v) => setValue(Number(v ?? 0))}
+                >
+                  <SelectTrigger className="w-full max-w-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(holdOptions).map(([value2, label]) => (
+                      <SelectItem key={value2} value={value2}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </OverrideField>
 

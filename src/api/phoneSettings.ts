@@ -28,6 +28,11 @@ export interface EffectivePhoneSettings {
   ringTimeoutSeconds: number;
   /** `''` means "no voice attribute — take the provider default". */
   voice: string;
+  /** PhoneAudio id played while a caller is on hold. `0` means none — silence. */
+  holdAudioId: number;
+  voicemailEnabled: boolean;
+  voicemailPrompt: string;
+  voicemailMaxSeconds: number;
 }
 
 /** The per-company row as stored. **`null` means "inherit"**, and is the only absence. */

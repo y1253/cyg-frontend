@@ -19,12 +19,31 @@ import {
 } from 'sip.js';
 import { useAuth } from '@/context/AuthContext';
 import {
+  fetchHoldAudio,
   fetchPendingCall,
   fetchSipCredentials,
+  phoneAudioUrl,
   phoneEventsUrl,
+  setCallHold,
 } from '@/api/phone';
+import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
+
+/**
+ * The outgoing audio sender on a live call, or undefined.
+ *
+ * sip.js does not expose the RTCPeerConnection in its types, so this cast is the same
+ * one toggleMute has always used. Kept in one place now that two features need it.
+ */
+function audioSenderOf(session: Session | null): RTCRtpSender | undefined {
+  const pc = (
+    session?.sessionDescriptionHandler as unknown as {
+      peerConnection?: RTCPeerConnection;
+    }
+  )?.peerConnection;
+  return pc?.getSenders().find((sender) => sender.track?.kind === 'audio');
+}
 
 /** Where the SIP registration currently stands. Surfaced so it is never a mystery. */
 export type SoftphoneStatus =
@@ -61,6 +80,14 @@ interface SoftphoneState {
   phase: CallPhase;
   info: IncomingCallInfo | null;
   muted: boolean;
+  /**
+   * The caller is on hold and hearing music (or silence, if none is configured).
+   *
+   * Deliberately NOT a CallPhase value: phase drives tryPair and the overlay portal,
+   * and widening it would put call pairing at risk for what is really a display state.
+   * Hold is orthogonal to the call machine, exactly like muted.
+   */
+  held: boolean;
   /** Seconds since the call was answered. */
   seconds: number;
   /**
@@ -78,6 +105,7 @@ interface SoftphoneActions {
   answer: () => void;
   hangup: () => void;
   toggleMute: () => void;
+  toggleHold: () => void;
   /**
    * Answer the held INVITE as the given call.
    *
@@ -148,6 +176,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<CallPhase>('idle');
   const [info, setInfo] = useState<IncomingCallInfo | null>(null);
   const [muted, setMuted] = useState(false);
+  const [held, setHeld] = useState(false);
+  /** The real microphone track, parked here while hold music takes its place. */
+  const micTrackRef = useRef<MediaStreamTrack | null>(null);
+  const holdMusicRef = useRef<HoldMusic | null>(null);
+  /** Guards a double-click: two swaps in flight would fight over one sender. */
+  const holdBusyRef = useRef(false);
   const [seconds, setSeconds] = useState(0);
   // Mirrors `unpairedRef` into render, so the tab can offer Answer only when there is
   // genuinely something to answer.
@@ -190,8 +224,32 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     void audioRef.current.play().catch(() => undefined);
   }, []);
 
+  /**
+   * Put the microphone back and tear the music down.
+   *
+   * Called by resume AND by endCall: hanging up while still held must not leave a live
+   * microphone track or an open AudioContext behind. Browsers cap how many contexts a
+   * page may have, and a track left running keeps the tab’s recording indicator lit.
+   */
+  const teardownHold = useCallback((sender?: RTCRtpSender) => {
+    const mic = micTrackRef.current;
+    if (mic) {
+      // Re-enabled because a silent hold disables the track in place rather than
+      // replacing it; a no-op when music was used.
+      mic.enabled = true;
+      if (sender) void sender.replaceTrack(mic).catch(() => undefined);
+    }
+    micTrackRef.current = null;
+    holdMusicRef.current?.stop();
+    holdMusicRef.current = null;
+    if (audioRef.current) audioRef.current.muted = false;
+  }, []);
+
   const endCall = useCallback(() => {
     stopRinging();
+    teardownHold(audioSenderOf(invitationRef.current));
+    setHeld(false);
+    holdBusyRef.current = false;
     clearTimeout(unpairedTimerRef.current);
     unpairedRef.current = null;
     setHasHeldInvite(false);
@@ -202,7 +260,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setMuted(false);
     setSeconds(0);
     if (audioRef.current) audioRef.current.srcObject = null;
-  }, []);
+  }, [teardownHold]);
 
   // ── Incoming calls ────────────────────────────────────────────────────────
   /**
@@ -507,27 +565,93 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           .catch(() => endCall());
       },
       toggleMute: () => {
-        const pc = (
-          invitationRef.current?.sessionDescriptionHandler as unknown as {
-            peerConnection?: RTCPeerConnection;
-          }
-        )?.peerConnection;
-        if (!pc) return;
+        const sender = audioSenderOf(invitationRef.current);
+        if (!sender) return;
         setMuted((prev) => {
           const next = !prev;
-          pc.getSenders().forEach((s) => {
-            if (s.track?.kind === 'audio') s.track.enabled = !next;
-          });
+          // While held, the sender carries the music track — muting must still apply to
+          // the microphone, so it is parked in micTrackRef and toggled there instead.
+          const track = micTrackRef.current ?? sender.track;
+          if (track) track.enabled = !next;
           return next;
         });
       },
+
+      /**
+       * Put the caller on hold, or take them off it.
+       *
+       * Swaps the microphone for a looping music track on the outgoing stream. The far
+       * end hears music; the agent hears nothing, because the remote audio element is
+       * muted locally for the duration.
+       *
+       * ORDER IS LOAD-BEARING. The recording is paused BEFORE the music starts and
+       * resumed AFTER it stops — the opposite order records a slice of music at each
+       * boundary, which is the whole defect the pause exists to prevent.
+       *
+       * With no track configured this is simply a silent hold, which is also what
+       * happens if the music fails to build. Hold must never fail outright: the caller
+       * is on a live call and the agent has already stopped talking to them.
+       */
+      toggleHold: () => {
+        if (holdBusyRef.current) return;
+        const sender = audioSenderOf(invitationRef.current);
+        const call = pendingRef.current;
+        if (!sender) return;
+        holdBusyRef.current = true;
+
+        void (async () => {
+          try {
+            if (holdMusicRef.current || micTrackRef.current) {
+              // ── Resume ──
+              teardownHold(sender);
+              setHeld(false);
+              if (token && call) {
+                await setCallHold(token, call.companyId, call.callSid, false);
+              }
+              return;
+            }
+
+            // ── Hold ──
+            if (token && call) {
+              await setCallHold(token, call.companyId, call.callSid, true);
+            }
+
+            micTrackRef.current = sender.track ?? null;
+            if (audioRef.current) audioRef.current.muted = true;
+
+            let music: HoldMusic | null = null;
+            if (token && call) {
+              try {
+                const { audioId } = await fetchHoldAudio(token, call.companyId);
+                if (audioId !== null) {
+                  music = await startHoldMusic(phoneAudioUrl(token, audioId));
+                }
+              } catch {
+                /* fall through to a silent hold */
+              }
+            }
+
+            if (music) {
+              holdMusicRef.current = music;
+              await sender.replaceTrack(music.track).catch(() => undefined);
+            } else if (sender.track) {
+              // Silent hold. The track is disabled rather than replaced, and
+              // micTrackRef still holds it so resume and mute both behave.
+              sender.track.enabled = false;
+            }
+            setHeld(true);
+          } finally {
+            holdBusyRef.current = false;
+          }
+        })();
+      },
     }),
-    [endCall, tryPair],
+    [endCall, teardownHold, token, tryPair],
   );
 
   const state = useMemo<SoftphoneState>(
-    () => ({ status, phase, info, muted, seconds, hasHeldInvite }),
-    [status, phase, info, muted, seconds, hasHeldInvite],
+    () => ({ status, phase, info, muted, held, seconds, hasHeldInvite }),
+    [status, phase, info, muted, held, seconds, hasHeldInvite],
   );
 
   return (

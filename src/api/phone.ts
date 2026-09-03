@@ -392,3 +392,60 @@ export async function markPhoneItem(
   );
   if (!res.ok) throw await failure(res, `Failed to mark ${action}`);
 }
+
+// ─── Hold ────────────────────────────────────────────────────────────────────
+
+/** Which track a company uses on hold. `audioId: null` means none is configured. */
+export interface HoldAudio {
+  audioId: number | null;
+  name?: string;
+}
+
+export async function fetchHoldAudio(
+  token: string,
+  companyId: number,
+): Promise<HoldAudio> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/hold-audio`,
+    { method: 'GET' },
+  );
+  if (!res.ok) throw await failure(res, 'Failed to load the hold music');
+  return res.json() as Promise<HoldAudio>;
+}
+
+/**
+ * URL the browser can play a track from.
+ *
+ * The token rides in the query string because an <audio> element cannot send an
+ * Authorization header — the same reason internalAttachmentUrl is shaped this way.
+ */
+export function phoneAudioUrl(token: string, audioId: number): string {
+  return `${API}/phone/audio/${audioId}?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Pause / resume the call recording around a hold.
+ *
+ * Both are BEST EFFORT and deliberately never throw: the hold music is played by this
+ * browser regardless, and a caller left in silence because a provider call failed is a
+ * worse outcome than a recording that contains music.
+ */
+export async function setCallHold(
+  token: string,
+  companyId: number,
+  callSid: string,
+  held: boolean,
+): Promise<void> {
+  try {
+    await fetchWithAuth(
+      token,
+      `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/${
+        held ? 'hold' : 'resume'
+      }`,
+      { method: 'POST' },
+    );
+  } catch {
+    /* best effort — see the docblock */
+  }
+}

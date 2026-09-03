@@ -16,6 +16,8 @@ import { usePhoneDefaults, useUpdatePhoneDefaults } from '@/hooks/usePhoneSettin
 import type { EffectivePhoneSettings } from '@/api/phoneSettings';
 import { PhoneHoursEditor } from './PhoneHoursEditor';
 import { MessageField } from './MessageField';
+import { AudioLibrary } from './AudioLibrary';
+import { usePhoneAudio } from '@/hooks/usePhoneAudio';
 import { SegmentedChoice } from './OverrideField';
 
 const RING_SECONDS = [15, 20, 30, 45, 60];
@@ -46,6 +48,13 @@ function errorText(error: unknown): string {
  */
 export function CompanySettingsPage() {
   const { data, isLoading, error } = usePhoneDefaults();
+  const { data: audioTracks } = usePhoneAudio();
+  // "0" is the none sentinel, and it is always offered: without it an admin who has
+  // set hold music could never turn it back off.
+  const holdOptions: Record<string, string> = {
+    '0': 'None (silence)',
+    ...Object.fromEntries((audioTracks ?? []).map((t) => [String(t.id), t.name])),
+  };
   const save = useUpdatePhoneDefaults();
 
   const [draft, setDraft] = useState<EffectivePhoneSettings | null>(null);
@@ -287,6 +296,31 @@ export function CompanySettingsPage() {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <Label className="text-sm font-medium">Hold music</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Played on a loop when an agent puts a caller on hold.
+                </p>
+              </div>
+              <Select
+                items={holdOptions}
+                value={String(draft.holdAudioId)}
+                onValueChange={(v) => set('holdAudioId', Number(v ?? 0))}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(holdOptions).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <Label className="text-sm font-medium">Voice</Label>
               <Select
                 items={VOICES}
@@ -308,6 +342,8 @@ export function CompanySettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AudioLibrary />
 
       {/* Sticky save bar: the three cards are one coherent change, saved together. */}
       <div className="fixed bottom-0 left-52 right-0 border-t bg-background/95 backdrop-blur px-6 py-3">

@@ -1,4 +1,12 @@
-import { Mic, MicOff, Phone, PhoneOff, Building2 } from 'lucide-react';
+import {
+  Mic,
+  MicOff,
+  Pause,
+  Phone,
+  PhoneOff,
+  Play,
+  Building2,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { formatE164 } from '@/lib/phone';
 import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
@@ -21,8 +29,8 @@ function mmss(total: number): string {
  * call state, so navigation never tears down a live call.
  */
 export function CallOverlay() {
-  const { phase, info, muted, seconds } = useSoftphone();
-  const { answer, hangup, toggleMute } = useSoftphoneActions();
+  const { phase, info, muted, held, seconds } = useSoftphone();
+  const { answer, hangup, toggleMute, toggleHold } = useSoftphoneActions();
   const navigate = useNavigate();
 
   if (phase === 'idle') return null;
@@ -104,6 +112,18 @@ export function CallOverlay() {
             </button>
           ) : (
             <>
+              <button
+                onClick={toggleHold}
+                className={[
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  held
+                    ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                    : 'bg-muted hover:bg-muted/70',
+                ].join(' ')}
+              >
+                {held ? <Play size={14} /> : <Pause size={14} />}
+                {held ? 'Resume' : 'Hold'}
+              </button>
               <button
                 onClick={toggleMute}
                 className={[
