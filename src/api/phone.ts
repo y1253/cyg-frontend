@@ -247,6 +247,27 @@ export interface CallRecording {
   token: string;
 }
 
+/**
+ * The AI summary of a call, when there is one.
+ *
+ * `pending` means the server has queued it and the sweep has not finished — the hook
+ * polls while this is the state. `skipped` is not a failure: the call had no audio, or
+ * nothing was said. The server never sends its internal error text; `reason` is a fixed
+ * sentence per state.
+ */
+export interface CallSummary {
+  status: 'pending' | 'ready' | 'skipped' | 'failed';
+  summary: string | null;
+  reason: string | null;
+  generatedAt: string | null;
+}
+
+export interface CallRecordingsResult {
+  recordings: CallRecording[];
+  /** Null when summarisation is switched off, or the call predates the feature. */
+  summary: CallSummary | null;
+}
+
 /** One page of the company's calls + SMS, newest first. */
 export async function fetchPhoneTimeline(
   token: string,
@@ -323,19 +344,29 @@ export async function startCall(
   }>;
 }
 
-/** Recordings for one call. */
+/**
+ * Recordings for one call, plus its AI summary.
+ *
+ * `parentCallSid` is passed through because the summary is keyed by the leg the `<Dial>`
+ * ran on, which for an OUTBOUND call is the parent — not the sid of the row on screen.
+ * Omitting it shows "no summary" on every outbound call.
+ */
 export async function fetchCallRecordings(
   token: string,
   companyId: number,
   sid: string,
-): Promise<CallRecording[]> {
+  parentCallSid?: string | null,
+): Promise<CallRecordingsResult> {
+  const qs = parentCallSid
+    ? `?parentCallSid=${encodeURIComponent(parentCallSid)}`
+    : '';
   const res = await fetchWithAuth(
     token,
-    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(sid)}/recordings`,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(sid)}/recordings${qs}`,
     { headers: JSON_HEADERS },
   );
   if (!res.ok) throw await failure(res, 'Failed to load the recording');
-  return res.json() as Promise<CallRecording[]>;
+  return res.json() as Promise<CallRecordingsResult>;
 }
 
 /** Unread / uncompleted phone counts for this company's folder badges. */

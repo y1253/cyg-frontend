@@ -21,6 +21,7 @@ import { useUserDirectory } from '@/hooks/useUserDirectory';
 import { useInternalCalls } from '@/hooks/useInternalCalls';
 import { useStartInternalCall } from '@/hooks/useStartInternalCall';
 import { useInternalCallRecordings } from '@/hooks/useInternalCallRecordings';
+import { CallSummaryPanel } from './communications/CallSummaryPanel';
 import { recordingUrl } from '@/api/phone';
 import { formatEmailDate } from './message-utils';
 import type { InternalCall } from '@/api/internalCalls';
@@ -45,7 +46,8 @@ function CallRecording({ sid }: { sid: string }) {
   if (isLoading) {
     return <p className="text-xs text-muted-foreground">Loading recording…</p>;
   }
-  if (!data?.length) {
+  const recordings = data?.recordings ?? [];
+  if (recordings.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
         No recording for this call.
@@ -53,8 +55,8 @@ function CallRecording({ sid }: { sid: string }) {
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      {data.map((r) => (
+    <div className="flex flex-col gap-3">
+      {recordings.map((r) => (
         <audio
           key={r.sid}
           controls
@@ -64,6 +66,7 @@ function CallRecording({ sid }: { sid: string }) {
           className="w-full"
         />
       ))}
+      <CallSummaryPanel summary={data?.summary} />
     </div>
   );
 }

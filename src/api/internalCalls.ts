@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './client';
+import type { CallSummary } from './phone';
 
 const API = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -60,15 +61,20 @@ export async function startInternalCall(
   }>;
 }
 
+export interface InternalCallRecordingsResult {
+  recordings: InternalCallRecording[];
+  summary: CallSummary | null;
+}
+
 export async function fetchInternalCallRecordings(
   token: string,
   sid: string,
-): Promise<InternalCallRecording[]> {
+): Promise<InternalCallRecordingsResult> {
   const res = await fetchWithAuth(
     token,
     `${API}/internal-calls/${encodeURIComponent(sid)}/recordings`,
     { method: 'GET' },
   );
   await throwOnError(res, 'Failed to load the recording');
-  return res.json() as Promise<InternalCallRecording[]>;
+  return res.json() as Promise<InternalCallRecordingsResult>;
 }

@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import type { CallItem } from '@/api/phone';
 import { recordingUrl } from '@/api/phone';
 import { useCallRecordings } from '@/hooks/useCallRecordings';
+import { CallSummaryPanel } from './CallSummaryPanel';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { formatE164 } from '@/lib/phone';
 import { formatEmailDate } from '../message-utils';
@@ -60,7 +61,14 @@ export function CallDetailView({
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
 }) {
-  const { data: recordings, isLoading } = useCallRecordings(companyId, sid);
+  // The parent sid rides along because an outbound call's summary is keyed by the
+  // parent leg, not by the row on screen. See summaryLookupSids on the server.
+  const { data, isLoading } = useCallRecordings(
+    companyId,
+    sid,
+    call?.parentCallSid ?? null,
+  );
+  const recordings = data?.recordings;
   const markUnread = useMarkPhoneItem(companyId, 'unread');
 
   const outcome = call?.outcome ?? 'answered';
@@ -208,6 +216,8 @@ export function CallDetailView({
             ))
           )}
         </div>
+
+        <CallSummaryPanel summary={data?.summary} isVoicemail={isVoicemail} />
       </Card>
     </div>
   );
