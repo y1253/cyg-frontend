@@ -547,6 +547,14 @@ export async function sendEmail(
       if (xhr.status === 413) {
         message = 'The attachments were too large for the server to accept.';
       }
+      // Keep the raw response where a report can reach it. A send that fails
+      // intermittently is nearly impossible to reproduce on demand, and without this
+      // the only evidence left was the rendered sentence — which could not tell a 500
+      // apart from a 502 page a proxy happened to return as JSON. Truncated because
+      // an error body can be a full HTML page.
+      console.error(
+        `[sendEmail] ${xhr.status} from ${url}: ${xhr.responseText.slice(0, 500)}`,
+      );
       reject(new Error(message));
     };
     xhr.onerror = () => reject(new Error('Network error while sending'));
