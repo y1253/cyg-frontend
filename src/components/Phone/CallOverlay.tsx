@@ -3,13 +3,17 @@ import {
   MicOff,
   Pause,
   Phone,
+  PhoneForwarded,
   PhoneOff,
   Play,
   Building2,
+  CornerDownRight,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatE164 } from '@/lib/phone';
 import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
+import { TransferPicker } from '@/components/Phone/TransferPicker';
 
 function mmss(total: number): string {
   const m = Math.floor(total / 60);
@@ -30,8 +34,10 @@ function mmss(total: number): string {
  */
 export function CallOverlay() {
   const { phase, info, muted, held, seconds } = useSoftphone();
-  const { answer, hangup, toggleMute, toggleHold } = useSoftphoneActions();
+  const { answer, hangup, toggleMute, toggleHold, blindTransfer } =
+    useSoftphoneActions();
   const navigate = useNavigate();
+  const [transferOpen, setTransferOpen] = useState(false);
 
   if (phase === 'idle') return null;
   const ringing = phase === 'ringing';
@@ -80,10 +86,23 @@ export function CallOverlay() {
                 <span className="truncate">{info.companyName}</span>
               </button>
             )}
+            {/*
+              A transferred call shows all three facts: who is on the line, which company
+              they are, and that a colleague handed them over. Absent on an ordinary
+              call, so every other card renders exactly as it did before.
+            */}
+            {info?.transferFrom && (
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                <CornerDownRight size={12} />
+                <span className="truncate">
+                  Transferred by {info.transferFrom.name}
+                </span>
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="flex gap-2 border-t p-3">
+        <div className="flex flex-wrap gap-2 border-t p-3">
           {ringing && !outgoing ? (
             <>
               <button
@@ -115,7 +134,7 @@ export function CallOverlay() {
               <button
                 onClick={toggleHold}
                 className={[
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  'flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
                   held
                     ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                     : 'bg-muted hover:bg-muted/70',
@@ -127,7 +146,7 @@ export function CallOverlay() {
               <button
                 onClick={toggleMute}
                 className={[
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  'flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
                   muted
                     ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                     : 'bg-muted hover:bg-muted/70',
@@ -137,8 +156,15 @@ export function CallOverlay() {
                 {muted ? 'Unmute' : 'Mute'}
               </button>
               <button
+                onClick={() => setTransferOpen(true)}
+                className="flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md bg-muted px-3 py-2 text-sm font-medium hover:bg-muted/70"
+              >
+                <PhoneForwarded size={14} />
+                Transfer
+              </button>
+              <button
                 onClick={hangup}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+                className="flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
               >
                 <PhoneOff size={14} />
                 Hang up
@@ -147,6 +173,12 @@ export function CallOverlay() {
           )}
         </div>
       </div>
+
+      <TransferPicker
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        onTransfer={blindTransfer}
+      />
     </div>
   );
 }

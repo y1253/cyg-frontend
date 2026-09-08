@@ -493,3 +493,47 @@ export async function setCallHold(
     /* best effort — see the docblock */
   }
 }
+
+/**
+ * Hand a company call to a colleague and drop out — a blind (cold) transfer.
+ *
+ * `targetUserId`, never a phone number: the picker commits only directory choices, and
+ * the server takes only a user id, so a transfer can never become a way to dial out.
+ *
+ * ⚠️ This THROWS, unlike `setCallHold` which deliberately swallows. Pausing a recording
+ * is cosmetic; a transfer that silently failed leaves the agent believing the client was
+ * handed over when they are still sitting on the line.
+ */
+export async function transferCallBlind(
+  token: string,
+  companyId: number,
+  callSid: string,
+  targetUserId: number,
+): Promise<{ transferredSid: string }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/transfer/blind`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ targetUserId }),
+    },
+  );
+  if (!res.ok) throw await failure(res, 'Could not transfer the call');
+  return res.json() as Promise<{ transferredSid: string }>;
+}
+
+/**
+ * Which colleagues have a live event stream open.
+ *
+ * ⚠️ ADVISORY ONLY — see the route's own warning. SSE is blackholed by the office TLS
+ * proxy, so a perfectly reachable colleague can report offline. Render it, never gate on
+ * it.
+ */
+export async function fetchPresence(
+  token: string,
+): Promise<{ userIds: number[] }> {
+  const res = await fetchWithAuth(token, `${API}/phone/presence`);
+  if (!res.ok) throw await failure(res, 'Failed to load who is available');
+  return res.json() as Promise<{ userIds: number[] }>;
+}

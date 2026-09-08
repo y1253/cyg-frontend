@@ -25,7 +25,9 @@ import {
   phoneAudioUrl,
   phoneEventsUrl,
   setCallHold,
+  transferCallBlind,
 } from '@/api/phone';
+import { transferInternalCallBlind } from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
@@ -95,6 +97,22 @@ export interface IncomingCallInfo {
    * leg per browser and need no marker. See markerOf().
    */
   token?: string;
+  /**
+   * Which family of call this is, so the client knows which API to act on.
+   *
+   * `token != null` is NOT a usable discriminator: an internal CALLER's own event
+   * carries no token, so it looks identical to a company call. Absent on events from an
+   * older server build, which are company calls.
+   */
+  kind?: 'company' | 'internal';
+  /**
+   * Set only when this ring is the result of a TRANSFER: who handed the call over.
+   *
+   * Rendered as an extra line so the person taking over sees the client's number AND
+   * that a colleague passed it to them. Absent on every ordinary call, which is what
+   * keeps their card byte-identical to before.
+   */
+  transferFrom?: { id: number; name: string };
 }
 
 export type CallPhase = 'idle' | 'ringing' | 'active';
@@ -140,6 +158,18 @@ interface SoftphoneActions {
    * anywhere and no way to hang it up.
    */
   answerHeld: (info: IncomingCallInfo) => void;
+  /**
+   * Hand the live call to a colleague and drop out.
+   *
+   * Rejects rather than swallowing, so the picker can show why it failed — a transfer
+   * that silently did nothing leaves the agent believing the client was handed over.
+   *
+   * The local leg is NOT torn down here: the server redirects the other party, which
+   * ends the bridge, and our own session then terminates on its own and runs `endCall`
+   * through the existing Terminated listener. Hanging up here first would tear the
+   * bridge down before the redirect landed and drop the caller into voicemail.
+   */
+  blindTransfer: (targetUserId: number) => Promise<void>;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -580,6 +610,23 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           void inv.reject().catch(() => undefined);
         }
         endCall();
+      },
+      blindTransfer: async (targetUserId: number) => {
+        const call = pendingRef.current;
+        if (!token || !call) throw new Error('No call to transfer');
+        if (call.kind === 'internal') {
+          await transferInternalCallBlind(token, call.callSid, targetUserId);
+        } else {
+          await transferCallBlind(
+            token,
+            call.companyId,
+            call.callSid,
+            targetUserId,
+          );
+        }
+        // Deliberately no endCall() here. SignalWire tears the bridge down as a result
+        // of the redirect, our session goes Terminated, and the existing listener does
+        // the teardown — one path out of a call instead of two that can disagree.
       },
       answerHeld: (call: IncomingCallInfo) => {
         // Unlock audio on this click, while it is still a real user gesture.

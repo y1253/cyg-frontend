@@ -78,3 +78,27 @@ export async function fetchInternalCallRecordings(
   await throwOnError(res, 'Failed to load the recording');
   return res.json() as Promise<InternalCallRecordingsResult>;
 }
+
+/**
+ * Hand a staff-to-staff call to a third colleague and drop out.
+ *
+ * Participants only — an admin who is not on the call gets a 404, matching the
+ * recordings route and internal messages.
+ */
+export async function transferInternalCallBlind(
+  token: string,
+  sid: string,
+  targetUserId: number,
+): Promise<{ transferredSid: string }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/transfer/blind`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ targetUserId }),
+    },
+  );
+  await throwOnError(res, 'Could not transfer the call');
+  return res.json() as Promise<{ transferredSid: string }>;
+}
