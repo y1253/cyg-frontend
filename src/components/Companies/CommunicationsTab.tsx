@@ -42,6 +42,7 @@ import { InboxView } from './communications/InboxView';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
+import { showListSpinner } from './communications/inbox-loading';
 import {
   ALL_LABELS, FOLDERS, INBOX_TABS,
   type CompleteTarget, type ItemKind, type KindFilter,
@@ -790,6 +791,16 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const chatFirst = chatQuery.data?.pages?.[0];
   const emailFirst = emailQuery.data?.pages?.[0];
 
+  // Mirrors InboxView's own `rows`: the unified list in the inbox, email alone in a folder.
+  const loadedRowCount = isInboxLike ? visibleItems.length : emailItems.length;
+  const listSpinner = showListSpinner({
+    isInboxLike,
+    emailLoading: emailQuery.isLoading,
+    chatLoading: chatQuery.isLoading,
+    phoneLoading: phoneQuery.isLoading,
+    loadedRowCount,
+  });
+
   return (
     <>
       {ringingBanner}
@@ -817,14 +828,14 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         // Whether the inbox is currently narrowed by search/kind.
         isFiltering={filter !== 'all' || activeSearch != null}
         activeSearch={activeSearch}
-        // A DISABLED query in TanStack v5 reports isPending:true / isFetching:false,
-        // so isLoading is false — which is what lets a phone-only company render
-        // instead of sitting on "Loading…" forever. Do not swap this for isPending.
-        isLoading={
-          isInboxLike
-            ? emailQuery.isLoading || chatQuery.isLoading || phoneQuery.isLoading
-            : emailQuery.isLoading
-        }
+        // See `showListSpinner`: the list is only replaced when there is nothing to
+        // replace, so a late source (phone especially, gated behind the support-number
+        // query) merges in behind the rows instead of wiping them.
+        isLoading={listSpinner}
+        // Separate from the spinner: while phone has not returned its first page it
+        // reports hasNextPage:false, so the sentinel would claim "You're all caught up"
+        // with a whole source still in flight.
+        phoneLoading={isInboxLike && !!supportNumber && phoneQuery.isLoading}
         visibleItems={visibleItems}
         emailItems={emailItems}
         emailHasNext={emailHasNext}

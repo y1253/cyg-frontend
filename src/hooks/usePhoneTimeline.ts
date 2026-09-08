@@ -25,5 +25,11 @@ export function usePhoneTimeline(
       last.hasMore ? (last.nextCursor ?? undefined) : undefined,
     enabled: !!token && !!companyId && hasNumber && active,
     refetchInterval: active ? 15000 : false,
+    // Leaving the tab for longer than the default 5-minute gcTime threw the loaded pages
+    // away, so coming back re-entered the cold path and the list had nothing to show.
+    gcTime: 30 * 60_000,
+    // No `placeholderData: keepPreviousData` on purpose: the key is static, so there is no
+    // previous key to carry data from and it would do exactly nothing. What keeps a poll
+    // from blanking the list is the stable key plus `showListSpinner`.
   });
 }

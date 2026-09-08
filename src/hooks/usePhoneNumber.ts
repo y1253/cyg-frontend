@@ -14,6 +14,13 @@ export function usePhoneNumber(companyId: number) {
     queryKey: ['support-number', companyId],
     queryFn: () => fetchSupportNumber(token!, companyId),
     enabled: !!token && !!companyId,
+    // The number changes only through attach/release, and BOTH already invalidate this key
+    // (see useInvalidateNumber). Without a staleTime it refetched on every mount and every
+    // window focus, which bought nothing and put one serialized hop in front of the query
+    // it gates: usePhoneTimeline only becomes enabled once this has answered, so the
+    // timeline flipped from disabled to loading a beat after the inbox had already painted.
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
   });
 }
 

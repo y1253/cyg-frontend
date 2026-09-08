@@ -59,6 +59,7 @@ export function InboxView({
   isFiltering,
   activeSearch,
   isLoading,
+  phoneLoading,
   visibleItems,
   emailItems,
   emailHasNext,
@@ -117,6 +118,8 @@ export function InboxView({
   isFiltering: boolean;
   activeSearch: string | undefined;
   isLoading: boolean;
+  /** Phone has not returned its first page yet. See the sentinel below. */
+  phoneLoading?: boolean;
   visibleItems: UnifiedItem[];
   /** The email-only folders (Sent/Spam/Trash) render straight off this. */
   emailItems: EmailSummary[];
@@ -512,6 +515,15 @@ export function InboxView({
               page must not read as "loading more" in Sent/Spam/Trash. */}
           {(isInboxLike ? anyFetchingNext : emailFetchingNext) ? (
             <span className="text-xs text-muted-foreground">Loading more…</span>
+          ) : phoneLoading ? (
+            /* A source that has not returned its FIRST page reports hasNextPage:false, so
+               `allExhausted` below would otherwise announce the list is complete while
+               calls and texts are still on the way. Now that a late phone query no longer
+               blanks the list, this is the only thing standing between the user and a
+               confident "You're all caught up" over a half-loaded inbox. */
+            <span className="text-xs text-muted-foreground">
+              Loading calls &amp; texts…
+            </span>
           ) : (isInboxLike ? allExhausted : !emailHasNext) && rows.length > 0 ? (
             <span className="text-xs text-muted-foreground/70">You're all caught up</span>
           ) : null}
