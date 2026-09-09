@@ -5,6 +5,7 @@ import type { useGmailEmails } from '@/hooks/useGmailEmails';
 import type { useGmailChats } from '@/hooks/useGmailChats';
 import type { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { dedupeById } from '../message-utils';
+import { clampSources } from './inbox-clamp';
 import {
   getItemTimestamp,
   matchesKindFilter,
@@ -168,67 +169,23 @@ export function useUnifiedInbox({
   );
 
   // Build unified sorted list for INBOX, newest first. Because the sources page
-  // independently, the visible tail is clamped to a watermark — the newest
-  // "oldest-loaded" boundary among sources that still have more — so the list never
-  // shows a half-loaded (out-of-order) tail. `clampSource` is whichever source's tail
-  // == the cutoff (the one PINNING the list); advancing it is the only way to lower
-  // the cutoff and reveal more.
+  // independently, the visible tail is clamped to a watermark — see `inbox-clamp.ts`,
+  // which owns the rule and is shared with the internal workspace inbox.
   const { visible: unifiedItems, hiddenCount, clampSource } = useMemo(() => {
     if (!isInboxLike)
       return { visible: [] as UnifiedItem[], hiddenCount: 0, clampSource: null as SourceKind | null };
-
-    const active = sources.filter((s) => s.enabled);
-    // Timestamp ONCE per item, then sort on the number.
-    //
-    // The comparator used to call `getItemTimestamp` on both operands, so every
-    // one of the ~n log n comparisons re-parsed two date strings. The same
-    // numbers are reused by the tail scan and the cutoff filter below, which
-    // also retires the `Math.min(...spread)` those used — a stack-overflow
-    // hazard bounded only by the auto-fill page cap.
-    const stamped = active.flatMap((s) =>
-      s.items.map((item) => ({ ts: getItemTimestamp(item), item })),
-    );
-    stamped.sort((a, b) => b.ts - a.ts);
-    const merged = stamped.map((e) => e.item);
 
     // Filtered folders (UNREAD/UNCOMPLETED) intend to show EVERY matching row so the
     // list backs up the badge, so skip the clamp — it would hide already-loaded matches
     // older than the oldest-loaded chat. Chat matches are all on page 1, so showing the
     // full merged set can't drop a badge-counted item. Plain INBOX keeps the clamp.
-    if (isFilteredFolder)
-      return { visible: merged, hiddenCount: 0, clampSource: null as SourceKind | null };
-
-    // True oldest-loaded timestamp of a source (arrays aren't globally sorted).
-    // A fold rather than `Math.min(...spread)`: same answer, no argument-count
-    // ceiling, and it reuses the timestamps computed above.
-    const minTs = (arr: UnifiedItem[]) => {
-      let min = Infinity;
-      for (const it of arr) {
-        const ts = getItemTimestamp(it);
-        if (ts < min) min = ts;
-      }
-      return arr.length ? min : -Infinity;
-    };
-    // A source that is exhausted can never reveal older rows, so it cannot pin.
-    const tails = active.map((s) => ({
-      kind: s.kind,
-      tail: s.hasNext ? minTs(s.items) : -Infinity,
-    }));
-    const cutoff = tails.length
-      ? Math.max(...tails.map((t) => t.tail))
-      : -Infinity;
-    const visible =
-      cutoff === -Infinity
-        ? merged
-        : stamped.filter((e) => e.ts >= cutoff).map((e) => e.item);
-    // STRICT `>` keeps the FIRST maximum, which with email first in `sources`
-    // reproduces the original two-source tie-break. `>=` would flip it and silently
-    // change which stream advances.
-    const clampSource: SourceKind | null =
-      cutoff === -Infinity
-        ? null
-        : tails.reduce((a, b) => (b.tail > a.tail ? b : a)).kind;
-    return { visible, hiddenCount: merged.length - visible.length, clampSource };
+    //
+    // Expressed as "no source can pin" rather than a second code path, so the sort and
+    // the de-duplication of concerns stay in one place.
+    const forClamp = isFilteredFolder
+      ? sources.map((s) => ({ ...s, hasNext: false }))
+      : sources;
+    return clampSources(forClamp, getItemTimestamp);
   }, [isInboxLike, isFilteredFolder, sources]);
 
   // Advance the PINNING source only (advancing another loads pages that stay

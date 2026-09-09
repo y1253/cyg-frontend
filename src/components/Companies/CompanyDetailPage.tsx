@@ -69,8 +69,7 @@ import type { EmailProvider } from '@/api/gmail';
 import { AddTaskDialog } from './AddTaskDialog';
 import { CopyButton } from './CopyButton';
 import { CommunicationsTab } from './CommunicationsTab';
-import { InternalMessagesTab } from './InternalMessagesTab';
-import { InternalCallsTab } from './InternalCallsTab';
+import { InternalCommunicationsTab } from './InternalCommunicationsTab';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
@@ -868,9 +867,7 @@ type Tab =
   | 'resolved'
   | 'links'
   | 'schedules'
-  | 'communications'
-  | 'messages'
-  | 'calls';
+  | 'communications';
 
 // ─── Company Notes section ────────────────────────────────────────────────────
 
@@ -1095,11 +1092,15 @@ function TabBar({
   isInternal?: boolean;
 }) {
   // The internal "Cyg Finance" workspace has no client-company data — no details,
-  // todos, schedules or external mailbox. Just messages and the user's own links.
+  // todos, schedules or external mailbox. Just its own Communications inbox (staff
+  // messages and staff-to-staff calls, merged) and the user's own links.
+  //
+  // It shares the 'communications' key with a client company deliberately: the label is
+  // the same, so switching from a company to the workspace should land on the same tab
+  // rather than reset.
   const tabs: { key: Tab; label: string }[] = isInternal
     ? [
-        { key: 'messages' as Tab, label: 'Messages' },
-        { key: 'calls' as Tab, label: 'Calls' },
+        { key: 'communications' as Tab, label: 'Communications' },
         { key: 'links', label: 'Links' },
       ]
     : [
@@ -2443,12 +2444,11 @@ export function CompanyDetailPage() {
   const isArchived = !!company.deletedAt;
   const isInternal = !!company.isInternal;
   // The workspace only has two tabs, but `tab` is restored from localStorage and
-  // may hold a client-company tab ('tasks', 'details', …). Coerce instead of
-  // syncing state, so there is no flash of an invalid tab on first render.
-  // Anything unrecognised falls back to Messages, so a stale URL cannot render a blank
-  // workspace.
-  const internalTab: Tab =
-    tab === 'links' || tab === 'calls' ? tab : 'messages';
+  // may hold a client-company tab ('tasks', 'details', …) — or one of the two the
+  // workspace used to have, 'messages' and 'calls', which are now one merged tab.
+  // Coerce instead of syncing state, so there is no flash of an invalid tab on first
+  // render and a stale stored value cannot render a blank workspace.
+  const internalTab: Tab = tab === 'links' ? 'links' : 'communications';
 
   // ── Internal "Cyg Finance" workspace ──────────────────────────────────────
   // A per-user container for internal messaging + that user's private links, not
@@ -2463,7 +2463,7 @@ export function CompanyDetailPage() {
             <Badge className="bg-teal-100 text-teal-800 hover:bg-teal-100">Internal</Badge>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Your private workspace — message colleagues and keep your own links.
+            Your private workspace — message and call colleagues, and keep your own links.
           </p>
           <TabBar
             active={internalTab}
@@ -2474,15 +2474,15 @@ export function CompanyDetailPage() {
           />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
-          {/* Messages stays mounted while Links is showing so an open thread and a
-              half-typed reply survive the tab switch (same contract as Communications). */}
-          <div className={internalTab === 'messages' ? 'contents' : 'hidden'}>
-            <InternalMessagesTab active={internalTab === 'messages'} />
+          {/* Communications stays mounted while Links is showing so an open thread, an
+              open call and a half-typed reply survive the tab switch (same contract as
+              a client company's Communications tab). */}
+          <div className={internalTab === 'communications' ? 'contents' : 'hidden'}>
+            <InternalCommunicationsTab
+              active={internalTab === 'communications'}
+            />
           </div>
-          {internalTab === 'calls' && (
-              <InternalCallsTab active={internalTab === 'calls'} />
-            )}
-            {internalTab === 'links' && <LinksSection companyId={companyId} />}
+          {internalTab === 'links' && <LinksSection companyId={companyId} />}
         </div>
       </div>
     );

@@ -31,7 +31,7 @@ interface TransferPickerProps {
  * number out — there is nowhere to put one.
  *
  * Single-pick idiom (`slice(0, 1)` / `slice(-1)`) lifted verbatim from
- * `InternalCallsTab`: committing a second person replaces the first, so the control
+ * `InternalCommunicationsTab`: committing a second person replaces the first, so the control
  * cannot reach a state the API would reject.
  */
 export function TransferPicker({

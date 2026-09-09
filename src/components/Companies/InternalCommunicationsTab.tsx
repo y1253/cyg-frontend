@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
-  MailOpen, Paperclip, Pencil, Printer, Reply, SendHorizonal, X,
+  Loader2, MailOpen, Paperclip, Pencil, Phone, Printer, Reply, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SearchInput } from '@/components/ui/SearchInput';
+import {
+  Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { UserAutocomplete } from './UserAutocomplete';
 import { InternalMessageRow } from './InternalMessageRow';
+import { InternalCallRow } from './InternalCallRow';
+import { InternalCallDetail } from './InternalCallDetail';
 import { useComposer, useComposerSignals } from '@/context/ComposerContext';
 import { EmailBodyFrame } from './EmailBodyFrame';
 import { Linkified } from './Linkified';
@@ -16,10 +24,23 @@ import { AttachmentPreview } from './AttachmentPreview';
 import { CompleteConfirmDialog } from './CompleteConfirmDialog';
 import { InlineComposerPanel } from './InlineComposerPanel';
 import { AdvancedSearchPanel } from './communications/AdvancedSearchPanel';
+import { clampSources } from './communications/inbox-clamp';
+import { showListSpinner } from './communications/inbox-loading';
+import {
+  INTERNAL_KIND_FILTER_LABELS,
+  getInternalItemTimestamp,
+  internalItemId,
+  isInternalKindFilter,
+  matchesInternalItem,
+  type InternalItem,
+  type InternalKindFilter,
+} from './communications/internal-inbox';
 import {
   EMPTY_FILTERS,
   filterKey,
   filterParams,
+  hasActiveFilters,
+  isStructuredSearch,
   type SearchFilters,
 } from './communications/search-filters';
 import {
@@ -34,6 +55,9 @@ import { RecipientDetails } from './RecipientDetails';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useInternalMessage } from '@/hooks/useInternalMessage';
 import { useInternalMessages } from '@/hooks/useInternalMessages';
+import { useInternalCalls, useInternalCallCounts } from '@/hooks/useInternalCalls';
+import { useInternalCallState } from '@/hooks/useInternalCallState';
+import { useStartInternalCall } from '@/hooks/useStartInternalCall';
 import { useInternalMessageThread } from '@/hooks/useInternalMessageThread';
 import { useInternalMessageState } from '@/hooks/useInternalMessageState';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
@@ -50,10 +74,11 @@ import type {
   InternalMessageDetail,
   InternalMessageSummary,
 } from '@/api/internalMessages';
+import type { InternalCall } from '@/api/internalCalls';
 
 interface Props {
   /**
-   * Messages is the visible tab. The component stays MOUNTED while hidden so an
+   * Communications is the visible tab. The component stays MOUNTED while hidden so an
    * open thread and a half-typed reply survive a tab switch — polling is gated on
    * this, not on mount.
    */
@@ -120,6 +145,7 @@ interface StoredUI {
   folder?: InternalFolder;
   openThreadId?: number | null;
   search?: string;
+  filter?: InternalKindFilter;
 }
 
 function getStoredUI(): StoredUI {
@@ -130,7 +156,19 @@ function getStoredUI(): StoredUI {
   }
 }
 
-export function InternalMessagesTab({ active }: Props) {
+/**
+ * The internal "Cyg Finance" workspace inbox — staff messages and staff-to-staff calls
+ * in ONE time-ordered list, the same contract a client company's Communications tab has
+ * for email, chat, calls and texts.
+ *
+ * It is deliberately still a separate implementation from `CommunicationsTab`: the two
+ * inboxes share their PURE rules (`clampSources`, `showListSpinner`, `formatEmailDate`,
+ * `CallSummaryPanel`) and nothing else, because a workspace has no mailbox, no provider,
+ * no phone number in either direction, and its read/completed state is per-USER rather
+ * than per-company. Folding the two together would mean carrying every one of those
+ * differences as a branch through `InboxView`.
+ */
+export function InternalCommunicationsTab({ active }: Props) {
   const { token, user } = useAuth();
   const { openInternal } = useComposer();
   const { internalSentAt } = useComposerSignals();
@@ -143,11 +181,28 @@ export function InternalMessagesTab({ active }: Props) {
   );
   const [banner, setBanner] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
-  // The message awaiting "mark complete" confirmation, mirroring the Communications
-  // tab. `fromDetail` closes the thread afterwards. null = no confirm dialog open.
+  // Which channels the list shows — the workspace's twin of the company tab's kind
+  // dropdown. Only two kinds here, so no `voicemail` pseudo-kind: an internal <Dial>
+  // has no <Record> fallthrough and therefore no voicemail to filter for.
+  const [filter, setFilter] = useState<InternalKindFilter>(
+    isInternalKindFilter(stored.filter) ? stored.filter : 'all',
+  );
+  // The open CALL, if any. Deliberately separate from `openThreadId` rather than one
+  // union: a call has no thread, no reply and no forward, so every piece of thread state
+  // below would need a "not for calls" branch. Exactly one can be set — `openCall` is
+  // cleared when a thread opens and vice versa.
+  const [openCall, setOpenCall] = useState<InternalCall | null>(null);
+  // The row awaiting "mark complete" confirmation, mirroring the Communications
+  // tab. `fromDetail` closes the open view afterwards. null = no confirm dialog open.
   const [completeTarget, setCompleteTarget] = useState<
-    { id: number; fromDetail?: boolean } | null
+    | { kind: 'message'; id: number; fromDetail?: boolean }
+    | { kind: 'call'; sid: string; fromDetail?: boolean }
+    | null
   >(null);
+  // "New call" — the dial dialog, lifted from the retired InternalCallsTab.
+  const [dialOpen, setDialOpen] = useState(false);
+  const [dialPicked, setDialPicked] = useState<number[]>([]);
+  const [dialError, setDialError] = useState<string | null>(null);
 
   // Jump to Sent once a compose window lands. Driven by a signal from the provider
   // rather than an `onSent` callback handed to it: a compose window outlives this
@@ -213,11 +268,26 @@ export function InternalMessagesTab({ active }: Props) {
     searchParams,
     filterKey(filters),
   );
+  // Calls are the second source of the merged inbox. They page on their own cursor, so
+  // the clamp below can tell whether either stream still has older rows to give.
+  //
+  // Not fetched at all in SENT: that is a mailbox-only folder and the server answers it
+  // with an empty page, so asking would be a round trip and a 15s poll for nothing. A
+  // DISABLED query reports `isLoading: false` in TanStack v5, which is what keeps the
+  // spinner check below honest without a special case.
+  const callQuery = useInternalCalls(folder, active && folder !== 'SENT');
+  const { data: callCounts } = useInternalCallCounts(active);
+  const callStateMutation = useInternalCallState();
+  const startCall = useStartInternalCall();
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
   // Compose fetches the directory itself now that it lives in the docked composer.
-  const { data: directory = [] } = useUserDirectory(forwardOpen || replyOpen);
+  // Also gated on the dial dialog now: "New call" picks its colleague from the very
+  // same directory the composer does, so a typo can never become a callee.
+  const { data: directory = [] } = useUserDirectory(
+    forwardOpen || replyOpen || dialOpen,
+  );
   const { data: uncompleted } = useInternalUncompletedCount();
   const { data: unread } = useInternalUnreadCount();
   const { lastInternalEventAt } = useNotifications();
@@ -225,6 +295,60 @@ export function InternalMessagesTab({ active }: Props) {
   const messages = useMemo(
     () => dedupeById(listQuery.data?.pages.flatMap((p) => p.messages) ?? []),
     [listQuery.data],
+  );
+  const calls = useMemo(
+    () => dedupeById(callQuery.data?.pages.flatMap((p) => p.calls) ?? []),
+    [callQuery.data],
+  );
+
+  const structuredSearch = isStructuredSearch(filters);
+
+  /**
+   * The one time-ordered list, messages and calls together.
+   *
+   * ── THE CLAMP ────────────────────────────────────────────────────────────────
+   * The two streams page independently, so at any moment they have loaded back to
+   * different points in time. Concatenating and sorting is correct at the top and wrong
+   * at the bottom, where the shallower stream's rows are simply missing — and scrolling
+   * then makes rows appear ABOVE ones already on screen. `clampSources` cuts the list at
+   * the newest "oldest-loaded" boundary among the streams that still have more; the
+   * shared implementation and the reasoning live in `communications/inbox-clamp.ts`.
+   *
+   * UNREAD / UNCOMPLETED skip the clamp — those folders mean to show every matching row
+   * so the list backs up the number on the chip — expressed as "nothing may pin" rather
+   * than a second code path, exactly as `useUnifiedInbox` does it.
+   */
+  const { visible: mergedItems, clampSource } = useMemo(() => {
+    const isFiltered = folder === 'UNREAD' || folder === 'UNCOMPLETED';
+    return clampSources<'message' | 'call', InternalItem>(
+      [
+        {
+          kind: 'message',
+          items: messages.map((data) => ({ kind: 'message', data })),
+          hasNext: !isFiltered && listQuery.hasNextPage,
+          enabled: true,
+        },
+        {
+          kind: 'call',
+          items: calls.map((data) => ({ kind: 'call', data })),
+          // SENT is mailbox-only: the server returns an empty call page there, and
+          // saying so here keeps a folder with no calls from pinning the list.
+          hasNext: !isFiltered && folder !== 'SENT' && callQuery.hasNextPage,
+          enabled: folder !== 'SENT',
+        },
+      ],
+      getInternalItemTimestamp,
+    );
+  }, [messages, calls, folder, listQuery.hasNextPage, callQuery.hasNextPage]);
+
+  // The kind dropdown and the call-side search, applied over the merged list. Messages
+  // were already searched server-side and are never re-tested — see matchesInternalItem.
+  const items = useMemo(
+    () =>
+      mergedItems.filter((it) =>
+        matchesInternalItem(it, { filter, search, structuredSearch }),
+      ),
+    [mergedItems, filter, search, structuredSearch],
   );
   // Memoised so the `?? []` fallback doesn't hand the expand-init effect a fresh
   // array on every render.
@@ -292,9 +416,9 @@ export function InternalMessagesTab({ active }: Props) {
   useEffect(() => {
     localStorage.setItem(
       UI_KEY,
-      JSON.stringify({ folder, openThreadId, search } satisfies StoredUI),
+      JSON.stringify({ folder, openThreadId, search, filter } satisfies StoredUI),
     );
-  }, [folder, openThreadId, search]);
+  }, [folder, openThreadId, search, filter]);
 
   // ── SSE: instant delivery ─────────────────────────────────────────────────
   // The connection itself is owned by NotificationProvider (one per tab, alive on
@@ -307,21 +431,31 @@ export function InternalMessagesTab({ active }: Props) {
   }, [lastInternalEventAt]);
 
   // ── Infinite scroll ───────────────────────────────────────────────────────
+  // Advances the source PINNING the clamp, not simply "messages". Paging the other one
+  // loads rows that stay clamped out of view, so the list would stop growing while the
+  // observer kept firing. Each successful page of the pinning source strictly lowers the
+  // cutoff, which is what makes this terminate.
   useEffect(() => {
     const el = loadMoreRef.current;
-    if (!el || openThreadId) return;
-    const io = new IntersectionObserver((entries) => {
-      if (
-        entries[0].isIntersecting &&
-        listQuery.hasNextPage &&
-        !listQuery.isFetchingNextPage
-      ) {
-        void listQuery.fetchNextPage();
+    if (!el || openThreadId || openCall) return;
+    const advance = () => {
+      const order =
+        clampSource === 'call'
+          ? ([callQuery, listQuery] as const)
+          : ([listQuery, callQuery] as const);
+      for (const q of order) {
+        if (q.hasNextPage && !q.isFetchingNextPage) {
+          void q.fetchNextPage();
+          return;
+        }
       }
+    };
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) advance();
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [openThreadId, listQuery]);
+  }, [openThreadId, openCall, clampSource, listQuery, callQuery]);
 
   // ── List scroll position ──────────────────────────────────────────────────
   // Opening a thread early-returns above the list, unmounting its scroll box and
@@ -349,6 +483,7 @@ export function InternalMessagesTab({ active }: Props) {
       }
       setOpenThreadId(message.threadId);
       setOpenMsgId(message.id);
+      setOpenCall(null);
       // Let the init effect re-run for the newly opened thread.
       threadInitKeyRef.current = null;
       setExpandedThreadIds(new Set());
@@ -368,6 +503,30 @@ export function InternalMessagesTab({ active }: Props) {
     [stateMutation],
   );
 
+  /**
+   * Open one call, full-tab, the same way a message opens its thread.
+   *
+   * Saves and re-arms the list scroll offset through the same two refs the thread uses,
+   * so coming Back lands on the row that was clicked either way.
+   */
+  const openCallRow = useCallback(
+    (call: InternalCall) => {
+      if (listScrollRef.current) {
+        listScrollTop.current = listScrollRef.current.scrollTop;
+        restoreListScroll.current = true;
+      }
+      setOpenCall(call);
+      setOpenThreadId(null);
+      setOpenMsgId(null);
+      // Opening marks it read — but only a call you RECEIVED has any read state; your
+      // own is read by definition and the server would no-op the write anyway.
+      if (!call.isRead && call.direction === 'inbound') {
+        callStateMutation.mutate({ sid: call.sid, action: 'read' });
+      }
+    },
+    [callStateMutation],
+  );
+
   const closeThread = () => {
     setOpenThreadId(null);
     setOpenMsgId(null);
@@ -383,10 +542,17 @@ export function InternalMessagesTab({ active }: Props) {
   // applies straight away. Same asymmetry as the Communications tab.
   const confirmComplete = () => {
     if (!completeTarget) return;
-    const { id, fromDetail } = completeTarget;
-    stateMutation.mutate({ id, action: 'complete' });
+    if (completeTarget.kind === 'message') {
+      stateMutation.mutate({ id: completeTarget.id, action: 'complete' });
+    } else {
+      callStateMutation.mutate({ sid: completeTarget.sid, action: 'complete' });
+    }
+    const { fromDetail } = completeTarget;
     setCompleteTarget(null);
-    if (fromDetail) closeThread();
+    if (fromDetail) {
+      closeThread();
+      setOpenCall(null);
+    }
   };
 
   const toggleComplete = (
@@ -396,7 +562,15 @@ export function InternalMessagesTab({ active }: Props) {
     if (message.isCompleted) {
       stateMutation.mutate({ id: message.id, action: 'uncomplete' });
     } else {
-      setCompleteTarget({ id: message.id, fromDetail });
+      setCompleteTarget({ kind: 'message', id: message.id, fromDetail });
+    }
+  };
+
+  const toggleCallComplete = (call: InternalCall, fromDetail?: boolean) => {
+    if (call.isCompleted) {
+      callStateMutation.mutate({ sid: call.sid, action: 'uncomplete' });
+    } else {
+      setCompleteTarget({ kind: 'call', sid: call.sid, fromDetail });
     }
   };
 
@@ -405,8 +579,69 @@ export function InternalMessagesTab({ active }: Props) {
       open={completeTarget !== null}
       onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
       onConfirm={confirmComplete}
-      description="Confirm you've completed this message. It stays in your inbox with a blue check."
+      description={
+        completeTarget?.kind === 'call'
+          ? "Confirm you've dealt with this call. It stays in your inbox with a blue check."
+          : "Confirm you've completed this message. It stays in your inbox with a blue check."
+      }
     />
+  );
+
+  // ── Placing a call ────────────────────────────────────────────────────────
+  // The overlay takes over the moment this succeeds — it is mounted above the router, so
+  // it follows the user anywhere for the rest of the call.
+  const placeCall = (calleeId: number | undefined) => {
+    if (!calleeId) return;
+    setDialError(null);
+    startCall.mutate(calleeId, {
+      onSuccess: () => {
+        setDialOpen(false);
+        setDialPicked([]);
+      },
+      onError: (e: unknown) =>
+        setDialError(e instanceof Error ? e.message : 'Could not place the call'),
+    });
+  };
+
+  const dialDialog = (
+    <Dialog open={dialOpen} onOpenChange={setDialOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Call a colleague</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <UserAutocomplete
+            // One person per call. Committing a second replaces the first, so the
+            // control cannot get into a state the API would reject.
+            value={dialPicked.slice(0, 1)}
+            onChange={(next) => setDialPicked(next.slice(-1))}
+            users={directory.filter((u) => u.id !== user?.id)}
+            placeholder="Type a name…"
+          />
+          {dialError && <p className="text-sm text-red-600">{dialError}</p>}
+          {!token && <p className="text-sm text-red-600">You are signed out.</p>}
+        </div>
+
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="ghost">Cancel</Button>
+          </DialogClose>
+          <Button
+            onClick={() => placeCall(dialPicked[0])}
+            disabled={!dialPicked.length || startCall.isPending}
+            className="bg-teal-600 text-white hover:bg-teal-500"
+          >
+            {startCall.isPending ? (
+              <Loader2 size={14} className="mr-1.5 animate-spin" />
+            ) : (
+              <Phone size={14} className="mr-1.5" />
+            )}
+            Call
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 
   // ── Reply / forward ───────────────────────────────────────────────────────
@@ -851,6 +1086,34 @@ export function InternalMessagesTab({ active }: Props) {
     );
   };
 
+  // ── Call detail view ──────────────────────────────────────────────────────
+  // Above the thread view and below every hook, so the two detail views are mutually
+  // exclusive by construction rather than by keeping two ids in step.
+  //
+  // The row is read off the LIVE list when it is still loaded, so an optimistic
+  // read/complete flip shows on the buttons immediately; `openCall` is the fallback for
+  // a row the poll has since paged away.
+  if (openCall) {
+    const live = calls.find((c) => c.sid === openCall.sid) ?? openCall;
+    return (
+      <div className="flex flex-col h-full">
+        <InternalCallDetail
+          call={live}
+          onClose={() => setOpenCall(null)}
+          onCallBack={(peerId) => placeCall(peerId)}
+          onMarkUnread={() =>
+            callStateMutation.mutate({ sid: live.sid, action: 'unread' })
+          }
+          onRequestComplete={() => toggleCallComplete(live, true)}
+          onUncomplete={() =>
+            callStateMutation.mutate({ sid: live.sid, action: 'uncomplete' })
+          }
+        />
+        {completeConfirmDialog}
+      </div>
+    );
+  }
+
   // ── Thread view ───────────────────────────────────────────────────────────
   if (openThreadId) {
     return (
@@ -1099,8 +1362,14 @@ export function InternalMessagesTab({ active }: Props) {
 
       <div className="flex items-center gap-2 flex-wrap pb-3">
         {FOLDERS.map(({ id, label, icon: Icon }) => {
+          // Both channels feed one chip, the same way the company tab adds the phone
+          // contribution onto the mailbox's.
           const count =
-            id === 'UNCOMPLETED' ? uncompleted?.count : id === 'UNREAD' ? unread?.count : 0;
+            id === 'UNCOMPLETED'
+              ? (uncompleted?.count ?? 0) + (callCounts?.uncompleted ?? 0)
+              : id === 'UNREAD'
+                ? (unread?.count ?? 0) + (callCounts?.unread ?? 0)
+                : 0;
           return (
             <button
               key={id}
@@ -1134,7 +1403,7 @@ export function InternalMessagesTab({ active }: Props) {
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search messages…"
+            placeholder="Search…"
             className="h-8 w-48"
           />
           {/* Size and mail-folder scope are hidden for this variant: internal
@@ -1144,6 +1413,37 @@ export function InternalMessagesTab({ active }: Props) {
             onApply={setFilters}
             variant="internal"
           />
+          <Select
+            items={INTERNAL_KIND_FILTER_LABELS}
+            value={filter}
+            onValueChange={(v) =>
+              setFilter(isInternalKindFilter(v) ? v : 'all')
+            }
+          >
+            <SelectTrigger size="sm" className="w-[120px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(INTERNAL_KIND_FILTER_LABELS).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => {
+              setDialError(null);
+              setDialOpen(true);
+            }}
+          >
+            <Phone size={14} /> New call
+          </Button>
           <Button
             size="sm"
             className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
@@ -1155,35 +1455,65 @@ export function InternalMessagesTab({ active }: Props) {
       </div>
 
       <div ref={listScrollRef} className="flex-1 overflow-y-auto rounded-lg border">
-        {listQuery.isLoading ? (
+        {/*
+          `showListSpinner`, not `messagesLoading || callsLoading`. The two sources
+          resolve independently, so ORing their flags replaces a list that has already
+          painted — the exact defect that helper documents for the company inbox, and it
+          arrived here the moment this tab gained a second source.
+        */}
+        {showListSpinner({
+          isInboxLike: true,
+          emailLoading: listQuery.isLoading,
+          chatLoading: false,
+          phoneLoading: folder !== 'SENT' && callQuery.isLoading,
+          loadedRowCount: items.length,
+        }) ? (
           <p className="text-sm text-muted-foreground p-6 text-center">Loading…</p>
-        ) : messages.length === 0 ? (
+        ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
             <Inbox size={32} />
             <p className="text-sm">
-              {search ? 'No messages match your search.' : 'No messages here yet.'}
+              {search || hasActiveFilters(filters) || filter !== 'all'
+                ? 'Nothing matches your search.'
+                : 'Nothing here yet.'}
             </p>
           </div>
         ) : (
           <>
-            {messages.map((m, idx) => (
-              <InternalMessageRow
-                key={m.id}
-                message={m}
-                sentView={folder === 'SENT'}
-                isFirst={idx === 0}
-                onOpen={() => openMessage(m)}
-                onToggleRead={() =>
-                  stateMutation.mutate({
-                    id: m.id,
-                    action: m.isRead ? 'unread' : 'read',
-                  })
-                }
-                onToggleComplete={() => toggleComplete(m)}
-              />
-            ))}
+            {items.map((item, idx) =>
+              item.kind === 'message' ? (
+                <InternalMessageRow
+                  key={internalItemId(item)}
+                  message={item.data}
+                  sentView={folder === 'SENT'}
+                  isFirst={idx === 0}
+                  onOpen={() => openMessage(item.data)}
+                  onToggleRead={() =>
+                    stateMutation.mutate({
+                      id: item.data.id,
+                      action: item.data.isRead ? 'unread' : 'read',
+                    })
+                  }
+                  onToggleComplete={() => toggleComplete(item.data)}
+                />
+              ) : (
+                <InternalCallRow
+                  key={internalItemId(item)}
+                  call={item.data}
+                  isFirst={idx === 0}
+                  onOpen={() => openCallRow(item.data)}
+                  onToggleRead={() =>
+                    callStateMutation.mutate({
+                      sid: item.data.sid,
+                      action: item.data.isRead ? 'unread' : 'read',
+                    })
+                  }
+                  onToggleComplete={() => toggleCallComplete(item.data)}
+                />
+              ),
+            )}
             <div ref={loadMoreRef} className="h-8" />
-            {listQuery.isFetchingNextPage && (
+            {(listQuery.isFetchingNextPage || callQuery.isFetchingNextPage) && (
               <p className="text-xs text-muted-foreground text-center pb-3">
                 Loading more…
               </p>
@@ -1195,6 +1525,7 @@ export function InternalMessagesTab({ active }: Props) {
       {/* "New message" is the app-level docked composer now (ComposerContext), so
           it survives leaving this tab. */}
       {completeConfirmDialog}
+      {dialDialog}
     </div>
   );
 }

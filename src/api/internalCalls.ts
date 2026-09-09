@@ -6,6 +6,14 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 /** One staff-to-staff call, from the viewing user's point of view. */
 export interface InternalCall {
+  /**
+   * Namespaced inbox id — `intcall:{sid}`, minted server-side.
+   *
+   * The workspace inbox keys rows and selection off ONE string space shared with
+   * internal messages (`intmsg:{id}`), so a numeric message id and a bare uuid sid can
+   * never collide inside a shared Set.
+   */
+  id: string;
   sid: string;
   /** Relative to YOU — the same call is outbound for one participant, inbound for the other. */
   direction: 'inbound' | 'outbound';
@@ -14,7 +22,33 @@ export interface InternalCall {
   durationSec: number | null;
   status: string | null;
   outcome: 'answered' | 'missed' | 'in-progress';
+  /**
+   * Both TRUE for a call you placed — the same rule `isOwn` applies to a message you
+   * sent. Only the receiving side is ever stateful.
+   */
+  isRead: boolean;
+  isCompleted: boolean;
+  /**
+   * There is audio worth offering a player for. There is deliberately no `hasVoicemail`
+   * twin: the internal `<Dial>` has no `<Record>` fallthrough, so an unanswered staff
+   * call leaves nothing behind.
+   */
+  hasRecording: boolean;
 }
+
+/** Same four names as `InternalFolder` — one folder chip drives both sources. */
+export type InternalCallFolder = 'INBOX' | 'UNCOMPLETED' | 'UNREAD' | 'SENT';
+
+export interface InternalCallListResult {
+  calls: InternalCall[];
+  nextCursor: number | null;
+}
+
+export type InternalCallStateAction =
+  | 'read'
+  | 'unread'
+  | 'complete'
+  | 'uncomplete';
 
 export interface InternalCallRecording {
   sid: string;
@@ -37,12 +71,48 @@ async function throwOnError(res: Response, fallback: string) {
 
 export async function fetchInternalCalls(
   token: string,
-): Promise<InternalCall[]> {
-  const res = await fetchWithAuth(token, `${API}/internal-calls`, {
+  folder: InternalCallFolder = 'INBOX',
+  cursor?: number | null,
+): Promise<InternalCallListResult> {
+  const params = new URLSearchParams({ folder });
+  if (cursor) params.set('cursor', String(cursor));
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls?${params.toString()}`,
+    { method: 'GET' },
+  );
+  await throwOnError(res, 'Failed to load your calls');
+  return res.json() as Promise<InternalCallListResult>;
+}
+
+export async function fetchInternalCallCounts(
+  token: string,
+): Promise<{ unread: number; uncompleted: number }> {
+  const res = await fetchWithAuth(token, `${API}/internal-calls/counts`, {
     method: 'GET',
   });
-  await throwOnError(res, 'Failed to load your calls');
-  return res.json() as Promise<InternalCall[]>;
+  await throwOnError(res, 'Failed to load your call counts');
+  return res.json() as Promise<{ unread: number; uncompleted: number }>;
+}
+
+/**
+ * Flip read / completed on one call. 204, empty body — mirrors
+ * `setInternalMessageState`.
+ *
+ * A no-op server-side for a call you placed: it already projects as read and completed,
+ * so there is nothing the request could have meant.
+ */
+export async function setInternalCallState(
+  token: string,
+  sid: string,
+  action: InternalCallStateAction,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/${action}`,
+    { method: 'PATCH' },
+  );
+  await throwOnError(res, 'Failed to update the call');
 }
 
 export async function startInternalCall(
