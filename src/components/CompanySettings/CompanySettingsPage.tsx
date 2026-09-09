@@ -17,6 +17,8 @@ import type { EffectivePhoneSettings } from '@/api/phoneSettings';
 import { PhoneHoursEditor } from './PhoneHoursEditor';
 import { MessageField } from './MessageField';
 import { AudioLibrary } from './AudioLibrary';
+import { SignatureDefaultsCard } from './SignatureDefaultsCard';
+import { SignatureImageLibrary } from './SignatureImageLibrary';
 import { usePhoneAudio } from '@/hooks/usePhoneAudio';
 import { SegmentedChoice } from './OverrideField';
 import { VOICEMAIL_SECONDS, voicemailLengthLabel } from '@/lib/voicemail';
@@ -427,6 +429,13 @@ export function CompanySettingsPage() {
       </div>
 
       <AudioLibrary />
+
+      {/* Email signature. Its own module, its own query and its own Save -- see the
+          docblock on SignatureDefaultsCard for why it does not join the sticky bar. */}
+      <div className="flex flex-col gap-5 mt-5">
+        <SignatureDefaultsCard />
+        <SignatureImageLibrary />
+      </div>
 
       {/* Sticky save bar: the three cards are one coherent change, saved together. */}
       <div className="fixed bottom-0 left-52 right-0 border-t bg-background/95 backdrop-blur px-6 py-3">

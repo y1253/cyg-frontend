@@ -62,6 +62,7 @@ import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { usePhoneNumber } from '@/hooks/usePhoneNumber';
 import { PhoneNumberSection } from './PhoneNumberSection';
 import { PhoneSettingsSection } from './PhoneSettingsSection';
+import { SignatureSettingsSection } from './SignatureSettingsSection';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
 import { useDisconnectGmail } from '@/hooks/useDisconnectGmail';
 import { fetchAuthUrl } from '@/api/gmail';
@@ -2993,6 +2994,12 @@ export function CompanyDetailPage() {
 
             {isAdmin && !isArchived && (
               <PhoneSettingsSection companyId={companyId} />
+            )}
+
+            {/* Same gate as the phone card: management tier, and not on an archived
+                company, where every other editable card is hidden too. */}
+            {isAdmin && !isArchived && (
+              <SignatureSettingsSection companyId={companyId} />
             )}
 
             {/* Assigned User (admin only) */}
