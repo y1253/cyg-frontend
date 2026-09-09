@@ -27,6 +27,7 @@ import { ThreadMessage } from './ThreadMessage';
 import { buildEmailThreadPrintHtml } from './print-html';
 import { FORWARD_BODY_BUDGET, useForwardDraft } from './useForwardDraft';
 import { useProviderDraft } from '@/hooks/useProviderDraft';
+import { DraftStatusLine } from '../DockedComposer';
 import type { CompleteTarget } from './types';
 
 type ReplyForm = { to: string[]; subject: string; body: string; cc: string[]; bcc: string[] };
@@ -339,13 +340,15 @@ export function EmailThreadView({
     setAttachmentNotice(notice);
   };
 
-  /**
-   * Cancel is the DESTRUCTIVE close — it deletes the saved draft from the mailbox.
-   * Back is the other one, and it deliberately keeps it (the hook flushes on
-   * unmount). Both used to be the same thing, because neither saved anything.
+/**
+   * Cancel CLOSES AND KEEPS, the same as pressing Back. It used to delete the draft
+   * from the mailbox, which meant Cancel and Back did opposite things and an
+   * abandoned reply vanished rather than landing in Drafts.
+   *
+   * Deleting is now only ever the trash button — see `discardReply`.
    */
   const closeReply = () => {
-    void replyDraft.discard();
+    void replyDraft.park();
     setReplyOpen(false);
     setReplyTarget(null);
     setReplyFiles([]);
@@ -387,6 +390,21 @@ export function EmailThreadView({
     setAttachmentNotice(null);
     setReplyOpen(true);
     replyPolish.reset();
+  };
+
+  /** The one path that removes a reply draft from the mailbox. */
+  const discardReply = () => {
+    void replyDraft.discard();
+    setReplyOpen(false);
+    setReplyTarget(null);
+    setReplyFiles([]);
+    setAttachmentNotice(null);
+    replyPolish.reset();
+  };
+
+  const discardForward = () => {
+    void forwardDraft.discard();
+    forward.close();
   };
 
   const handleOpenReply = (detail: EmailDetail) => openReply(detail, false);
@@ -729,6 +747,13 @@ export function EmailThreadView({
                 isSending={sendMutation.isPending}
                 onSend={handleSendReply}
                 onCancel={closeReply}
+                onDiscard={discardReply}
+                draftStatus={
+                  <DraftStatusLine
+                    status={replyDraft.status}
+                    lastSavedAt={replyDraft.lastSavedAt}
+                  />
+                }
               />
             )}
 
@@ -861,11 +886,17 @@ export function EmailThreadView({
                 isSending={sendMutation.isPending}
                 onSend={handleSendForward}
                 onCancel={() => {
-                  // Cancel is the destructive one, matching the reply's closeReply:
-                  // it removes the draft from the mailbox.
-                  void forwardDraft.discard();
+                  // Close and keep, matching the reply's closeReply and Back.
+                  void forwardDraft.park();
                   forward.close();
                 }}
+                onDiscard={discardForward}
+                draftStatus={
+                  <DraftStatusLine
+                    status={forwardDraft.status}
+                    lastSavedAt={forwardDraft.lastSavedAt}
+                  />
+                }
               />
             )}
           </div>

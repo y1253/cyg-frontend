@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import {
   createDraft,
@@ -151,6 +152,7 @@ export function useProviderDraft({
   seed?: DraftSeed;
 }) {
   const { token } = useAuth();
+  const qc = useQueryClient();
 
   const [draftId, setDraftId] = useState<string | null>(initialDraftId);
   const [status, setStatus] = useState<DraftStatus>('idle');
@@ -181,6 +183,9 @@ export function useProviderDraft({
   const closedRef = useRef(false);
   // Assigned during render, below, once `flush` exists.
   const flushRef = useRef<() => void>(() => undefined);
+  // Set by discard() only. park() closes the instance too, but its draft is meant to
+  // survive — so a create landing after a park must be kept, not deleted.
+  const discardedRef = useRef(false);
 
   // `dirty` is read through a ref for the same reason as the snapshot: `save` must
   // not be re-created on every keystroke, or the debounce effect below re-arms its
@@ -191,6 +196,28 @@ export function useProviderDraft({
   seedRef.current = seed;
   dirtyRef.current = dirty;
   filesRef.current = files;
+
+  /**
+   * ⚠️ One hook instance serves EVERY draft a surface opens.
+   *
+   * A reply form is a boolean flag on a long-lived `EmailThreadView`, not a keyed
+   * component, so closing a reply and opening another reuses this same instance.
+   * Without this reset the second reply inherits the first one's `closedRef` and is
+   * never written to the mailbox — silently, for as long as the thread stays open.
+   *
+   * Adjusted during render rather than in an effect (the pattern ComposerContext uses
+   * for its logout wipe) so a save can never run against the previous draft's state.
+   */
+  const prevEnabledRef = useRef(enabled);
+  if (enabled && !prevEnabledRef.current) {
+    closedRef.current = false;
+    discardedRef.current = false;
+    draftIdRef.current = initialDraftId;
+    savedKeyRef.current = null;
+    savedFileKeyRef.current = null;
+    pendingRef.current = false;
+  }
+  prevEnabledRef.current = enabled;
 
   const save = useCallback(async (): Promise<void> => {
     if (!token || !enabled || closedRef.current) return;
@@ -256,10 +283,19 @@ export function useProviderDraft({
             currentFiles.length > 0 ? currentFiles : undefined,
           );
 
-      // The window may have been sent or discarded while this was in flight. Its
-      // draft is already gone from the mailbox, so adopting the id now would leave
-      // the UI pointing at nothing.
-      if (closedRef.current) return;
+      // The window was closed while this write was in flight.
+      //
+      // For an UPDATE that is harmless — discard() already deleted the draft, or
+      // park() deliberately left it. For a CREATE it is not: discard() ran while
+      // `draftIdRef` was still null, so it had nothing to delete, and the draft this
+      // call just made would be orphaned in the user's mailbox with its id known to
+      // nobody. So delete what we just created.
+      if (closedRef.current) {
+        if (!id && ref.draftId && discardedRef.current) {
+          await deleteDraft(token, companyId, ref.draftId).catch(() => undefined);
+        }
+        return;
+      }
 
       draftIdRef.current = ref.draftId;
       setDraftId(ref.draftId);
@@ -267,6 +303,9 @@ export function useProviderDraft({
       savedFileKeyRef.current = fileKey;
       setStatus('saved');
       setLastSavedAt(Date.now());
+      // Without this a saved draft is invisible until the list's 15s poll — long
+      // enough that it reads as "nothing was saved".
+      void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
     } catch (err) {
       setStatus('error');
       setError(err instanceof Error ? err.message : "Couldn't save the draft.");
@@ -277,7 +316,7 @@ export function useProviderDraft({
         void save();
       }
     }
-  }, [companyId, enabled, initialHasAttachments, token]);
+  }, [companyId, enabled, initialHasAttachments, qc, token]);
 
   // Attachments are part of "has this draft changed" — removing the last file with
   // no other edit still has to be saved.
@@ -336,9 +375,26 @@ export function useProviderDraft({
     return () => window.removeEventListener('pagehide', onHide);
   }, [enabled, flush]);
 
-  /** Delete the draft from the mailbox — the composer was discarded. */
+  /**
+   * Close and KEEP: write anything outstanding, then stop touching this draft.
+   *
+   * The default for every dismissal — the composer's ×, an inline form's Cancel,
+   * swapping reply for forward. Marking the instance closed is not just tidiness: a
+   * save that was already in flight queues a retry, and without this the retry runs
+   * AFTER the caller has emptied the form and PATCHes a blank body over the draft it
+   * just parked.
+   */
+  const park = useCallback(async () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    await save();
+    closedRef.current = true;
+    pendingRef.current = false;
+  }, [save]);
+
+  /** Delete the draft from the mailbox — the user explicitly discarded it. */
   const discard = useCallback(async () => {
     closedRef.current = true;
+    discardedRef.current = true;
     if (timerRef.current) clearTimeout(timerRef.current);
     const id = draftIdRef.current;
     if (!id || !token) return;
@@ -350,7 +406,8 @@ export function useProviderDraft({
     }
     draftIdRef.current = null;
     setDraftId(null);
-  }, [companyId, token]);
+    void qc.invalidateQueries({ queryKey: ['gmail-emails', companyId] });
+  }, [companyId, qc, token]);
 
   /**
    * The draft became a sent message. Stop touching it — the id may now resolve to a
@@ -362,5 +419,5 @@ export function useProviderDraft({
     draftIdRef.current = null;
   }, []);
 
-  return { draftId, status, lastSavedAt, error, flush, discard, markSent };
+  return { draftId, status, lastSavedAt, error, flush, park, discard, markSent };
 }

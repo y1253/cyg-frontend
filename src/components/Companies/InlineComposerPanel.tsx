@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Forward, Send } from 'lucide-react';
+import { Forward, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,6 +59,8 @@ export function InlineComposerPanel({
   polishContext,
   polishDraftPlain,
   onPolishAccept,
+  onDiscard,
+  draftStatus,
   sendLabel,
   sendDisabled,
   isSending,
@@ -106,6 +108,14 @@ export function InlineComposerPanel({
   /** The user's own prose, signature and quoted block already stripped. */
   polishDraftPlain: string;
   onPolishAccept: (polished: string) => void;
+  /**
+   * Delete the saved draft from the mailbox. Absent for surfaces with no provider
+   * draft. Cancel deliberately does NOT do this — it closes and keeps, so that Cancel
+   * and pressing Back mean the same thing.
+   */
+  onDiscard?: () => void;
+  /** "Saving… / Saved to Drafts", rendered by the caller that owns the draft. */
+  draftStatus?: ReactNode;
   sendLabel: string;
   sendDisabled: boolean;
   isSending: boolean;
@@ -222,6 +232,20 @@ export function InlineComposerPanel({
         <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
+        {/* Only rendered for surfaces that back their draft with the provider, so
+            internal messages — which pass no onDiscard — are untouched. */}
+        {onDiscard && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1 text-muted-foreground hover:text-destructive"
+            title="Delete draft"
+            onClick={onDiscard}
+          >
+            <Trash2 size={13} />
+          </Button>
+        )}
+        {draftStatus}
       </div>
     </div>
   );

@@ -111,10 +111,17 @@ export async function updateDraft(
 ): Promise<DraftRef> {
   const url = `${base(companyId)}/companies/${companyId}/drafts/${encodeURIComponent(draftId)}`;
   if (!files) {
+    const body = JSON.stringify(payload);
     const res = await fetchWithAuth(token, url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body,
+      // A save fired from `pagehide` is racing the tab closing, and that is the exact
+      // case this feature exists for. `keepalive` lets it outlive the document.
+      // Its body cap is 64 KB across all in-flight keepalive requests, so a very long
+      // message opts out rather than failing outright -- it has been saved on the
+      // ordinary debounce anyway, and only the last few seconds are at stake.
+      ...(body.length < 60000 ? { keepalive: true } : {}),
     });
     if (!res.ok) throw new Error(await draftError(res, 'save'));
     return res.json() as Promise<DraftRef>;

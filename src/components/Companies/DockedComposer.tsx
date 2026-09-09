@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ChevronDown, ChevronUp, Maximize2, Paperclip, Send, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Paperclip,
+  Send,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,7 +37,10 @@ import { useResizable } from '@/hooks/useResizable';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useSendEmail } from '@/hooks/useSendEmail';
-import { useProviderDraft } from '@/hooks/useProviderDraft';
+import {
+  useProviderDraft,
+  type DraftStatus,
+} from '@/hooks/useProviderDraft';
 import { useAuth } from '@/context/AuthContext';
 import { emailAttachmentUrl } from '@/api/gmail';
 import { useUserDirectory } from '@/hooks/useUserDirectory';
@@ -168,6 +179,12 @@ export function DockedComposer({
   const registerDiscard = useCallback((fn: () => void) => {
     discardRef.current = fn;
   }, []);
+  // Closing KEEPS the draft, so the window has to be able to ask the body to write
+  // what is outstanding before it unmounts.
+  const parkRef = useRef<(() => void) | null>(null);
+  const registerPark = useCallback((fn: () => void) => {
+    parkRef.current = fn;
+  }, []);
 
   // Both kinds: internal messages get the same drag-and-paste flow as email.
   // `useFileDrop` returns onPaste alongside the drag handlers, so gating this
@@ -176,17 +193,29 @@ export function DockedComposer({
     onFiles: (incoming) => addFilesRef.current?.(incoming),
   });
 
-  // An email composer autosaves to the mailbox, so an accidental × is recoverable
-  // from the Drafts folder. The confirm stays because Discard is the destructive
-  // option — it deletes the draft from the mailbox — and because the internal
-  // composer still has no autosave at all.
+  /**
+   * × KEEPS the draft. An email composer is already saved in the mailbox, so there is
+   * nothing to confirm and nothing to lose — this is Gmail's behaviour, and the whole
+   * point of having a Drafts folder.
+   *
+   * It used to open the confirm below, whose only outcomes were "keep writing" and
+   * "discard" — so every close deleted the draft, including merely reopening one to
+   * re-read it. That is the bug this file's Drafts support was reported broken over.
+   *
+   * The internal composer keeps the confirm: it has no autosave, so closing it really
+   * does lose the message.
+   */
   const requestClose = () => {
+    if (draft.kind === 'email') {
+      parkRef.current?.();
+      handleClose();
+      return;
+    }
     if (dirty) setConfirmOpen(true);
     else handleClose();
   };
 
-  // Closing WITHOUT discarding must leave the draft in the mailbox: flushing is the
-  // body's job via its own effects, so there is nothing to do here but close.
+  // The only path that deletes: the trash button, then this confirm.
   const discardAndClose = () => {
     setConfirmOpen(false);
     discardRef.current?.();
@@ -205,6 +234,8 @@ export function DockedComposer({
         onSendingChange={handleSendingChange}
         onSent={handleClose}
         registerDiscard={registerDiscard}
+        registerPark={registerPark}
+        onRequestDiscard={() => setConfirmOpen(true)}
       />
     ) : (
       <InternalComposerBody
@@ -322,23 +353,21 @@ export function DockedComposer({
         <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
-              <DialogTitle>Discard this draft?</DialogTitle>
+              <DialogTitle>
+                {draft.kind === 'email' ? 'Delete this draft?' : 'Discard this draft?'}
+              </DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
               {draft.kind === 'email'
-                ? 'This will delete the draft from your mailbox. To keep it, close the window instead.'
+                ? 'It will be removed from your mailbox. Closing this window instead keeps it in Drafts.'
                 : "Your message hasn't been sent and won't be saved."}
             </p>
             <DialogFooter className="gap-2">
               <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>
                 Keep writing
               </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={discardAndClose}
-              >
-                Discard
+              <Button size="sm" variant="destructive" onClick={discardAndClose}>
+                {draft.kind === 'email' ? 'Delete' : 'Discard'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -349,6 +378,32 @@ export function DockedComposer({
 }
 
 // ── Email ────────────────────────────────────────────────────────────────────
+
+/**
+ * "Saving… / Saved" for a provider-backed draft.
+ *
+ * Worth the few lines: the feature was reported as "drafts are not being saved" while
+ * it was in fact saving correctly, because nothing on screen ever said so.
+ */
+export function DraftStatusLine({
+  status,
+  lastSavedAt,
+}: {
+  status: DraftStatus;
+  lastSavedAt: number | null;
+}) {
+  if (status === 'saving') {
+    return <span className="text-xs text-muted-foreground">Saving…</span>;
+  }
+  if (status === 'error') {
+    // Not "failed": the text is still in the composer and the next change retries.
+    return <span className="text-xs text-amber-600">Couldn't save — retrying</span>;
+  }
+  if (status === 'saved' || lastSavedAt) {
+    return <span className="text-xs text-muted-foreground">Saved to Drafts</span>;
+  }
+  return null;
+}
 
 /** "a@b.com, c@d.com" -> ['a@b.com', 'c@d.com']; absent -> []. */
 function splitAddrs(list: string | undefined): string[] {
@@ -365,6 +420,8 @@ function EmailComposerBody({
   openDraft,
   registerAddFiles,
   registerDiscard,
+  registerPark,
+  onRequestDiscard,
   onDirtyChange,
   onSendingChange,
   onSent,
@@ -378,6 +435,10 @@ function EmailComposerBody({
   registerAddFiles: (fn: (incoming: File[]) => void) => void;
   /** Lets the window's Discard button delete the saved draft from the mailbox. */
   registerDiscard: (fn: () => void) => void;
+  /** Lets the window's × write anything outstanding before the body unmounts. */
+  registerPark: (fn: () => void) => void;
+  /** Opens the window's delete confirmation. */
+  onRequestDiscard: () => void;
 }) {
   const { token } = useAuth();
 
@@ -523,6 +584,11 @@ function EmailComposerBody({
   useEffect(() => {
     registerDiscard(() => void discardProviderDraft());
   }, [registerDiscard, discardProviderDraft]);
+
+  const { park: parkProviderDraft } = providerDraft;
+  useEffect(() => {
+    registerPark(() => void parkProviderDraft());
+  }, [registerPark, parkProviderDraft]);
 
   useEffect(() => {
     onSendingChange(sendMutation.isPending);
@@ -672,6 +738,24 @@ function EmailComposerBody({
           polish={polish}
           draftPlain={draftPlain}
           context={polishContext}
+        />
+        {/* The ONLY control that deletes a draft from the mailbox. Hidden until there
+            is something to delete, so a brand-new empty composer isn't offering it. */}
+        {(providerDraft.draftId || dirty) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-muted-foreground hover:text-destructive"
+            title="Delete draft"
+            onClick={onRequestDiscard}
+          >
+            <Trash2 size={14} />
+          </Button>
+        )}
+        <DraftStatusLine
+          status={providerDraft.status}
+          lastSavedAt={providerDraft.lastSavedAt}
         />
         <Button
           size="sm"
