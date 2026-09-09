@@ -49,6 +49,7 @@ export function InboxRow({
   onToggleRead,
   onToggleComplete,
   onCall,
+  isDraft = false,
 }: {
   item: UnifiedItem;
   isFirst: boolean;
@@ -64,6 +65,15 @@ export function InboxRow({
   onToggleComplete: () => void;
   /** Dial a number straight from the row. Absent when no support number is attached. */
   onCall?: (number: string) => void;
+  /**
+   * This row is an unsent draft. A draft stays `kind: 'email'` on purpose — one
+   * event, one id, so bulk select and the rest of the row machinery keep working —
+   * so the Drafts folder passes this in rather than the row inferring it. It flips
+   * the row to show RECIPIENTS instead of the sender (a draft's sender is always the
+   * mailbox itself) and drops the read control, which means nothing on your own
+   * unsent mail.
+   */
+  isDraft?: boolean;
 }) {
   const style = KIND_STYLES[item.kind];
   const { isRead, isCompleted } = item.data;
@@ -92,8 +102,13 @@ export function InboxRow({
           <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
         </div>
       )}
-      {/* Read/unread toggle dot */}
-      <button
+      {/* Read/unread toggle dot. A draft is never unread and cannot be marked, so it
+          gets a spacer instead — keeping the avatar and text aligned with every other
+          row in the list. */}
+      {isDraft ? (
+        <span className="mt-1 shrink-0 w-5 h-5" aria-hidden />
+      ) : (
+        <button
         className="mt-1 shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
         title={isRead ? 'Mark as unread' : 'Mark as read'}
         onClick={(e) => {
@@ -105,9 +120,10 @@ export function InboxRow({
           className={[
             'w-2.5 h-2.5 rounded-full border-2 transition-colors',
             isRead ? 'bg-transparent border-muted-foreground/40' : style.dot,
-          ].join(' ')}
-        />
-      </button>
+            ].join(' ')}
+          />
+        </button>
+      )}
       {/* Avatar */}
       <div
         className={[
@@ -115,7 +131,7 @@ export function InboxRow({
           style.avatar,
         ].join(' ')}
       >
-        <RowAvatar item={item} />
+        <RowAvatar item={item} isDraft={isDraft} />
       </div>
       {/* Content */}
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
@@ -126,7 +142,7 @@ export function InboxRow({
               !isRead ? 'font-semibold text-foreground' : 'font-medium text-foreground/80',
             ].join(' ')}
           >
-            <RowTitle item={item} />
+            <RowTitle item={item} isDraft={isDraft} />
           </span>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* Small blue completed-check toggle. Not-complete → opens the confirm
@@ -181,10 +197,12 @@ function rowDate(item: UnifiedItem): string {
   }
 }
 
-function RowAvatar({ item }: { item: UnifiedItem }) {
+function RowAvatar({ item, isDraft }: { item: UnifiedItem; isDraft?: boolean }) {
   switch (item.kind) {
     case 'email':
-      return <>{senderInitial(item.data.from)}</>;
+      return (
+        <>{senderInitial(isDraft ? draftRecipients(item.data) : item.data.from)}</>
+      );
     case 'chat':
       return <>{(item.data.sender[0] ?? '?').toUpperCase()}</>;
     default: {
@@ -194,10 +212,30 @@ function RowAvatar({ item }: { item: UnifiedItem }) {
   }
 }
 
-function RowTitle({ item }: { item: UnifiedItem }) {
+/**
+ * Who a draft is addressed to, or ''.
+ *
+ * Every draft in the folder shares one `from` — the mailbox — so without this the
+ * list reads as the user's own address repeated and no row is distinguishable from
+ * any other.
+ */
+function draftRecipients(msg: EmailSummary): string {
+  return (msg.to ?? '').trim();
+}
+
+function RowTitle({ item, isDraft }: { item: UnifiedItem; isDraft?: boolean }) {
   switch (item.kind) {
-    case 'email':
+    case 'email': {
+      if (isDraft) {
+        const to = draftRecipients(item.data);
+        return to ? (
+          <>{displayName(to)}</>
+        ) : (
+          <span className="italic text-muted-foreground">(no recipients)</span>
+        );
+      }
       return <>{displayName(item.data.from)}</>;
+    }
     case 'chat':
       return (
         <>

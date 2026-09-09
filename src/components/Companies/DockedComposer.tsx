@@ -29,11 +29,18 @@ import { useResizable } from '@/hooks/useResizable';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { useGmailContacts } from '@/hooks/useGmailContacts';
 import { useSendEmail } from '@/hooks/useSendEmail';
+import { useProviderDraft } from '@/hooks/useProviderDraft';
+import { useAuth } from '@/context/AuthContext';
+import { emailAttachmentUrl } from '@/api/gmail';
 import { useUserDirectory } from '@/hooks/useUserDirectory';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
 import { slotRight } from './composer-layout';
 import { cn } from '@/lib/utils';
-import type { ComposerActions, Draft } from '@/context/ComposerContext';
+import type {
+  ComposerActions,
+  Draft,
+  OpenDraftSeed,
+} from '@/context/ComposerContext';
 
 const INTERNAL_POLISH_CONTEXT =
   'An internal message between colleagues at a bookkeeping firm.';
@@ -155,6 +162,13 @@ export function DockedComposer({
   const registerAddFiles = useCallback((fn: (incoming: File[]) => void) => {
     addFilesRef.current = fn;
   }, []);
+  // The body owns the saved draft's id, so the window asks IT to delete the draft
+  // rather than holding the id itself. Same shape, same reason, as registerAddFiles.
+  const discardRef = useRef<(() => void) | null>(null);
+  const registerDiscard = useCallback((fn: () => void) => {
+    discardRef.current = fn;
+  }, []);
+
   // Both kinds: internal messages get the same drag-and-paste flow as email.
   // `useFileDrop` returns onPaste alongside the drag handlers, so gating this
   // would silently cost pasting a screenshot as well as dropping a file.
@@ -162,11 +176,21 @@ export function DockedComposer({
     onFiles: (incoming) => addFilesRef.current?.(incoming),
   });
 
-  // There is no draft autosave, so an accidental × is unrecoverable — unlike Gmail,
-  // which is why an always-dismissable window needs the confirm.
+  // An email composer autosaves to the mailbox, so an accidental × is recoverable
+  // from the Drafts folder. The confirm stays because Discard is the destructive
+  // option — it deletes the draft from the mailbox — and because the internal
+  // composer still has no autosave at all.
   const requestClose = () => {
     if (dirty) setConfirmOpen(true);
     else handleClose();
+  };
+
+  // Closing WITHOUT discarding must leave the draft in the mailbox: flushing is the
+  // body's job via its own effects, so there is nothing to do here but close.
+  const discardAndClose = () => {
+    setConfirmOpen(false);
+    discardRef.current?.();
+    handleClose();
   };
 
   const body =
@@ -176,9 +200,11 @@ export function DockedComposer({
         companyId={draft.companyId}
         cloudLabel={draft.cloudLabel}
         signatureHtml={draft.signatureHtml}
+        openDraft={draft.openDraft}
         onDirtyChange={setDirty}
         onSendingChange={handleSendingChange}
         onSent={handleClose}
+        registerDiscard={registerDiscard}
       />
     ) : (
       <InternalComposerBody
@@ -299,7 +325,9 @@ export function DockedComposer({
               <DialogTitle>Discard this draft?</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Your message hasn't been sent and won't be saved.
+              {draft.kind === 'email'
+                ? 'This will delete the draft from your mailbox. To keep it, close the window instead.'
+                : "Your message hasn't been sent and won't be saved."}
             </p>
             <DialogFooter className="gap-2">
               <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>
@@ -308,10 +336,7 @@ export function DockedComposer({
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={() => {
-                  setConfirmOpen(false);
-                  handleClose();
-                }}
+                onClick={discardAndClose}
               >
                 Discard
               </Button>
@@ -325,11 +350,21 @@ export function DockedComposer({
 
 // ── Email ────────────────────────────────────────────────────────────────────
 
+/** "a@b.com, c@d.com" -> ['a@b.com', 'c@d.com']; absent -> []. */
+function splitAddrs(list: string | undefined): string[] {
+  return (list ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function EmailComposerBody({
   companyId,
   cloudLabel,
   signatureHtml,
+  openDraft,
   registerAddFiles,
+  registerDiscard,
   onDirtyChange,
   onSendingChange,
   onSent,
@@ -337,22 +372,93 @@ function EmailComposerBody({
   companyId: number;
   cloudLabel: string;
   signatureHtml?: string;
+  /** Set when this window was opened from an existing draft in the Drafts folder. */
+  openDraft?: OpenDraftSeed;
   /** Hands the window's drop target a way to add files to this list. */
   registerAddFiles: (fn: (incoming: File[]) => void) => void;
+  /** Lets the window's Discard button delete the saved draft from the mailbox. */
+  registerDiscard: (fn: () => void) => void;
 }) {
-  const [to, setTo] = useState<string[]>([]);
-  const [cc, setCc] = useState<string[]>([]);
-  const [bcc, setBcc] = useState<string[]>([]);
+  const { token } = useAuth();
+
+  // A composer opened from the Drafts folder starts with that draft's content;
+  // a fresh Compose starts empty. Lazy initialisers, so re-renders never reset the
+  // user's typing back to the seed.
+  const [to, setTo] = useState<string[]>(() => splitAddrs(openDraft?.to));
+  const [cc, setCc] = useState<string[]>(() => splitAddrs(openDraft?.cc));
+  const [bcc, setBcc] = useState<string[]>(() => splitAddrs(openDraft?.bcc));
   // Bcc is hidden until asked for, like Gmail — it's the rare case, and an always
   // visible third row costs height in a small docked window.
-  const [showBcc, setShowBcc] = useState(false);
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState(
-    signatureHtml ? `${SIGNATURE_LEAD}${signatureHtml}` : '',
-  );
+  const [showBcc, setShowBcc] = useState(() => splitAddrs(openDraft?.bcc).length > 0);
+  const [subject, setSubject] = useState(openDraft?.subject ?? '');
+  const [body, setBody] = useState(() => {
+    // A reopened draft already contains whatever signature it was saved with —
+    // seeding another one would append a second copy on every open.
+    if (openDraft) return openDraft.bodyHtml || '';
+    return signatureHtml ? `${SIGNATURE_LEAD}${signatureHtml}` : '';
+  });
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * A reopened draft's attachments live on the provider. Download them back into
+   * `File` objects so everything downstream — the chips, the Drive/OneDrive spill
+   * badge, the send — keeps working on the single model it always had.
+   *
+   * The same move `useForwardDraft` makes when it re-attaches a forwarded message's
+   * files, and for the same reason: one `File[]` is far easier to be right about than
+   * a local/remote union threaded through every composer.
+   */
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    const seed = openDraft;
+    if (!seed || hydratedRef.current) return;
+    const wanted = (seed.attachments ?? []).filter((a) => !a.isInline);
+    if (!seed.messageId || wanted.length === 0 || !token) {
+      hydratedRef.current = true;
+      return;
+    }
+    hydratedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fetched = await Promise.all(
+          wanted.map(async (att) => {
+            const res = await fetch(
+              emailAttachmentUrl(
+                token,
+                companyId,
+                seed.messageId as string,
+                att,
+                'attachment',
+              ),
+            );
+            if (!res.ok) throw new Error('Failed to fetch attachment');
+            return new File([await res.blob()], att.filename || 'attachment', {
+              type: att.mimeType,
+            });
+          }),
+        );
+        if (cancelled) return;
+        // Merge rather than replace: the user can attach something while these are
+        // still downloading, and it must not be thrown away.
+        setFiles((prev) => {
+          const have = new Set(prev.map((f) => `${f.name}:${f.size}`));
+          return [...fetched.filter((f) => !have.has(`${f.name}:${f.size}`)), ...prev];
+        });
+      } catch {
+        if (!cancelled) {
+          setAttachmentNotice(
+            "Couldn't load this draft's attachments — they're still on the draft, but you'll need to reopen it to send them.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openDraft, companyId, token]);
 
   // One path for every way a file arrives — the paperclip, a drop, a paste — so
   // the de-duping and per-file ceiling can't diverge between them.
@@ -378,14 +484,45 @@ function EmailComposerBody({
   // The seeded signature is not the user's own writing, so it doesn't count.
   const draftPlain = htmlToText(splitSignature(body).body);
 
+  const dirty =
+    draftPlain.trim().length > 0 ||
+    files.length > 0 ||
+    to.length > 0 ||
+    subject.trim().length > 0;
+
+  // The message is kept in the mailbox's own Drafts folder, so it survives a reload,
+  // a crash, and an accidental tab close — and shows up in the user's real mail
+  // client. Attachments are NOT part of the snapshot: they are still `File` objects
+  // held here until the send.
+  const providerDraft = useProviderDraft({
+    companyId,
+    dirty,
+    initialDraftId: openDraft?.draftId ?? null,
+    // A composer that was never opened from a draft has no provider-side
+    // attachments, and one that was knows exactly what it found.
+    initialHasAttachments: openDraft ? openDraft.attachments.length > 0 : false,
+    files,
+    snapshot: {
+      to: to.join(', '),
+      cc: cc.join(', '),
+      bcc: bcc.join(', '),
+      subject,
+      body: bodyText,
+      bodyHtml: wrapBodyFont(body),
+    },
+  });
+
   useEffect(() => {
-    onDirtyChange(
-      draftPlain.trim().length > 0 ||
-        files.length > 0 ||
-        to.length > 0 ||
-        subject.trim().length > 0,
-    );
-  }, [draftPlain, files.length, to.length, subject, onDirtyChange]);
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // Discarding must remove the draft from the MAILBOX, not just close the window —
+  // otherwise "Discard" leaves the message sitting in the user's Drafts folder, which
+  // is precisely what they just said they didn't want.
+  const { discard: discardProviderDraft } = providerDraft;
+  useEffect(() => {
+    registerDiscard(() => void discardProviderDraft());
+  }, [registerDiscard, discardProviderDraft]);
 
   useEffect(() => {
     onSendingChange(sendMutation.isPending);
@@ -402,6 +539,11 @@ function EmailComposerBody({
 
   const handleSend = () => {
     if (to.length === 0) return;
+    // Deliberately the ordinary send route, not sendDraft: the message may carry
+    // attachments that only exist here as `File` objects, and that route is the one
+    // that stages them, spills the oversized ones to Drive/OneDrive and reports
+    // upload progress. The saved draft is deleted once the send lands, so the user
+    // is never left with a copy of a message they already sent.
     sendMutation.mutate(
       {
         to: to.join(', '),
@@ -412,7 +554,12 @@ function EmailComposerBody({
         bcc: bcc.length ? bcc.join(', ') : undefined,
         files,
       },
-      { onSuccess: onSent },
+      {
+        onSuccess: () => {
+          void providerDraft.discard();
+          onSent();
+        },
+      },
     );
   };
 

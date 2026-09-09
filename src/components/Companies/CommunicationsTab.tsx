@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { useComposer } from '@/context/ComposerContext';
+import { fetchDraft } from '@/api/drafts';
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { useGmailEmails } from '@/hooks/useGmailEmails';
 import { useGmailChats } from '@/hooks/useGmailChats';
@@ -90,6 +91,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const qc = useQueryClient();
   const { notifyPush, suppressSource } = useNotifications();
   const { openEmail } = useComposer();
+  // Opening a draft is a fetch, so it can fail (an expired token, a draft deleted
+  // from the provider's own UI since the list was rendered).
+  const [draftOpenError, setDraftOpenError] = useState<string | null>(null);
 
   const [connecting, setConnecting] = useState(false);
   const [newEmailBanner, setNewEmailBanner] = useState(false);
@@ -187,9 +191,15 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       ? 'INBOX,UNREAD'
       : selectedLabel === 'UNCOMPLETED'
         ? 'UNCOMPLETED'
-        : isInboxLike
-          ? 'INBOX'
-          : selectedLabel;
+        : selectedLabel === 'DRAFTS'
+          // Gmail's label is DRAFT (singular) and it is what the server branches on
+          // to list through drafts.list rather than messages.list -- which is what
+          // makes each row carry its DRAFT id, the only id a draft write accepts.
+          // MicrosoftService.folderFor accepts either spelling.
+          ? 'DRAFT'
+          : isInboxLike
+            ? 'INBOX'
+            : selectedLabel;
   const searchPlaceholder = isInboxLike
     ? 'Search inbox…'
     : `Search ${(FOLDERS.find((f) => f.id === selectedLabel)?.label ?? '').toLowerCase()}…`;
@@ -566,8 +576,51 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     },
   };
 
+  /**
+   * Open a draft back into a compose window.
+   *
+   * A draft is not a conversation to read, so it must NOT go to EmailThreadView. Its
+   * content is fetched rather than taken from the row: the list carries a snippet and
+   * recipients, and reopening a draft has to restore the full body.
+   */
+  const openDraftRow = (draftId: string) => {
+    if (!account || !token) return;
+    void (async () => {
+      try {
+        const detail = await fetchDraft(token, companyId, draftId);
+        openEmail({
+          companyId,
+          fromAddress: accountAddress,
+          cloudLabel,
+          signatureHtml: account.signatureHtml,
+          openDraft: {
+            draftId: detail.draftId,
+            messageId: detail.messageId,
+            attachments: detail.attachments,
+            to: detail.to,
+            cc: detail.cc,
+            bcc: detail.bcc,
+            subject: detail.subject,
+            bodyHtml: detail.bodyHtml,
+            hasAttachments: detail.attachments.length > 0,
+          },
+        });
+      } catch (err) {
+        setDraftOpenError(
+          err instanceof Error ? err.message : "Couldn't open that draft.",
+        );
+      }
+    })();
+  };
+
   const handleOpenItem = (item: UnifiedItem) => {
     saveListScroll();
+    // A draft is your own unsent message: nothing to mark read, and the row opens a
+    // composer rather than a thread.
+    if (selectedLabel === 'DRAFTS' && item.kind === 'email') {
+      openDraftRow(item.data.id);
+      return;
+    }
     if (!item.data.isRead) stateMutations[item.kind].read(item.data.id);
     switch (item.kind) {
       case 'email':
@@ -871,6 +924,8 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         newEmailBanner={newEmailBanner}
         onDismissNewEmailBanner={() => setNewEmailBanner(false)}
         stateError={stateError}
+        draftError={draftOpenError}
+        onDismissDraftError={() => setDraftOpenError(null)}
         onResetStateError={resetStateErrors}
         onConnect={(prov) => void handleConnect(prov)}
         onRetryChats={() => void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] })}

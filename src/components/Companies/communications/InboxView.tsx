@@ -76,6 +76,8 @@ export function InboxView({
   newEmailBanner,
   onDismissNewEmailBanner,
   stateError,
+  draftError,
+  onDismissDraftError,
   onResetStateError,
   onConnect,
   onRetryChats,
@@ -139,6 +141,10 @@ export function InboxView({
   newEmailBanner: boolean;
   onDismissNewEmailBanner: () => void;
   stateError: string | null;
+  /** A draft row that could not be opened — deleted from the provider's own UI since
+   *  the list rendered, or an expired token. */
+  draftError: string | null;
+  onDismissDraftError: () => void;
   onResetStateError: () => void;
   onConnect: (provider: EmailProvider, kind?: 'work' | 'personal') => void;
   onRetryChats: () => void;
@@ -206,6 +212,9 @@ export function InboxView({
 
   // The email-only folders reuse the same row through a UnifiedItem wrapper.
   const folderItems: UnifiedItem[] = emailItems.map((data) => ({ kind: 'email', data }));
+  // Drafts are ordinary email rows fetched from the drafts folder — the row only
+  // needs to know so it can show recipients rather than the sender.
+  const isDrafts = selectedLabel === 'DRAFTS';
   const rows = isInboxLike ? visibleItems : folderItems;
 
   const renderRow = (item: UnifiedItem, idx: number) => (
@@ -225,6 +234,7 @@ export function InboxView({
         onToggleComplete({ kind: item.kind, id: item.data.id }, !!item.data.isCompleted)
       }
       onCall={onCall}
+      isDraft={isDrafts}
     />
   );
 
@@ -312,6 +322,24 @@ export function InboxView({
 
       {/* A read/complete toggle that failed. Without this the optimistic update is
           rolled back silently and the change just appears to "not stick". */}
+      {/* A draft row that wouldn't open. Kept separate from stateError because
+          nothing was being saved, and "Couldn't save that change" would be a lie. */}
+      {draftError && (
+        <MessageNotice
+          tone="destructive"
+          action={
+            <button
+              onClick={onDismissDraftError}
+              className="text-destructive/70 hover:text-destructive"
+            >
+              <X size={14} />
+            </button>
+          }
+        >
+          {draftError}
+        </MessageNotice>
+      )}
+
       {stateError && (
         <MessageNotice
           tone="destructive"
@@ -500,7 +528,9 @@ export function InboxView({
                       : 'Inbox is empty'
                 : activeSearch
                   ? 'No messages match your search'
-                  : 'No messages'}
+                  : isDrafts
+                    ? 'No drafts'
+                    : 'No messages'}
             </div>
           ) : (
             rows.map(renderRow)

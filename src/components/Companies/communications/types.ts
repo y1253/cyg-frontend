@@ -1,5 +1,5 @@
 import {
-  Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle,
+  Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle, FileText,
   MessageSquare, Phone, MessageSquareText, type LucideIcon,
 } from 'lucide-react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
@@ -9,6 +9,7 @@ export const FOLDERS = [
   { id: 'INBOX', label: 'Inbox', icon: Inbox },
   { id: 'UNCOMPLETED', label: 'Uncompleted', icon: Circle },
   { id: 'UNREAD', label: 'Unread', icon: Mail },
+  { id: 'DRAFTS', label: 'Drafts', icon: FileText },
   { id: 'SENT', label: 'Sent', icon: SendHorizonal },
   { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
   { id: 'TRASH', label: 'Trash', icon: Trash },
@@ -17,9 +18,13 @@ export const FOLDERS = [
 export const ALL_LABELS: string[] = FOLDERS.map((f) => f.id);
 
 /** Folders that need a connected mailbox. Phone-only companies never see them. */
-export const MAILBOX_ONLY_FOLDERS = ['SENT', 'SPAM', 'TRASH'];
+export const MAILBOX_ONLY_FOLDERS = ['DRAFTS', 'SENT', 'SPAM', 'TRASH'];
 
 // Tabs backed by the unified INBOX view (emails + chats + calls + texts).
+// DRAFTS is deliberately NOT one of them: it is an email-only folder like SENT, so it
+// renders straight off emailItems with no merge against chats and calls, no kind
+// filter, and no watermark clamp. Adding it here would time-sort unsent drafts in
+// among incoming calls and texts.
 // UNCOMPLETED and UNREAD fetch the same INBOX data and apply a forced
 // completion/read filter on top.
 export const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];

@@ -22,7 +22,9 @@ export function clearCompanyProvider(companyId: number): void {
 }
 
 // The per-company API base. 'MICROSOFT' → Graph-backed routes; anything else → Gmail.
-function base(companyId: number): string {
+// Exported so other per-company API modules (drafts.ts) route to the same provider
+// without each re-deriving it — there is one provider map and it lives here.
+export function base(companyId: number): string {
   return providerByCompany.get(companyId) === 'MICROSOFT'
     ? `${API}/microsoft`
     : `${API}/gmail`;
@@ -62,6 +64,9 @@ export interface EmailSummary {
   threadId: string;
   subject: string;
   from: string;
+  /** Recipients. Populated for DRAFTS rows only — a draft's `from` is always the
+   *  mailbox itself, so the recipient is what tells one draft row from another. */
+  to?: string;
   date: string;
   snippet: string;
   isRead: boolean;

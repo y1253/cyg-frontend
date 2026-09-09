@@ -26,6 +26,7 @@ import {
 import { ThreadMessage } from './ThreadMessage';
 import { buildEmailThreadPrintHtml } from './print-html';
 import { FORWARD_BODY_BUDGET, useForwardDraft } from './useForwardDraft';
+import { useProviderDraft } from '@/hooks/useProviderDraft';
 import type { CompleteTarget } from './types';
 
 type ReplyForm = { to: string[]; subject: string; body: string; cc: string[]; bcc: string[] };
@@ -106,6 +107,49 @@ export function EmailThreadView({
   const replyPolish = useDraftPolish();
   const forwardPolish = useDraftPolish();
 
+  /**
+   * Reply and forward are kept in the mailbox's Drafts folder while they are being
+   * written.
+   *
+   * This view unmounts on Back, which used to destroy a half-written reply outright —
+   * a worse loss than the docked composer's, because nothing about it looked
+   * dismissable. `useProviderDraft` flushes on unmount, so Back now parks the reply
+   * in Drafts instead of deleting it.
+   *
+   * One hook per form, like `useDraftPolish` above and for the same reason: a shared
+   * one would write the forward's text into the reply's draft.
+   */
+  const replyDraft = useProviderDraft({
+    companyId,
+    enabled: replyOpen,
+    dirty:
+      htmlToText(splitSignature(replyForm.body).body).trim().length > 0 ||
+      replyForm.to.length > 0,
+    // A reply always starts fresh here, so the draft it creates has no
+    // provider-side attachments to protect until this composer puts some there.
+    initialHasAttachments: false,
+    files: replyFiles,
+    snapshot: {
+      to: replyForm.to.join(', '),
+      cc: replyForm.cc.join(', '),
+      bcc: replyForm.bcc.join(', '),
+      subject: replyForm.subject,
+      body: htmlToText(replyForm.body),
+      bodyHtml: wrapBodyFont(replyForm.body),
+    },
+    // Threading, fixed when the form opened. Gmail writes these into the raw MIME;
+    // Graph ignores them and uses `replyToMessageId` + `draftKind` to run createReply,
+    // which is the only way Outlook will set In-Reply-To/References at all.
+    seed: {
+      inReplyTo: replyTarget?.messageId || undefined,
+      references: replyTarget?.references || undefined,
+      threadId: replyTarget?.threadId || undefined,
+      replyToMessageId: replyTarget?.id || undefined,
+      draftKind: 'reply',
+    },
+  });
+
+
   const detailScrollRef = useRef<HTMLDivElement>(null);
   // Inline reply forms render below a (potentially tall) message/thread; scroll
   // them into view when opened so the user doesn't have to scroll down to reply.
@@ -141,6 +185,30 @@ export function EmailThreadView({
     signatureHtml: account.signatureHtml,
     threadEmails: emailThread?.messages ?? [],
     onResetPolish: () => forwardPolish.reset(),
+  });
+
+  const forwardDraft = useProviderDraft({
+    companyId,
+    enabled: forward.open,
+    dirty:
+      htmlToText(splitSignature(forward.form.body).body).trim().length > 0 ||
+      forward.form.to.length > 0,
+    initialHasAttachments: false,
+    files: forward.files,
+    snapshot: {
+      to: forward.form.to.join(', '),
+      cc: forward.form.cc.join(', '),
+      bcc: forward.form.bcc.join(', '),
+      subject: forward.form.subject,
+      body: htmlToText(forward.form.body),
+      bodyHtml: wrapBodyFont(forward.form.body),
+    },
+    seed: {
+      forwardedFrom: forward.source?.id,
+      forwardScope: forward.scope,
+      replyToMessageId: forward.source?.id,
+      draftKind: 'forward',
+    },
   });
   const { data: contacts } = useGmailContacts(companyId, replyOpen || forward.open);
 
@@ -271,7 +339,13 @@ export function EmailThreadView({
     setAttachmentNotice(notice);
   };
 
+  /**
+   * Cancel is the DESTRUCTIVE close — it deletes the saved draft from the mailbox.
+   * Back is the other one, and it deliberately keeps it (the hook flushes on
+   * unmount). Both used to be the same thing, because neither saved anything.
+   */
   const closeReply = () => {
+    void replyDraft.discard();
     setReplyOpen(false);
     setReplyTarget(null);
     setReplyFiles([]);
@@ -285,7 +359,11 @@ export function EmailThreadView({
    * on the original across to Cc.
    */
   const openReply = (detail: EmailDetail, all: boolean) => {
-    // Reply and forward share the same inline slot below the message.
+    // Reply and forward share the same inline slot below the message. Swapping one
+    // for the other is not a discard, so the half-written forward is FLUSHED to
+    // Drafts, not deleted — and it has to be flushed here, because `enabled` goes
+    // false with `forward.open` and the debounce would never fire again.
+    void forwardDraft.flush();
     forward.close();
     const recipients = replyAllRecipients(
       detail.from,
@@ -319,7 +397,9 @@ export function EmailThreadView({
     replyAllRecipients(detail.from, detail.to, detail.cc, accountAddress).cc.length > 0;
 
   const handleOpenForward = (detail: EmailDetail) => {
-    // Reply and forward share the same inline slot below the message.
+    // Reply and forward share the same inline slot below the message. Same rule as
+    // openReply: park the reply, don't delete it.
+    void replyDraft.flush();
     setReplyOpen(false);
     setReplyTarget(null);
     setReplyFiles([]);
@@ -386,6 +466,10 @@ export function EmailThreadView({
       },
       {
         onSuccess: () => {
+          // The message went out through the ordinary send route, so the parked draft
+          // is still a draft — delete it, or the user finds a copy of something they
+          // already sent sitting in Drafts.
+          void replyDraft.discard();
           setReplyOpen(false);
           setReplyTarget(null);
           setReplyForm({ to: [], subject: '', body: '', cc: [], bcc: [] });
@@ -417,7 +501,12 @@ export function EmailThreadView({
         forwardScope: forward.scope,
         files: forward.files,
       },
-      { onSuccess: forward.close },
+      {
+        onSuccess: () => {
+          void forwardDraft.discard();
+          forward.close();
+        },
+      },
     );
   };
 
@@ -771,7 +860,12 @@ export function EmailThreadView({
                 }
                 isSending={sendMutation.isPending}
                 onSend={handleSendForward}
-                onCancel={forward.close}
+                onCancel={() => {
+                  // Cancel is the destructive one, matching the reply's closeReply:
+                  // it removes the draft from the mailbox.
+                  void forwardDraft.discard();
+                  forward.close();
+                }}
               />
             )}
           </div>

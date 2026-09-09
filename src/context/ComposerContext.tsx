@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './AuthContext';
+import type { EmailAttachment } from '@/api/gmail';
 import { ComposerStack } from '@/components/Companies/ComposerStack';
 import {
   clampPos,
@@ -26,6 +27,24 @@ const CAP_NOTICE = 'You can have up to 3 compose windows open on a page.';
 
 let nextDraftId = 0;
 
+/** The content of a draft already in the mailbox, when the composer was opened
+ *  from the Drafts folder rather than from Compose. */
+export interface OpenDraftSeed {
+  draftId: string;
+  /** The message inside the draft — what the attachment download route addresses. */
+  messageId: string | null;
+  /** The draft's attachments, downloaded back into the composer when it opens. */
+  attachments: EmailAttachment[];
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  bodyHtml: string;
+  /** Whether the draft carries attachments. Lets the autosave tell the server it
+   *  need not re-read the draft to protect them — a whole request per save. */
+  hasAttachments: boolean;
+}
+
 /** A new outbound email, sent from one company's connected mailbox. */
 export interface EmailDraftSeed {
   companyId: number;
@@ -35,6 +54,8 @@ export interface EmailDraftSeed {
   /** "Drive" or "OneDrive", for the oversized-attachment badge. */
   cloudLabel: string;
   signatureHtml?: string;
+  /** Present only when reopening an existing draft. */
+  openDraft?: OpenDraftSeed;
 }
 
 interface DraftCommon {
@@ -124,10 +145,15 @@ function fitToViewport(list: Draft[], path: string, viewportWidth: number): Draf
  *
  * Navigating away no longer closes anything. A draft is simply not painted off its
  * own page — mounted, hidden, untouched — so walking to another company and back
- * returns every window exactly as it was left, attachments and all. That is also why
- * there is no autosave and no draft model: nothing is ever serialised because
- * nothing is ever destroyed. (A `File` could not be serialised anyway, which is why
- * a draft does not survive a page reload.)
+ * returns every window exactly as it was left, attachments and all.
+ *
+ * That is why this model carries only window CHROME and no content: an open window is
+ * never destroyed, so its text never has to be serialised to survive navigation.
+ *
+ * A page RELOAD is a different problem, and it is not solved here — the composer body
+ * writes its text to the mailbox's own Drafts folder (`useProviderDraft`), so it is
+ * the provider, not this context, that a reloaded draft comes back from. Attachments
+ * are still `File` objects held in the body until the send.
  */
 export function ComposerProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
