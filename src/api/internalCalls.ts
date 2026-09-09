@@ -1,5 +1,5 @@
 import { fetchWithAuth } from './client';
-import type { CallSummary } from './phone';
+import type { CallSummary, TransferResult, TransferStatus } from './phone';
 
 const API = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -159,7 +159,7 @@ export async function transferInternalCallBlind(
   token: string,
   sid: string,
   targetUserId: number,
-): Promise<{ transferredSid: string }> {
+): Promise<TransferResult> {
   const res = await fetchWithAuth(
     token,
     `${API}/internal-calls/${encodeURIComponent(sid)}/transfer/blind`,
@@ -170,5 +170,24 @@ export async function transferInternalCallBlind(
     },
   );
   await throwOnError(res, 'Could not transfer the call');
-  return res.json() as Promise<{ transferredSid: string }>;
+  return res.json() as Promise<TransferResult>;
+}
+
+/**
+ * How a transfer is going — polled by the card the transferring agent is watching.
+ *
+ * ⚠️ `sid` is the ROOT sid (`info.callSid`), NOT the `transferredSid` the POST returned.
+ * `assertParticipant` looks `InternalCall` up by the root, so the transferred leg 404s on
+ * exactly the half of transfers where the requester placed the call.
+ */
+export async function fetchInternalTransferStatus(
+  token: string,
+  sid: string,
+): Promise<TransferStatus> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/transfer-status`,
+  );
+  await throwOnError(res, 'Could not check the transfer');
+  return res.json() as Promise<TransferStatus>;
 }

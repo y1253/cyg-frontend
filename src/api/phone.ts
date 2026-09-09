@@ -509,7 +509,7 @@ export async function transferCallBlind(
   companyId: number,
   callSid: string,
   targetUserId: number,
-): Promise<{ transferredSid: string }> {
+): Promise<TransferResult> {
   const res = await fetchWithAuth(
     token,
     `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/transfer/blind`,
@@ -520,7 +520,47 @@ export async function transferCallBlind(
     },
   );
   if (!res.ok) throw await failure(res, 'Could not transfer the call');
-  return res.json() as Promise<{ transferredSid: string }>;
+  return res.json() as Promise<TransferResult>;
+}
+
+/**
+ * Where a blind transfer has got to.
+ *
+ * `ringing` -> `answered` is the happy path. `no-answer` is NOT the same as `ended`: the
+ * colleague let it ring out and the caller is in the company's voicemail, while the peer
+ * leg is still very much up.
+ */
+export type TransferState = 'ringing' | 'answered' | 'no-answer' | 'ended';
+
+export interface TransferResult {
+  /** The leg that was handed over. Informational — never post it back as a sid. */
+  transferredSid: string;
+  target: { id: number; name: string };
+}
+
+export interface TransferStatus {
+  state: TransferState;
+  targetName: string | null;
+}
+
+/**
+ * How a transfer is going — polled by the card the transferring agent is watching.
+ *
+ * ⚠️ `callSid` is the ROOT sid (`info.callSid`), NOT the `transferredSid` the POST
+ * returned. Every guard in the phone module runs on the root and leg sids are derived
+ * server-side; which leg this actually inspects is remembered there.
+ */
+export async function fetchTransferStatus(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<TransferStatus> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/transfer-status`,
+  );
+  if (!res.ok) throw await failure(res, 'Could not check the transfer');
+  return res.json() as Promise<TransferStatus>;
 }
 
 /**

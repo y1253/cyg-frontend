@@ -26,8 +26,13 @@ import {
   phoneEventsUrl,
   setCallHold,
   transferCallBlind,
+  fetchTransferStatus,
+  type TransferState,
 } from '@/api/phone';
-import { transferInternalCallBlind } from '@/api/internalCalls';
+import {
+  fetchInternalTransferStatus,
+  transferInternalCallBlind,
+} from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
@@ -115,12 +120,37 @@ export interface IncomingCallInfo {
   transferFrom?: { id: number; name: string };
 }
 
-export type CallPhase = 'idle' | 'ringing' | 'active';
+/**
+ * `'transferring'` is the agent's own state after handing a call over, while the
+ * colleague's phone rings.
+ *
+ * It is a real phase rather than a flag beside `'idle'` because it has to do the work of
+ * a phase: `tryPair` bails on anything but `'idle'` and the in-tab ringing banner is
+ * gated on `'idle'` too, so being in this phase is single-handedly what stops the
+ * transferring browser being rung by the very call it just gave away. (Every browser
+ * shares one SIP credential, so the transfer `<Dial><Sip>` forks an INVITE back to it.)
+ */
+export type CallPhase = 'idle' | 'ringing' | 'active' | 'transferring';
+
+/** What the transferring agent's card is showing. */
+export interface TransferView {
+  target: { id: number; name: string };
+  state: TransferState;
+  /** The leg that was handed over. Used to re-pair on take-back. */
+  transferredSid: string;
+}
 
 interface SoftphoneState {
   status: SoftphoneStatus;
   phase: CallPhase;
   info: IncomingCallInfo | null;
+  /** Non-null exactly while `phase === 'transferring'`. */
+  transfer: TransferView | null;
+  /**
+   * The transfer can still be pulled back: the colleague has not answered AND this
+   * browser is still holding its fork of the transfer `<Dial>`.
+   */
+  canTakeBack: boolean;
   muted: boolean;
   /**
    * The caller is on hold and hearing music (or silence, if none is configured).
@@ -165,11 +195,27 @@ interface SoftphoneActions {
    * that silently did nothing leaves the agent believing the client was handed over.
    *
    * The local leg is NOT torn down here: the server redirects the other party, which
-   * ends the bridge, and our own session then terminates on its own and runs `endCall`
-   * through the existing Terminated listener. Hanging up here first would tear the
-   * bridge down before the redirect landed and drop the caller into voicemail.
+   * ends the bridge, and our own session then terminates on its own. Hanging up here
+   * first would tear the bridge down before the redirect landed and drop the caller into
+   * voicemail.
+   *
+   * ⚠️ The phase moves to `'transferring'` BEFORE the request, not after it. The BYE and
+   * the transfer INVITE both travel the already-open SIP WebSocket while the browser is
+   * still awaiting this HTTP response, so setting it afterwards is reliably too late:
+   * the Terminated listener would run a full `endCall()`, throw the INVITE away, and
+   * unmount the overlay (and the picker inside it) mid-`await`. Rolled back to
+   * `'active'` if the request rejects.
    */
   blindTransfer: (targetUserId: number) => Promise<void>;
+  /**
+   * Pull a transfer back before the colleague picks up.
+   *
+   * No second redirect and no new endpoint: this browser is one of the forks of the
+   * transfer `<Dial><Sip>`, so it is already holding an answerable INVITE for the very
+   * call it handed over. Accepting it wins the fork and SignalWire cancels the
+   * colleague's branch.
+   */
+  takeBack: () => void;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -202,6 +248,24 @@ const EVENT_STALE_MS = 60_000;
  */
 const PAIR_WINDOW_MS = 33_000;
 
+/** How often the transferring agent's card asks whether the colleague picked up. */
+const TRANSFER_POLL_MS = 3_000;
+/**
+ * How long the card lingers on its final wording before clearing itself.
+ *
+ * Long enough to read "David Levy picked up" and know the hand-off worked; short enough
+ * that it is not sitting on the screen when the next call arrives.
+ */
+const TRANSFER_SETTLE_MS = 2_500;
+/**
+ * Backstop, just past PAIR_WINDOW_MS on purpose.
+ *
+ * At 33s the held fork is released, so take-back is gone and the card can no longer do
+ * anything for the agent. Outliving that would leave a card that only pretends to offer
+ * a choice.
+ */
+const TRANSFER_MAX_MS = 35_000;
+
 const log = (...args: unknown[]) => console.log('[softphone]', ...args);
 
 /**
@@ -227,8 +291,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
 
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
-  const [phase, setPhase] = useState<CallPhase>('idle');
-  const [info, setInfo] = useState<IncomingCallInfo | null>(null);
+  const [phase, setPhaseState] = useState<CallPhase>('idle');
+  const [info, setInfoState] = useState<IncomingCallInfo | null>(null);
+  const [transfer, setTransfer] = useState<TransferView | null>(null);
   const [muted, setMuted] = useState(false);
   const [held, setHeld] = useState(false);
   /** The real microphone track, parked here while hold music takes its place. */
@@ -252,17 +317,51 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const unpairedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  /**
+   * The fork of OUR OWN transfer's `<Dial><Sip>`, claimed once and never overwritten.
+   *
+   * Take-back cannot use `unpairedRef`: `onInvite` overwrites that unconditionally, so
+   * any unrelated inbound call arriving during the thirty-second transfer ring would
+   * replace it — and "Take it back" would then answer a stranger while labelling them
+   * with the transferred call's caller and company. Whether that happened would depend
+   * on timing, which is the worst way to find out.
+   */
+  const transferInviteRef = useRef<Invitation | null>(null);
+  const transferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   /** Read from callbacks without making them depend on it. */
   const tokenRef = useRef(token);
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
 
-  /** Current phase, readable from callbacks without making them a dependency. */
+  /**
+   * Current phase, readable from callbacks without making them a dependency.
+   *
+   * ⚠️ Written by `setPhase` below, NOT by an effect. It used to lag one render behind,
+   * which is invisible until something sets the phase and then immediately calls
+   * something guarded on the ref in the same tick — take-back does exactly that, and
+   * would have been a silent no-op.
+   */
   const phaseRef = useRef<CallPhase>('idle');
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
+  const setPhase = useCallback((next: CallPhase) => {
+    phaseRef.current = next;
+    setPhaseState(next);
+  }, []);
+
+  /** The PAIRED call. See `infoRef` below for why this is not `pendingRef`. */
+  const infoRef = useRef<IncomingCallInfo | null>(null);
+  const setInfo = useCallback((next: IncomingCallInfo | null) => {
+    infoRef.current = next;
+    setInfoState(next);
+  }, []);
+
+  const transferRef = useRef<TransferView | null>(null);
+  const setTransferBoth = useCallback((next: TransferView | null) => {
+    transferRef.current = next;
+    setTransfer(next);
+  }, []);
 
   // ── Media ─────────────────────────────────────────────────────────────────
   const attachRemoteAudio = useCallback((session: Session) => {
@@ -299,22 +398,42 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.muted = false;
   }, []);
 
-  const endCall = useCallback(() => {
+  /**
+   * Give up the MEDIA — microphone, hold music, remote audio, the session itself — while
+   * leaving the held invitations alone.
+   *
+   * Split out of `endCall` for one caller: a transfer. When the agent hands a call over,
+   * their own leg is hung up by the server and the session terminates, but the browser
+   * must keep holding its fork of the transfer `<Dial>` or "Take it back" has nothing to
+   * accept. Every other exit still wants the full reset.
+   *
+   * ⚠️ `teardownHold` reads `invitationRef.current` for its sender, so it must run BEFORE
+   * that ref is cleared or the microphone track leaks and the tab keeps its recording
+   * indicator lit.
+   */
+  const releaseMedia = useCallback(() => {
     stopRinging();
     teardownHold(audioSenderOf(invitationRef.current));
     setHeld(false);
     holdBusyRef.current = false;
-    clearTimeout(unpairedTimerRef.current);
-    unpairedRef.current = null;
-    setHasHeldInvite(false);
     invitationRef.current = null;
     pendingRef.current = null;
-    setPhase('idle');
-    setInfo(null);
     setMuted(false);
     setSeconds(0);
     if (audioRef.current) audioRef.current.srcObject = null;
   }, [teardownHold]);
+
+  const endCall = useCallback(() => {
+    releaseMedia();
+    clearTimeout(unpairedTimerRef.current);
+    clearTimeout(transferTimerRef.current);
+    unpairedRef.current = null;
+    transferInviteRef.current = null;
+    setHasHeldInvite(false);
+    setPhase('idle');
+    setInfo(null);
+    setTransferBoth(null);
+  }, [releaseMedia, setInfo, setPhase, setTransferBoth]);
 
   // ── Incoming calls ────────────────────────────────────────────────────────
   /**
@@ -381,13 +500,38 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setSeconds(0);
         attachRemoteAudio(invitation);
       }
-      if (state === SessionState.Terminated) endCall();
+      if (state === SessionState.Terminated) {
+        // The one place the two teardowns differ. During a transfer this BYE is the
+        // server hanging up our leg on purpose; the card must stay up and the held
+        // fork must survive, so only the media goes.
+        if (phaseRef.current === 'transferring') releaseMedia();
+        else endCall();
+      }
     });
-  }, [attachRemoteAudio, endCall]);
+  }, [attachRemoteAudio, endCall, releaseMedia, setInfo, setPhase]);
 
   const onInvite = useCallback(
     (invitation: Invitation) => {
       log('INVITE received');
+
+      // Claimed ONCE. While a transfer of ours is ringing, the first INVITE to arrive is
+      // its fork coming back to us — every browser shares one SIP credential — and it is
+      // the handle "Take it back" accepts. `unpairedRef` below is overwritten by every
+      // later INVITE, so it cannot serve: an unrelated call arriving mid-ring would make
+      // take-back answer a stranger under the transferred call's name.
+      if (phaseRef.current === 'transferring' && !transferInviteRef.current) {
+        transferInviteRef.current = invitation;
+        setHasHeldInvite(true);
+        invitation.stateChange.addListener((state) => {
+          if (state !== SessionState.Terminated) return;
+          if (transferInviteRef.current !== invitation) return;
+          // SignalWire cancelled our branch: the colleague answered, or it rang out.
+          transferInviteRef.current = null;
+          setHasHeldInvite(false);
+        });
+        return;
+      }
+
       // ALWAYS hold it, even with no context yet — it may still be on its way, and for
       // a whole company's worth of admins it never will: the call is somebody else's to
       // be shown, but any of them may still pick it up from that company's tab.
@@ -585,6 +729,65 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [phase]);
 
+  // ── "Has my colleague picked up yet?" ─────────────────────────────────────
+  /**
+   * A bare interval rather than a TanStack query, even though the provider sits inside
+   * QueryClientProvider. This feeds a state MACHINE — the card's wording, then `endCall`
+   * — not a render-time cache read, and the app-wide `retry` plus refetch-on-focus would
+   * turn one terminal answer into several `endCall()`s. Every other timer in this file
+   * is a bare interval for the same reason.
+   */
+  useEffect(() => {
+    if (phase !== 'transferring') return;
+    const tok = tokenRef.current;
+    const call = infoRef.current;
+    if (!tok || !call) return;
+
+    let stopped = false;
+    const settle = (next: TransferState) => {
+      if (stopped) return;
+      stopped = true;
+      setTransferBoth(
+        transferRef.current ? { ...transferRef.current, state: next } : null,
+      );
+      // The server's agent-leg hangup is best-effort and swallowed. When it failed,
+      // no BYE ever arrives and this session would linger until the media times out,
+      // so it is closed explicitly rather than waiting on a listener that may not fire.
+      const inv = invitationRef.current;
+      if (inv && inv.state === SessionState.Established) {
+        void inv.bye().catch(() => undefined);
+      }
+      transferTimerRef.current = setTimeout(endCall, TRANSFER_SETTLE_MS);
+    };
+
+    const tick = () => {
+      const view = transferRef.current;
+      if (stopped || !view) return;
+      const ask =
+        call.kind === 'internal'
+          ? fetchInternalTransferStatus(tok, call.callSid)
+          : fetchTransferStatus(tok, call.companyId, call.callSid);
+      void ask
+        .then(({ state }) => {
+          if (stopped || transferRef.current !== view) return;
+          if (state === 'ringing') return;
+          settle(state);
+        })
+        .catch(() => undefined);
+    };
+
+    const id = setInterval(tick, TRANSFER_POLL_MS);
+    tick();
+    // The backstop, capped just past PAIR_WINDOW_MS: once the held fork is released
+    // there is nothing left to take back and the card has nothing useful left to say.
+    const giveUp = setTimeout(() => settle('ended'), TRANSFER_MAX_MS);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      clearTimeout(giveUp);
+    };
+  }, [phase, endCall, setTransferBoth]);
+
   // ── Actions ───────────────────────────────────────────────────────────────
   const actions = useMemo<SoftphoneActions>(
     () => ({
@@ -612,21 +815,88 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         endCall();
       },
       blindTransfer: async (targetUserId: number) => {
-        const call = pendingRef.current;
+        // `infoRef`, NOT `pendingRef`. `pendingRef` is overwritten by every SSE frame and
+        // every /pending-call response, including ones for a call this browser is not on
+        // — so a ring for another company arriving mid-call would make this POST against
+        // that company's id and sid. `info` is the call we are actually paired with.
+        const call = infoRef.current;
         if (!token || !call) throw new Error('No call to transfer');
-        if (call.kind === 'internal') {
-          await transferInternalCallBlind(token, call.callSid, targetUserId);
-        } else {
-          await transferCallBlind(
-            token,
-            call.companyId,
-            call.callSid,
-            targetUserId,
-          );
+
+        // Optimistic, and it has to be: the BYE and the transfer fork travel the
+        // already-open SIP WebSocket while this request is still in flight, so a phase
+        // set after the await is reliably too late.
+        const previous = phaseRef.current;
+        setPhase('transferring');
+        try {
+          const result =
+            call.kind === 'internal'
+              ? await transferInternalCallBlind(
+                  token,
+                  call.callSid,
+                  targetUserId,
+                )
+              : await transferCallBlind(
+                  token,
+                  call.companyId,
+                  call.callSid,
+                  targetUserId,
+                );
+          setTransferBoth({
+            target: result.target,
+            state: 'ringing',
+            transferredSid: result.transferredSid,
+          });
+        } catch (err) {
+          setPhase(previous);
+          throw err;
         }
         // Deliberately no endCall() here. SignalWire tears the bridge down as a result
-        // of the redirect, our session goes Terminated, and the existing listener does
-        // the teardown — one path out of a call instead of two that can disagree.
+        // of the redirect, our session goes Terminated, and `releaseMedia` runs through
+        // the existing listener. The card is closed by the status poll instead.
+      },
+      takeBack: () => {
+        const invitation = transferInviteRef.current;
+        const call = infoRef.current;
+        const view = transferRef.current;
+        if (!invitation || !call || !view) return;
+
+        // The first real user gesture since the transfer, so audio can play again.
+        unlockAudio();
+        clearTimeout(transferTimerRef.current);
+        transferInviteRef.current = null;
+        setHasHeldInvite(false);
+        setTransferBoth(null);
+
+        // Re-pair through the normal path so `info` and `phase` are set by the same code
+        // that sets them for every other call. `callSid` becomes the transferred leg:
+        // on an inbound call it is the sid we already had, but on an outbound one the
+        // old root was our OWN leg and is now dead, so keeping it would break hold,
+        // hang-up and any second transfer.
+        unpairedRef.current = invitation;
+        pendingRef.current = {
+          ...call,
+          callSid: view.transferredSid,
+          at: Date.now(),
+          direction: 'inbound',
+          transferFrom: undefined,
+          // ⚠️ `token` MUST be dropped. `tryPair` compares it against the INVITE's
+          // X-Cyg-Call header, and a transfer deliberately carries none — so an internal
+          // call's original token would compare `'tok' !== null` and take-back would
+          // silently never pair. Company calls have no token and were never affected,
+          // which is exactly how this would have shipped unnoticed.
+          token: undefined,
+        };
+        setPhase('idle');
+        tryPair();
+        // Pairing an inbound call starts the ringtone; there is nothing to answer here.
+        stopRinging();
+        void invitationRef.current
+          ?.accept({
+            sessionDescriptionHandlerOptions: {
+              constraints: { audio: true, video: false },
+            },
+          })
+          .catch(() => endCall());
       },
       answerHeld: (call: IncomingCallInfo) => {
         // Unlock audio on this click, while it is still a real user gesture.
@@ -680,7 +950,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       toggleHold: () => {
         if (holdBusyRef.current) return;
         const sender = audioSenderOf(invitationRef.current);
-        const call = pendingRef.current;
+        // `infoRef`, not `pendingRef` — same bug as `blindTransfer` had. `pendingRef`
+        // holds the newest event this browser has SEEN, which during a ring for another
+        // company is that other company's call, and pausing its recording would be a
+        // write against a call the agent is not on.
+        const call = infoRef.current;
         if (!sender) return;
         holdBusyRef.current = true;
 
@@ -731,12 +1005,28 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         })();
       },
     }),
-    [endCall, teardownHold, token, tryPair],
+    // `setPhase` / `setTransferBoth` / `setInfo` are all identity-stable useCallbacks, so
+    // listing them keeps the linter honest without churning this memo — which must stay
+    // identity-stable, since a consumer that only wants the buttons re-renders on it.
+    [endCall, setPhase, setTransferBoth, teardownHold, token, tryPair],
   );
 
   const state = useMemo<SoftphoneState>(
-    () => ({ status, phase, info, muted, held, seconds, hasHeldInvite }),
-    [status, phase, info, muted, held, seconds, hasHeldInvite],
+    () => ({
+      status,
+      phase,
+      info,
+      transfer,
+      // Both halves matter: the colleague has not answered yet, AND our fork of the
+      // transfer <Dial> is still alive. The server can say the first; only the browser
+      // knows the second, and without it the button would offer a dead session.
+      canTakeBack: transfer?.state === 'ringing' && hasHeldInvite,
+      muted,
+      held,
+      seconds,
+      hasHeldInvite,
+    }),
+    [status, phase, info, transfer, muted, held, seconds, hasHeldInvite],
   );
 
   return (
