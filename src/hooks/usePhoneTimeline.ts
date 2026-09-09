@@ -25,6 +25,11 @@ export function usePhoneTimeline(
       last.hasMore ? (last.nextCursor ?? undefined) : undefined,
     enabled: !!token && !!companyId && hasNumber && active,
     refetchInterval: active ? 15000 : false,
+    // Under the 15s poll interval, so polling is unaffected — this only stops the
+    // OTHER refetch trigger: at staleTime 0 every window focus and remount refetched
+    // EVERY loaded page (TanStack refetches an infinite query's whole page array),
+    // which after a few pages is the dominant request source.
+    staleTime: 10_000,
     // Leaving the tab for longer than the default 5-minute gcTime threw the loaded pages
     // away, so coming back re-entered the cold path and the list had nothing to show.
     gcTime: 30 * 60_000,

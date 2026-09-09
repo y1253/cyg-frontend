@@ -85,14 +85,28 @@ export function useUnifiedInbox({
   detailOpenKey: string | null;
 }) {
   // Flattened, de-duped items across all loaded pages.
-  const emailItems: EmailSummary[] = dedupeById(
-    (emailQuery.data?.pages ?? []).flatMap((p) => p.messages),
+  //
+  // MEMOISED on the pages array, which matters for more than the CPU: these used
+  // to run in the render body, so each produced a new array identity every
+  // render, which is why `sources` below had to key its deps on `.length`. That
+  // was a latent bug — a poll returning the same ids with a flipped `isRead`
+  // changed no length and so rebuilt nothing. Stable identities let `sources`
+  // depend on the arrays themselves, which is both cheaper and correct.
+  const emailPages = emailQuery.data?.pages;
+  const chatPages = chatQuery.data?.pages;
+  const phonePages = phoneQuery.data?.pages;
+
+  const emailItems: EmailSummary[] = useMemo(
+    () => dedupeById((emailPages ?? []).flatMap((p) => p.messages)),
+    [emailPages],
   );
-  const chatItems: ChatInboxMessage[] = dedupeById(
-    (chatQuery.data?.pages ?? []).flatMap((p) => p.messages),
+  const chatItems: ChatInboxMessage[] = useMemo(
+    () => dedupeById((chatPages ?? []).flatMap((p) => p.messages)),
+    [chatPages],
   );
-  const phoneItems: PhoneItem[] = dedupeById(
-    (phoneQuery.data?.pages ?? []).flatMap((p) => p.items),
+  const phoneItems: PhoneItem[] = useMemo(
+    () => dedupeById((phonePages ?? []).flatMap((p) => p.items)),
+    [phonePages],
   );
 
   const emailHasNext = emailQuery.hasNextPage;
@@ -139,9 +153,14 @@ export function useUnifiedInbox({
         enabled: phoneEnabled,
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The item arrays are memoised above, so these are stable identities that
+    // change exactly when the CONTENT changes — no longer `.length`, which could
+    // not see a same-length page whose read state had flipped.
+    //
+    // No eslint-disable here any more, and that is the proof the change was real:
+    // the list this hook needs is now the list exhaustive-deps agrees with.
     [
-      emailItems.length, chatItems.length, phoneItems.length,
+      emailItems, chatItems, phoneItems,
       emailHasNext, chatHasNext, phoneHasNext,
       emailFetchingNext, chatFetchingNext, phoneFetchingNext,
       phoneEnabled, emailQuery, chatQuery, phoneQuery,
@@ -159,9 +178,18 @@ export function useUnifiedInbox({
       return { visible: [] as UnifiedItem[], hiddenCount: 0, clampSource: null as SourceKind | null };
 
     const active = sources.filter((s) => s.enabled);
-    const merged = active
-      .flatMap((s) => s.items)
-      .sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a));
+    // Timestamp ONCE per item, then sort on the number.
+    //
+    // The comparator used to call `getItemTimestamp` on both operands, so every
+    // one of the ~n log n comparisons re-parsed two date strings. The same
+    // numbers are reused by the tail scan and the cutoff filter below, which
+    // also retires the `Math.min(...spread)` those used — a stack-overflow
+    // hazard bounded only by the auto-fill page cap.
+    const stamped = active.flatMap((s) =>
+      s.items.map((item) => ({ ts: getItemTimestamp(item), item })),
+    );
+    stamped.sort((a, b) => b.ts - a.ts);
+    const merged = stamped.map((e) => e.item);
 
     // Filtered folders (UNREAD/UNCOMPLETED) intend to show EVERY matching row so the
     // list backs up the badge, so skip the clamp — it would hide already-loaded matches
@@ -171,8 +199,16 @@ export function useUnifiedInbox({
       return { visible: merged, hiddenCount: 0, clampSource: null as SourceKind | null };
 
     // True oldest-loaded timestamp of a source (arrays aren't globally sorted).
-    const minTs = (arr: UnifiedItem[]) =>
-      arr.length ? Math.min(...arr.map(getItemTimestamp)) : -Infinity;
+    // A fold rather than `Math.min(...spread)`: same answer, no argument-count
+    // ceiling, and it reuses the timestamps computed above.
+    const minTs = (arr: UnifiedItem[]) => {
+      let min = Infinity;
+      for (const it of arr) {
+        const ts = getItemTimestamp(it);
+        if (ts < min) min = ts;
+      }
+      return arr.length ? min : -Infinity;
+    };
     // A source that is exhausted can never reveal older rows, so it cannot pin.
     const tails = active.map((s) => ({
       kind: s.kind,
@@ -184,7 +220,7 @@ export function useUnifiedInbox({
     const visible =
       cutoff === -Infinity
         ? merged
-        : merged.filter((it) => getItemTimestamp(it) >= cutoff);
+        : stamped.filter((e) => e.ts >= cutoff).map((e) => e.item);
     // STRICT `>` keeps the FIRST maximum, which with email first in `sources`
     // reproduces the original two-source tie-break. `>=` would flip it and silently
     // change which stream advances.
@@ -273,26 +309,36 @@ export function useUnifiedInbox({
   // Apply the kind/state filter dropdown over the merged inbox. Search itself is
   // already applied server-side (Gmail `q` for email, text match for chat) — phone has
   // no server-side search at all, which the caller handles by not passing it one.
-  const visibleItems = unifiedItems.filter((it) => {
-    // Not `it.kind !== filter`: 'voicemail' is a pseudo-kind whose rows are still
-    // `kind: 'call'`. See matchesKindFilter.
-    if (!matchesKindFilter(it, filter)) return false;
-    // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
-    if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
-    if (selectedLabel === 'UNREAD' && it.data.isRead) return false;
-    return true;
-  });
+  // Memoised: this is a prop into InboxView, so a fresh array identity every
+  // render defeats anything downstream that tries to skip work.
+  const visibleItems = useMemo(
+    () =>
+      unifiedItems.filter((it) => {
+        // Not `it.kind !== filter`: 'voicemail' is a pseudo-kind whose rows are
+        // still `kind: 'call'`. See matchesKindFilter.
+        if (!matchesKindFilter(it, filter)) return false;
+        // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
+        if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
+        if (selectedLabel === 'UNREAD' && it.data.isRead) return false;
+        return true;
+      }),
+    [unifiedItems, filter, selectedLabel],
+  );
 
   // Filtered folders show EVERY matching row so the list backs up the badge count.
   // Count matches across the whole loaded set (ignore the kind dropdown — the badge
   // counts every channel regardless) and auto-load pages until we reach the total.
-  const matchedCount = unifiedItems.filter((it) =>
-    selectedLabel === 'UNREAD'
-      ? !it.data.isRead
-      : selectedLabel === 'UNCOMPLETED'
-        ? !it.data.isCompleted
-        : false,
-  ).length;
+  const matchedCount = useMemo(
+    () =>
+      unifiedItems.filter((it) =>
+        selectedLabel === 'UNREAD'
+          ? !it.data.isRead
+          : selectedLabel === 'UNCOMPLETED'
+            ? !it.data.isCompleted
+            : false,
+      ).length,
+    [unifiedItems, selectedLabel],
+  );
 
   // Drive pagination to completion so the user never has to scroll to make the list
   // match the badge. Runs only in a filtered folder with no active search (the badge

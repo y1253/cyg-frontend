@@ -16,6 +16,7 @@ import { useMarkChatComplete } from '@/hooks/useMarkChatComplete';
 import { useMarkChatUncomplete } from '@/hooks/useMarkChatUncomplete';
 import { useGmailUnreadCount } from '@/hooks/useGmailUnreadCount';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
+import { useCompany } from '@/hooks/useCompany';
 import { usePhoneNumber } from '@/hooks/usePhoneNumber';
 import { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { usePhoneCounts } from '@/hooks/usePhoneCounts';
@@ -231,8 +232,26 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // Phone lives beside the mailbox, not inside it: a company can have a support
   // number and no mailbox, or the reverse. `hasNumber` gates the query so a company
   // without one never pays for a request that can only ever return an empty page.
+  /**
+   * The support number, WITHOUT waiting a round trip to learn it.
+   *
+   * `usePhoneTimeline` and `usePhoneCounts` are gated on this, so while
+   * `usePhoneNumber` was in flight the phone source sat disabled and only began
+   * loading once it answered — a serialized hop in front of the request that
+   * matters, and the reason phone rows always arrived last on a cold open.
+   *
+   * `Company.supportNumber` is a server-written MIRROR of the active
+   * SupportNumber row, and the parent page has already loaded the company, so
+   * this is a cache read costing nothing. The authoritative row still wins the
+   * moment it lands — `undefined` means "not answered yet", which is what
+   * distinguishes it from a company that genuinely has no number.
+   */
+  const { data: company } = useCompany(companyId);
   const { data: supportNumberRow } = usePhoneNumber(companyId);
-  const supportNumber = supportNumberRow?.phoneNumber ?? null;
+  const supportNumber =
+    supportNumberRow !== undefined
+      ? (supportNumberRow?.phoneNumber ?? null)
+      : (company?.supportNumber ?? null);
   const phoneQuery = usePhoneTimeline(companyId, !!supportNumber, active);
   const { data: phoneCountData } = usePhoneCounts(companyId, !!supportNumber, active);
 

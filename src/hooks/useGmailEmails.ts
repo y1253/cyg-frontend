@@ -25,5 +25,10 @@ export function useGmailEmails(
     // the moment the user comes back.
     enabled: !!token && !!companyId && active,
     refetchInterval: active ? 15000 : false,
+    // Under the 15s poll interval, so polling is unaffected — this only stops the
+    // OTHER refetch trigger: at staleTime 0 every window focus and remount refetched
+    // EVERY loaded page (TanStack refetches an infinite query's whole page array),
+    // which after a few pages is the dominant request source.
+    staleTime: 10_000,
   });
 }
