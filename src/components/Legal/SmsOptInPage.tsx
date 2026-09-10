@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { LegalPlaceholder } from './LegalPlaceholder';
 
 /**
  * The public SMS opt-in page, published for A2P 10DLC campaign registration.
@@ -56,7 +55,7 @@ export function SmsOptInPage() {
               About this program
             </h2>
             <p>
-              CYG Finance (<LegalPlaceholder>LEGAL ENTITY NAME</LegalPlaceholder>) is a
+              CYG Finance is a
               bookkeeping and accounting firm. We send text messages to the clients whose
               books we keep, at the mobile number they give us, so that routine
               bookkeeping matters can be handled without a phone call.
@@ -130,7 +129,7 @@ export function SmsOptInPage() {
               >
                 chaim@cygfinance.com
               </a>{' '}
-              or <LegalPlaceholder>SUPPORT PHONE</LegalPlaceholder>.
+              or <a href="tel:+18552943462" className="text-[#3BBFB4] underline">855-294-3462</a>.
             </p>
             <p className="mt-3">
               Carriers are not liable for delayed or undelivered messages.
@@ -227,9 +226,9 @@ export function SmsOptInPage() {
             <p>
               CYG Finance
               <br />
-              <LegalPlaceholder>LEGAL ENTITY NAME</LegalPlaceholder>
+              867 McEachran Avenue
               <br />
-              <LegalPlaceholder>MAILING ADDRESS</LegalPlaceholder>
+              Outremont, QC H2V 3C9, Canada
               <br />
               <a
                 href="mailto:chaim@cygfinance.com"
@@ -238,7 +237,7 @@ export function SmsOptInPage() {
                 chaim@cygfinance.com
               </a>
               <br />
-              <LegalPlaceholder>SUPPORT PHONE</LegalPlaceholder>
+              <a href="tel:+18552943462" className="text-[#3BBFB4] underline">855-294-3462</a>
             </p>
           </section>
         </div>

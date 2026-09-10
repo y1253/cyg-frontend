@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { LegalPlaceholder } from './LegalPlaceholder';
 
 export function PrivacyPage() {
   return (
@@ -247,11 +246,11 @@ export function PrivacyPage() {
             <p className="mt-3">
               CYG Finance
               <br />
-              <LegalPlaceholder>LEGAL ENTITY NAME</LegalPlaceholder>
+              867 McEachran Avenue
               <br />
-              <LegalPlaceholder>MAILING ADDRESS</LegalPlaceholder>
+              Outremont, QC H2V 3C9, Canada
               <br />
-              <LegalPlaceholder>SUPPORT PHONE</LegalPlaceholder>
+              <a href="tel:+18552943462" className="text-[#3BBFB4] underline">855-294-3462</a>
             </p>
           </section>
         </div>
