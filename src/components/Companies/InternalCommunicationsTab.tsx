@@ -290,7 +290,8 @@ export function InternalCommunicationsTab({ active }: Props) {
   );
   const { data: uncompleted } = useInternalUncompletedCount();
   const { data: unread } = useInternalUnreadCount();
-  const { lastInternalEventAt } = useNotifications();
+  const { lastInternalEventAt, pendingOpen, clearPendingOpen } =
+    useNotifications();
 
   const messages = useMemo(
     () => dedupeById(listQuery.data?.pages.flatMap((p) => p.messages) ?? []),
@@ -526,6 +527,52 @@ export function InternalCommunicationsTab({ active }: Props) {
     },
     [callStateMutation],
   );
+
+  // ── Opening one item from the notification bell ─────────────────────────────
+  // Two effects, because the two kinds resolve differently. A message carries everything
+  // needed to open it; a call does not — there is no GET /internal-calls/:sid, and
+  // `openCallRow` wants a whole `InternalCall`. Rather than bloat the feed DTO with a
+  // synthetic one, the sid is stashed and matched against the unread page below.
+  const appliedOpenSeq = useRef(0);
+  const [pendingCallSid, setPendingCallSid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingOpen || pendingOpen.scope !== 'internal') return;
+    if (pendingOpen.seq === appliedOpenSeq.current) return;
+    appliedOpenSeq.current = pendingOpen.seq;
+
+    if (pendingOpen.target.kind === 'message') {
+      const { threadId, messageId } = pendingOpen.target;
+      setFolder('INBOX');
+      setOpenCall(null);
+      setOpenThreadId(threadId);
+      setOpenMsgId(messageId);
+      // Let the thread init effect re-run for the newly opened thread.
+      threadInitKeyRef.current = null;
+      setExpandedThreadIds(new Set());
+      setExpandedForwardIds(new Set());
+      stateMutation.mutate({ id: messageId, action: 'read' });
+    } else {
+      // UNREAD rather than INBOX: it is the shortest list containing the call, so the
+      // resolve effect below almost always finds it on page one.
+      setFolder('UNREAD');
+      setPendingCallSid(pendingOpen.target.sid);
+    }
+    clearPendingOpen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOpen]);
+
+  useEffect(() => {
+    if (!pendingCallSid) return;
+    const call = calls.find((c) => c.sid === pendingCallSid);
+    if (!call) return;
+    // `openCallRow` already marks it read and prefers the live row, so nothing about the
+    // open path is duplicated here. If the call never turns up — it has aged off the
+    // first page — the user is simply left on their unread calls list, which is a
+    // reasonable floor rather than an error.
+    setPendingCallSid(null);
+    openCallRow(call);
+  }, [pendingCallSid, calls, openCallRow]);
 
   const closeThread = () => {
     setOpenThreadId(null);

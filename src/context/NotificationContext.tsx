@@ -27,6 +27,8 @@ import {
   useNewMessageNotifier,
   type RisenCompany,
 } from '@/hooks/useNewMessageNotifier';
+import { writePendingCommSelection } from '@/components/Companies/communications/useCommUiState';
+import type { OpenRequest, PendingOpen } from '@/components/Layout/unread-feed';
 
 const PREFS_KEY = 'cyg-notify';
 
@@ -116,6 +118,20 @@ interface NotificationValue {
    * chimed at by their own click.
    */
   suppressSource: (source: string) => void;
+  /**
+   * One thing the user asked to open, from the notification panel.
+   *
+   * Needed as a LIVE channel rather than only a localStorage write because
+   * `CompanyDetailPage` reuses a single component instance across `/companies/:id` and
+   * `CommunicationsTab` re-reads its restore point only when its `key={companyId}`
+   * changes — so writing storage and navigating does nothing at all when the user is
+   * already standing on that company. This covers both cases with one code path.
+   */
+  pendingOpen: PendingOpen | null;
+  /** Ask for a message to be opened: writes the restore point, then navigates. */
+  requestOpen: (p: OpenRequest) => void;
+  /** Consumed by the tab that applied it — never by the page that only switched tabs. */
+  clearPendingOpen: () => void;
 }
 
 const NotificationCtx = createContext<NotificationValue | null>(null);
@@ -269,6 +285,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     [notify],
   );
 
+  const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null);
+  const openSeq = useRef(0);
+
+  const clearPendingOpen = useCallback(() => setPendingOpen(null), []);
+
   /** Focus this window and land on a company page, on the tab that has the message. */
   const openCompany = useCallback(
     (companyId: number, tab: 'messages' | 'communications') => {
@@ -288,6 +309,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       navigate(`/companies/${companyId}`);
     },
     [navigate],
+  );
+
+  /**
+   * Open one specific message, wherever the user currently is.
+   *
+   * `seq` is what makes clicking the SAME row twice work: an effect keyed on the payload
+   * alone would see an identical object and do nothing the second time.
+   *
+   * The storage write is for the cold case — the tab is not mounted yet, and for a
+   * reload afterwards. The live `pendingOpen` above is what the already-mounted tab
+   * hears, which storage alone cannot reach.
+   */
+  const requestOpen = useCallback(
+    (input: OpenRequest) => {
+      if (input.scope === 'company') {
+        writePendingCommSelection(input.companyId, input.selection);
+      }
+      setPendingOpen({ ...input, seq: ++openSeq.current });
+      openCompany(
+        input.companyId,
+        input.scope === 'internal' ? 'messages' : 'communications',
+      );
+    },
+    [openCompany],
   );
 
   // ── Internal messages: instant, via the per-user stream ────────────────────
@@ -431,6 +476,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       lastInternalEventAt,
       notifyPush,
       suppressSource,
+      pendingOpen,
+      requestOpen,
+      clearPendingOpen,
     }),
     [
       prefs,
@@ -442,6 +490,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       lastInternalEventAt,
       notifyPush,
       suppressSource,
+      pendingOpen,
+      requestOpen,
+      clearPendingOpen,
     ],
   );
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
@@ -42,6 +42,7 @@ import { RingingCallBanner } from './communications/RingingCallBanner';
 import { DialCallDialog } from './communications/DialCallDialog';
 import { InboxView } from './communications/InboxView';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
+import { readIdForSelection } from '@/components/Layout/unread-feed';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { showListSpinner } from './communications/inbox-loading';
@@ -89,7 +90,8 @@ interface Props {
 export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: Props) {
   const { token } = useAuth();
   const qc = useQueryClient();
-  const { notifyPush, suppressSource } = useNotifications();
+  const { notifyPush, suppressSource, pendingOpen, clearPendingOpen } =
+    useNotifications();
   const { openEmail } = useComposer();
   // Opening a draft is a fetch, so it can fail (an expired token, a draft deleted
   // from the provider's own UI since the list was rendered).
@@ -407,7 +409,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           void qc.invalidateQueries({ queryKey: ['gmail-unread-count', companyId] });
           // The dashboard badge reads this map, and it wasn't being refreshed here —
           // so a pushed email only showed up on the badge a poll cycle later.
-          void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
+          void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
           setNewEmailBanner(true);
           setTimeout(() => setNewEmailBanner(false), 5000);
           // Sound/desktop alert. Fires even though this tab is what's on screen —
@@ -467,7 +469,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
             ['gmail-chats', companyId],
             ['gmail-unread-count', companyId],
             ['gmail-uncompleted-count', companyId],
-            ['gmail-uncompleted-counts'],
+            ['inbox-summary'],
           ]) {
             void qc.invalidateQueries({ queryKey: key });
           }
@@ -532,6 +534,36 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     },
     [token, companyId, qc],
   );
+
+  // ── Opening one message from the notification bell ──────────────────────────
+  // Runs on mount AND on change, so arriving at a new company and clicking a row for the
+  // company already on screen are one code path — the second is the case a localStorage
+  // restore point cannot serve, since `useRestoredCommUi` reads only once per mount.
+  //
+  // `appliedSeq` is what stops a replay: `pendingOpen` stays set until the tab that owns
+  // the selection clears it, so without the ref, navigating away and back would reopen a
+  // message the user had already closed.
+  const appliedSeq = useRef(0);
+  useEffect(() => {
+    if (!pendingOpen || pendingOpen.scope !== 'company') return;
+    if (pendingOpen.companyId !== companyId) return;
+    if (pendingOpen.seq === appliedSeq.current) return;
+    appliedSeq.current = pendingOpen.seq;
+
+    const selection = pendingOpen.selection;
+    // INBOX, because the row has to be listable where the user lands — somebody parked in
+    // DRAFTS or a filtered folder would otherwise arrive where it does not appear.
+    setSelectedLabel('INBOX');
+    setRestoredThreadId(selection.kind === 'email' ? selection.threadId : null);
+    setSelectedMsgIsRead(selection.kind === 'email');
+    setSelected(selection);
+    // The same choke point a row click uses, keyed by the STATE id: `msgId` for
+    // email/chat/sms, but `itemId` for a call — its bare `sid` is not what
+    // ChatMessageReadState / MessageCompletedState hold.
+    stateMutations[selection.kind].read(readIdForSelection(selection));
+    clearPendingOpen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOpen, companyId]);
 
   // ── Open / close handlers ──────────────────────────────────────────────────
   const closeDetail = () => setSelected(null);

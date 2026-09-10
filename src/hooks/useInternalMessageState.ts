@@ -3,6 +3,10 @@ import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { setInternalMessageState } from '@/api/internalMessages';
+import {
+  dismissUnreadFeedItem,
+  restoreUnreadFeedItem,
+} from '@/lib/unreadFeedDismiss';
 import type {
   InternalListResult,
   InternalStateAction,
@@ -45,6 +49,10 @@ export function useInternalMessageState() {
       // can land first.
       if (action === 'unread') suppressSource('internal');
 
+      // The bell keys internal rows `intmsg:{id}`, minted the same way server-side.
+      if (action === 'read') dismissUnreadFeedItem(`intmsg:${id}`);
+      if (action === 'unread') restoreUnreadFeedItem(`intmsg:${id}`);
+
       const patch = PATCH[action];
       qc.setQueriesData<InfiniteData<InternalListResult>>(
         { queryKey: ['internal-messages'] },
@@ -82,7 +90,7 @@ export function useInternalMessageState() {
       void qc.invalidateQueries({ queryKey: ['internal-uncompleted-count'] });
       void qc.invalidateQueries({ queryKey: ['internal-unread-count'] });
       // Keeps the dashboard "N uncompleted" badge honest without a full refetch cycle.
-      void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
+      void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
     },
   });
 }

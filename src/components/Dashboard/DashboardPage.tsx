@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { canManage } from '@/lib/roles';
 import { useCompanies } from '@/hooks/useCompanies';
-import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
+import { useInboxSummary } from '@/hooks/useInboxSummary';
 import { CompanyListSkeleton } from './CompanyListSkeleton';
 import { CompanyRow } from './CompanyRow';
 import { DashboardToolbar } from './DashboardToolbar';
@@ -18,7 +18,7 @@ export function DashboardPage() {
 
   const { data: allCompanies = [], isLoading } = useCompanies();
   // Resolves after the company list — badges fill in once it lands.
-  const { data: uncompletedCounts } = useGmailUncompletedCounts();
+  const { uncompleted: uncompletedCounts } = useInboxSummary();
 
   // The internal "Cyg Finance" workspace is pinned to the top and excluded from
   // search, filters and the stats strip — it is not a client company. The server

@@ -1,91 +1,105 @@
-import { Bell, BellOff } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useState } from 'react';
+import { ArrowLeft, Bell, BellOff, Settings } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useNotifications } from '@/context/NotificationContext';
+import { useInboxSummary } from '@/hooks/useInboxSummary';
+import { dismissUnreadFeedItem } from '@/lib/unreadFeedDismiss';
+import { useMarkFeedItemRead } from '@/hooks/useMarkFeedItemRead';
+import { NotificationPanel } from './NotificationPanel';
+import { NotificationSettings } from './NotificationSettings';
+import { badgeLabel, pendingOpenFromFeedItem } from './unread-feed';
+import type { UnreadFeedItem } from '@/api/gmail';
 
 /**
- * Sound/notification controls for new messages. Alerts fire while you're using the
- * app as well as when the tab is unfocused; "Alert me while I'm using the app" turns
- * the focused half off for anyone who finds it noisy.
+ * Unread messages across every company assigned to this user, plus their own workspace.
+ *
+ * The bell's ICON still means "are alerts on", which is why the settings that used to be
+ * the whole popover are still here behind the gear. The BADGE is independent of that: it
+ * counts waiting work, which matters whether or not you want to be chimed at.
+ *
+ * Mounted in the header, so it is alive on every authenticated route — which is what
+ * makes this the one component that owns the feed query. `useInboxSummary` is also
+ * mounted by the dashboard and the new-message notifier, and React Query dedupes all
+ * three onto a single request by key.
  */
 export function NotificationBell() {
-  const { prefs, setSound, setDesktop, setWhileActive, permission, testSound } =
-    useNotifications();
+  const { prefs, requestOpen } = useNotifications();
+  const { unread, count, truncated, failed, isLoading } = useInboxSummary();
+  const markRead = useMarkFeedItemRead();
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'list' | 'settings'>('list');
 
-  const anyOn = prefs.sound || prefs.desktop;
-  const blocked = permission === 'denied';
-  const unsupported = permission === 'unsupported';
+  const alertsOn = prefs.sound || prefs.desktop;
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    // Always reopen on the list: the settings page is somewhere you visit, not somewhere
+    // you are left.
+    if (!next) setView('list');
+  };
+
+  const handleOpen = (item: UnreadFeedItem) => {
+    const request = pendingOpenFromFeedItem(item);
+    if (!request) return;
+    // Hide the row before navigating. Opening it marks it read a beat later, and a row
+    // that lingers while the page changes underneath reads as a click that did nothing.
+    dismissUnreadFeedItem(item.id);
+    handleOpenChange(false);
+    requestOpen(request);
+  };
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
-        aria-label="Notification settings"
-        title={anyOn ? 'Notifications on' : 'Notifications off'}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label={
+          count > 0
+            ? `Notifications, ${count} unread`
+            : alertsOn
+              ? 'Notifications'
+              : 'Notifications (alerts off)'
+        }
+        title={count > 0 ? `${count} unread` : 'No unread messages'}
+        className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        {anyOn ? <Bell size={16} /> : <BellOff size={16} />}
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 gap-3 p-3">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">New message alerts</span>
-          <span className="text-xs text-muted-foreground">
-            Alerts you whenever a message arrives, even while you're using the
-            app.
+        {alertsOn ? <Bell size={16} /> : <BellOff size={16} />}
+        {count > 0 && (
+          <span className="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white">
+            {badgeLabel(count, truncated)}
           </span>
-        </div>
-
-        <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
-          <Checkbox
-            checked={prefs.sound}
-            onCheckedChange={(checked) => setSound(checked === true)}
-          />
-          Notification sound
-        </label>
-
-        {!unsupported && (
-          <div className="flex flex-col gap-1">
-            <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
-              <Checkbox
-                checked={prefs.desktop}
-                disabled={blocked}
-                onCheckedChange={(checked) => void setDesktop(checked === true)}
-              />
-              Desktop notifications
-            </label>
-            {blocked && (
-              <span className="pl-6 text-xs text-muted-foreground">
-                Blocked in your browser settings.
-              </span>
-            )}
-          </div>
         )}
+      </PopoverTrigger>
 
-        <div className="flex flex-col gap-1">
-          <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
-            <Checkbox
-              checked={prefs.whileActive}
-              onCheckedChange={(checked) => setWhileActive(checked === true)}
-            />
-            Alert me while I'm using the app
-          </label>
-          <span className="pl-6 text-xs text-muted-foreground">
-            Off = only when this tab isn't focused.
+      <PopoverContent align="end" className="w-[26rem] gap-0 p-0">
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <span className="text-sm font-medium">
+            {view === 'list' ? 'Notifications' : 'Alert settings'}
           </span>
+          <button
+            type="button"
+            aria-label={view === 'list' ? 'Alert settings' : 'Back to notifications'}
+            onClick={() => setView(view === 'list' ? 'settings' : 'list')}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {view === 'list' ? <Settings size={14} /> : <ArrowLeft size={14} />}
+          </button>
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="justify-start text-muted-foreground hover:text-foreground"
-          onClick={testSound}
-        >
-          Test sound
-        </Button>
+        {view === 'list' ? (
+          <NotificationPanel
+            items={unread}
+            isLoading={isLoading}
+            truncated={truncated}
+            failed={failed}
+            onOpen={handleOpen}
+            onMarkRead={(item) => markRead.mutate(item)}
+          />
+        ) : (
+          <NotificationSettings />
+        )}
       </PopoverContent>
     </Popover>
   );

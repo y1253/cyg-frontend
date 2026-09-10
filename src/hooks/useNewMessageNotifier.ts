@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanies } from '@/hooks/useCompanies';
-import { useGmailUncompletedCounts } from '@/hooks/useGmailUncompletedCounts';
+import { useInboxSummary } from '@/hooks/useInboxSummary';
 import { useInternalUnreadCount } from '@/hooks/useInternalUncompletedCount';
 
 /**
@@ -34,7 +34,10 @@ export function useNewMessageNotifier({
   /** Reports the caller's own workspace id, so notifications can deep-link to it. */
   onInternalWorkspaceId: (id: number | null) => void;
 }) {
-  const counts = useGmailUncompletedCounts();
+  // Only the uncompleted half: this hook's whole job is diffing those counts for a
+  // rise. The unread feed in the same response is the bell's, and is not a signal
+  // about arrival — reading it here would double-announce every message.
+  const counts = useInboxSummary();
   const internalUnread = useInternalUnreadCount();
   const companies = useCompanies();
   const { user } = useAuth();
@@ -64,7 +67,7 @@ export function useNewMessageNotifier({
 
   const baselineRef = useRef<Map<string, number> | null>(null);
   useEffect(() => {
-    const data = counts.data;
+    const data = counts.uncompleted;
     if (!data) return;
     if (counts.dataUpdatedAt < mountedAt.current) return;
 
@@ -117,7 +120,7 @@ export function useNewMessageNotifier({
       })),
     );
   }, [
-    counts.data,
+    counts.uncompleted,
     counts.dataUpdatedAt,
     internalCompanyId,
     onCompaniesRose,

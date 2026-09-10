@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { restoreUnreadFeedItem } from '@/lib/unreadFeedDismiss';
 import { markEmailUnread } from '@/api/gmail';
 import type { EmailListResult } from '@/api/gmail';
 
@@ -11,6 +12,8 @@ export function useMarkEmailUnread(companyId: number) {
   return useMutation({
     mutationFn: (messageId: string) => markEmailUnread(token!, companyId, messageId),
     onMutate: (messageId: string) => {
+      // Deliberately unread again, so it belongs back in the bell.
+      restoreUnreadFeedItem(messageId);
       qc.setQueriesData<InfiniteData<EmailListResult>>(
         { queryKey: ['gmail-emails', companyId] },
         (old) => {

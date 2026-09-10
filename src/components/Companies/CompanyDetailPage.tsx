@@ -71,6 +71,7 @@ import { AddTaskDialog } from './AddTaskDialog';
 import { CopyButton } from './CopyButton';
 import { CommunicationsTab } from './CommunicationsTab';
 import { InternalCommunicationsTab } from './InternalCommunicationsTab';
+import { useNotifications } from '@/context/NotificationContext';
 import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
@@ -2276,6 +2277,31 @@ export function CompanyDetailPage() {
     setSnoozedExpanded(g.snoozedExpanded ?? false);
     setExpandSignal({ expanded: g.expandedAll ?? true, seq: 0 });
   }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Opening one message from the notification bell ──────────────────────────
+  // Only the TAB is this component's business; the selection itself is applied by the
+  // keyed Communications tab, which is why this deliberately does not clear
+  // `pendingOpen`.
+  //
+  // It has to be a live effect rather than the stored-tab read above: this component
+  // reuses one instance across /companies/:id, so clicking a notification for the company
+  // already on screen fires no [companyId] effect and nothing would switch tabs.
+  const { pendingOpen } = useNotifications();
+  useEffect(() => {
+    if (!pendingOpen || pendingOpen.companyId !== companyId) return;
+    // Both, in one commit: the tab is lazily mounted behind `commVisited`, so setting the
+    // tab alone would leave nothing there to receive the selection.
+    //
+    // set-state-in-effect is disabled rather than worked around: `pendingOpen` is an
+    // external request channel (the notification panel, mounted above the router), which
+    // is the subscribe case the rule exempts in prose but cannot detect. Deriving the tab
+    // during render instead would snap back to the previous tab the moment the
+    // Communications tab consumed and cleared the request. The `[companyId]` effect above
+    // has the same shape for the same reason.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCommVisited(true);
+    setTab('communications');
+  }, [pendingOpen, companyId]);
 
   function startEdit(section: EditSection) {
     if (!company) return;

@@ -3,6 +3,10 @@ import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { setInternalCallState } from '@/api/internalCalls';
+import {
+  dismissUnreadFeedItem,
+  restoreUnreadFeedItem,
+} from '@/lib/unreadFeedDismiss';
 import type {
   InternalCallListResult,
   InternalCallStateAction,
@@ -47,6 +51,11 @@ export function useInternalCallState() {
       // Stamped before the request, not after, because the refetch can land first.
       if (action === 'unread') suppressSource('internal');
 
+      // `intcall:{sid}` — the id the feed carries, namespaced so a call sid can never
+      // collide with a numeric internal message id.
+      if (action === 'read') dismissUnreadFeedItem(`intcall:${sid}`);
+      if (action === 'unread') restoreUnreadFeedItem(`intcall:${sid}`);
+
       const patch = PATCH[action];
       qc.setQueriesData<InfiniteData<InternalCallListResult>>(
         { queryKey: ['internal-calls'] },
@@ -70,7 +79,7 @@ export function useInternalCallState() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['internal-call-counts'] });
       // Keeps the dashboard "N uncompleted" badge honest without a full refetch cycle.
-      void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
+      void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
     },
   });
 }

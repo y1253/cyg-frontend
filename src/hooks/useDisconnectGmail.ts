@@ -17,7 +17,7 @@ export function useDisconnectGmail(companyId: number) {
         ['gmail-chats', companyId],
         ['gmail-unread-count', companyId],
         ['gmail-uncompleted-count', companyId],
-        ['gmail-uncompleted-counts'],
+        ['inbox-summary'],
       ]) {
         void qc.invalidateQueries({ queryKey: key });
       }

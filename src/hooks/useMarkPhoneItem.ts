@@ -2,6 +2,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { markPhoneItem, type PhoneStateAction, type PhoneTimelineResult } from '@/api/phone';
+import {
+  dismissUnreadFeedItem,
+  restoreUnreadFeedItem,
+} from '@/lib/unreadFeedDismiss';
 
 /**
  * Read / completed state for one call or text, optimistically applied.
@@ -27,6 +31,12 @@ export function useMarkPhoneItem(companyId: number, action: PhoneStateAction) {
     mutationFn: (itemId: string) =>
       markPhoneItem(token!, companyId, itemId, action),
     onMutate: (itemId: string) => {
+      // `itemId` is already namespaced (`swcall:` / `swsms:`), which is exactly the id
+      // the feed carries — so the bell row goes immediately, without a sweep. Only the
+      // read actions touch it: completing something does not make it read.
+      if (action === 'read') dismissUnreadFeedItem(itemId);
+      if (action === 'unread') restoreUnreadFeedItem(itemId);
+
       qc.setQueriesData<InfiniteData<PhoneTimelineResult>>(
         { queryKey: ['phone-timeline', companyId] },
         (old) => {

@@ -65,7 +65,7 @@ export function useInternalMessageStream(
         void qc.invalidateQueries({ queryKey: ['internal-messages'] });
         void qc.invalidateQueries({ queryKey: ['internal-uncompleted-count'] });
         void qc.invalidateQueries({ queryKey: ['internal-unread-count'] });
-        void qc.invalidateQueries({ queryKey: ['gmail-uncompleted-counts'] });
+        void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
         // The broad key, not ['internal-message-thread', id] — up here we don't
         // know which thread is open, and invalidating an unmounted query only
         // marks it stale.

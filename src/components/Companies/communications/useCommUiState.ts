@@ -34,8 +34,12 @@ const CURRENT_VERSION = 2;
  * Storage is not a trusted input: it survives deploys, and a shape from an older
  * build (or a hand-edited value) would otherwise open a detail view missing the very
  * field it needs.
+ *
+ * Exported so the notification panel can assert in a test that every feed row it can
+ * render produces a Selection this accepts — a rejected one is a row that navigates and
+ * then opens nothing, with no error anywhere.
  */
-function isValidSelection(value: unknown): value is Selection {
+export function isValidSelection(value: unknown): value is Selection {
   if (!value || typeof value !== 'object') return false;
   const s = value as Record<string, unknown>;
   const str = (k: string) => typeof s[k] === 'string' && s[k] !== '';
@@ -113,4 +117,38 @@ export function usePersistCommUi(companyId: number, current: CommUI): void {
       // storage full / disabled — losing the restore point is not worth breaking on
     }
   }, [companyId, selectedLabel, selectedKey, filter, searchInput]);
+}
+
+/**
+ * Point a company's Communications tab at one message before navigating to it.
+ *
+ * For the cold case — the tab is not mounted yet, so the live `pendingOpen` channel has
+ * nobody to hear it — and so the choice survives a reload afterwards.
+ *
+ * READ-MODIFY-WRITE: this blob also holds the folder, the search term and the advanced
+ * filters, and overwriting it would silently reset the user's view.
+ *
+ * The folder is forced to INBOX because the restored item has to be listable where the
+ * user lands: somebody parked in DRAFTS, or in a filtered folder, would otherwise arrive
+ * somewhere the message does not appear.
+ */
+export function writePendingCommSelection(
+  companyId: number,
+  selection: Selection,
+  label = 'INBOX',
+): void {
+  try {
+    const existing = readCommUI(companyId);
+    localStorage.setItem(
+      commKey(companyId),
+      JSON.stringify({
+        ...existing,
+        v: CURRENT_VERSION,
+        selectedLabel: label,
+        selected: selection,
+      } satisfies CommUI),
+    );
+  } catch {
+    // storage full / disabled — the live pendingOpen channel still opens it.
+  }
 }

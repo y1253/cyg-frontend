@@ -462,15 +462,87 @@ export async function fetchUncompletedCount(
 }
 
 /**
- * Uncompleted counts keyed by company id, across BOTH providers (unified endpoint).
- * Companies without any connected account are absent.
+ * One row in the notification bell's unread feed.
+ *
+ * Mirrors `server/src/communications/unread-feed.types.ts`. Discriminated on
+ * `(scope, kind)`, and each variant carries exactly the fields needed to rebuild a
+ * `Selection` so clicking a row opens the message itself, not just the company.
+ *
+ * `scope` keeps the internal workspace's two kinds out of `ItemKind`, which is a closed
+ * `Record`-typed set for a client company's four channels.
  */
-export async function fetchUncompletedCounts(
-  token: string,
-): Promise<Record<string, number>> {
-  const res = await fetchWithAuth(token, `${API}/communications/uncompleted-counts`);
-  if (!res.ok) throw new Error('Failed to fetch uncompleted counts');
-  return res.json() as Promise<Record<string, number>>;
+export interface UnreadFeedItemBase {
+  /** Stable row id. Also the key the read-dismissal store hides a row by. */
+  id: string;
+  companyId: number;
+  /** Carried by the server: the companies cache has no refetch interval. */
+  companyName: string;
+  from: string;
+  title: string;
+  snippet: string;
+  /** ISO. */
+  at: string;
+}
+
+export type UnreadFeedItem =
+  | (UnreadFeedItemBase & {
+      scope: 'company';
+      kind: 'email';
+      msgId: string;
+      threadId: string | null;
+    })
+  | (UnreadFeedItemBase & {
+      scope: 'company';
+      kind: 'chat';
+      spaceId: string;
+      msgId: string;
+      msgTime: string;
+    })
+  | (UnreadFeedItemBase & {
+      scope: 'company';
+      kind: 'sms';
+      peer: string;
+      msgId: string;
+      msgTime: string;
+    })
+  | (UnreadFeedItemBase & {
+      scope: 'company';
+      kind: 'call';
+      /** `sid` is SignalWire's key; `itemId` is the READ-STATE key. Not interchangeable. */
+      sid: string;
+      itemId: string;
+      isVoicemail: boolean;
+    })
+  | (UnreadFeedItemBase & {
+      scope: 'internal';
+      kind: 'message';
+      messageId: number;
+      threadId: number;
+    })
+  | (UnreadFeedItemBase & { scope: 'internal'; kind: 'call'; sid: string });
+
+/**
+ * What `GET /communications/inbox-summary` returns — both cross-company surfaces in one
+ * request, so they cost one poll and one sweep rather than two.
+ *
+ * ⚠️ The two halves have DIFFERENT scopes, deliberately. `uncompleted` is global (the
+ * dashboard badges every company it lists); `unread` covers only companies assigned to
+ * the caller (the bell must only raise their own work).
+ */
+export interface InboxSummary {
+  /** Companies with nothing connected are ABSENT — absent means unknown, not zero. */
+  uncompleted: Record<string, number>;
+  unread: UnreadFeedItem[];
+  /** A cap was hit, so the badge reads "50+" rather than a precise total. */
+  truncated: boolean;
+  /** Swept and failed. Reported so the panel never implies a clean inbox it can't prove. */
+  failed: { companyId: number; companyName: string }[];
+}
+
+export async function fetchInboxSummary(token: string): Promise<InboxSummary> {
+  const res = await fetchWithAuth(token, `${API}/communications/inbox-summary`);
+  if (!res.ok) throw new Error('Failed to fetch inbox summary');
+  return res.json() as Promise<InboxSummary>;
 }
 
 export async function sendEmail(
