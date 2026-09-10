@@ -25,6 +25,7 @@ import { Step11Payroll } from './steps/Step11Payroll';
 import { Step12General } from './steps/Step12General';
 import { Step13SecretarialManagement } from './steps/Step13SecretarialManagement';
 import { Step14TermsAndConditions } from './steps/Step14TermsAndConditions';
+import { Link } from 'react-router-dom';
 
 export interface ReconciliationAccount {
   name: string;
@@ -805,6 +806,19 @@ export function RegisterPage() {
 
         <p className="mt-4 text-center text-xs text-muted-foreground">
           Your information is kept confidential and used only for bookkeeping purposes.
+        </p>
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          <Link to="/privacy" className="underline underline-offset-2 hover:opacity-80">
+            Privacy Policy
+          </Link>
+          {' · '}
+          <Link to="/terms" className="underline underline-offset-2 hover:opacity-80">
+            Terms of Service
+          </Link>
+          {' · '}
+          <Link to="/sms-opt-in" className="underline underline-offset-2 hover:opacity-80">
+            Text Message Program
+          </Link>
         </p>
       </div>
     </div>

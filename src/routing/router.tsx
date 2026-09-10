@@ -14,6 +14,7 @@ import { AdminRoute } from './AdminRoute';
 import { SuperAdminRoute } from './SuperAdminRoute';
 import { PrivacyPage } from '../components/Legal/PrivacyPage';
 import { TermsPage } from '../components/Legal/TermsPage';
+import { SmsOptInPage } from '../components/Legal/SmsOptInPage';
 import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
 import { GmailErrorPage } from '../components/Gmail/GmailErrorPage';
 import { MicrosoftSuccessPage } from '../components/Microsoft/MicrosoftSuccessPage';
@@ -59,6 +60,14 @@ export const router = createBrowserRouter([
   {
     path: '/terms',
     element: <TermsPage />,
+  },
+  {
+    // Published for A2P 10DLC campaign registration: The Campaign Registry vets this
+    // page before approving a messaging campaign. Public and standalone, like its two
+    // siblings above -- a route left out of this array does NOT 404, it falls to the
+    // catch-all and lands an unauthenticated visitor on /login.
+    path: '/sms-opt-in',
+    element: <SmsOptInPage />,
   },
   {
     element: <PrivateRoute />,

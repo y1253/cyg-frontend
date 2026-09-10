@@ -14,7 +14,7 @@ export function TermsPage() {
         </Link>
 
         <h1 className="text-3xl font-bold text-[#0B1C2C] mb-2">Terms of Service</h1>
-        <p className="text-sm text-gray-500 mb-10">Last updated: June 9, 2026</p>
+        <p className="text-sm text-gray-500 mb-10">Last updated: September 9, 2026</p>
 
         <div className="prose prose-slate max-w-none space-y-8 text-[15px] leading-relaxed text-gray-700">
 
@@ -148,7 +148,49 @@ export function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">11. Governing Law</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">
+              11. Text Message Program
+            </h2>
+            <p>
+              Where a client has provided a mobile number and agreed to be contacted that
+              way, CYG Finance sends text messages about that client's account: requests
+              for documents, the status of a filing, reminders about a deadline or a
+              scheduled call, and replies to questions. This is a customer-care program for
+              existing clients. We do not send marketing or promotional text messages.
+            </p>
+            <p className="mt-3">
+              <strong>Message frequency varies</strong> and depends on the work in progress
+              on the account. <strong>Message and data rates may apply</strong> — CYG
+              Finance does not charge for these messages, and any charge comes from the
+              recipient's own mobile carrier under their plan.
+            </p>
+            <p className="mt-3">
+              Reply <strong>STOP</strong> to any message to stop receiving text messages;
+              UNSUBSCRIBE, END, QUIT and CANCEL have the same effect. Reply{' '}
+              <strong>HELP</strong> for help, or contact us at{' '}
+              <a href="mailto:chaim@cygfinance.com" className="text-[#3BBFB4] underline">
+                chaim@cygfinance.com
+              </a>
+              . Opting out of text messages does not end the engagement or stop us
+              contacting the client by email or telephone.
+            </p>
+            <p className="mt-3">
+              Consent to receive text messages is not a condition of any purchase or of our
+              services. Mobile carriers are not liable for delayed or undelivered messages.
+              Full programme details are on our{' '}
+              <Link to="/sms-opt-in" className="text-[#3BBFB4] underline">
+                text message program
+              </Link>{' '}
+              page, and the handling of mobile information is described in our{' '}
+              <Link to="/privacy" className="text-[#3BBFB4] underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">12. Governing Law</h2>
             <p>
               These Terms are governed by the laws of the Province of Quebec, Canada, without
               regard to conflict of law principles. Any disputes shall be resolved in the courts
@@ -157,7 +199,7 @@ export function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">12. Changes to These Terms</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">13. Changes to These Terms</h2>
             <p>
               We may revise these Terms at any time. The "Last updated" date at the top reflects
               the current version. Continued use of the Service after changes are posted constitutes
@@ -166,7 +208,7 @@ export function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">13. Contact</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">14. Contact</h2>
             <p>
               Questions about these Terms? Contact us at:{' '}
               <a href="mailto:chaim@cygfinance.com" className="text-[#3BBFB4] underline">
@@ -180,6 +222,10 @@ export function TermsPage() {
           © {new Date().getFullYear()} CYG Finance ·{' '}
           <Link to="/privacy" className="text-[#3BBFB4] hover:opacity-80">
             Privacy Policy
+          </Link>{' '}
+          ·{' '}
+          <Link to="/sms-opt-in" className="text-[#3BBFB4] hover:opacity-80">
+            Text Message Program
           </Link>
         </div>
       </div>

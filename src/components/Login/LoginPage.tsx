@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { login, faceLogin } from '../../api/auth';
 import { useAuth } from '../../context/AuthContext';
 import { AdminStage } from './AdminStage';
@@ -194,6 +194,24 @@ export function LoginPage() {
 
             <p className="fu d6" style={{ textAlign: 'center', color: 'rgba(94,122,150,0.55)', fontSize: 11.5, marginTop: 44, letterSpacing: '0.04em' }}>
               CYG Finance · Bookkeeping Management Platform
+            </p>
+            {/* The only route into the public legal pages from anywhere in the app.
+                Nothing linked to them before, and a policy a reviewer cannot reach is
+                treated as one that does not exist. Inline styles here, not Tailwind:
+                this page is the documented exception, and a light-theme utility class
+                would be invisible on navy. */}
+            <p className="fu d6" style={{ textAlign: 'center', color: 'rgba(94,122,150,0.45)', fontSize: 11, marginTop: 10, letterSpacing: '0.04em' }}>
+              <Link to="/privacy" style={{ color: 'rgba(94,122,150,0.75)' }}>
+                Privacy
+              </Link>
+              {' · '}
+              <Link to="/terms" style={{ color: 'rgba(94,122,150,0.75)' }}>
+                Terms
+              </Link>
+              {' · '}
+              <Link to="/sms-opt-in" style={{ color: 'rgba(94,122,150,0.75)' }}>
+                Text Messages
+              </Link>
             </p>
           </div>
         </div>

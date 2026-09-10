@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { LegalPlaceholder } from './LegalPlaceholder';
 
 export function PrivacyPage() {
   return (
@@ -14,7 +15,7 @@ export function PrivacyPage() {
         </Link>
 
         <h1 className="text-3xl font-bold text-[#0B1C2C] mb-2">Privacy Policy</h1>
-        <p className="text-sm text-gray-500 mb-10">Last updated: June 9, 2026</p>
+        <p className="text-sm text-gray-500 mb-10">Last updated: September 9, 2026</p>
 
         <div className="prose prose-slate max-w-none space-y-8 text-[15px] leading-relaxed text-gray-700">
 
@@ -26,8 +27,12 @@ export function PrivacyPage() {
               we collect, how we use it, and your rights regarding that information.
             </p>
             <p className="mt-3">
-              This application is a private, invite-only tool used exclusively by authorized staff.
-              It is not a public consumer product.
+              The application itself is private and invite-only: only authorized CYG Finance
+              staff can log in, and it is not a consumer product. This policy also covers the
+              personal information of our <strong>client companies</strong> and their
+              representatives, whose contact details we hold in order to do their bookkeeping
+              — including where we contact them by text message. They are not users of the
+              application, but their information is processed through it.
             </p>
           </section>
 
@@ -144,7 +149,67 @@ export function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">6. Data Retention</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">
+              6. Client Contact Information
+            </h2>
+            <p>
+              To deliver bookkeeping services we hold contact details for our client
+              companies and their representatives: business and personal names, email
+              addresses, mailing addresses, and telephone and mobile numbers. This
+              information is given to us by the client when they engage us, or by a
+              representative they have authorized.
+            </p>
+            <p className="mt-3">
+              We use it only to carry out the work the client has engaged us for and to
+              communicate with them about it. We do not use client contact information for
+              marketing, and we do not sell it.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">
+              7. Text Messaging (SMS)
+            </h2>
+            <p>
+              Where a client has given us their mobile number and agreed to be contacted
+              that way, we send text messages about their account — document requests,
+              filing status, and reminders. Message frequency varies. Message and data
+              rates may apply. Full details are on our{' '}
+              <Link to="/sms-opt-in" className="text-[#3BBFB4] underline">
+                text message program
+              </Link>{' '}
+              page.
+            </p>
+            <p className="mt-3">
+              <strong>
+                No mobile information will be shared with third parties or affiliates for
+                marketing or promotional purposes.
+              </strong>{' '}
+              Text messaging originator opt-in data and consent are not shared with any
+              third party for any purpose. Mobile numbers are disclosed only to the
+              telecommunications provider that carries the message on our behalf, and only
+              so that it can be delivered.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">
+              8. How to Opt Out of Text Messages
+            </h2>
+            <p>
+              Reply <strong>STOP</strong> to any message from us to stop receiving text
+              messages. UNSUBSCRIBE, END, QUIT and CANCEL work the same way. Reply{' '}
+              <strong>HELP</strong> for help, or contact us at the address in the Contact
+              section below.
+            </p>
+            <p className="mt-3">
+              Opting out of text messages does not end our engagement or stop us contacting
+              you by email or telephone about your bookkeeping.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">9. Data Retention</h2>
             <p>
               Staff account data is retained for as long as your account is active. Soft-deleted
               accounts have their personal data retained for audit purposes but lose login access.
@@ -154,7 +219,7 @@ export function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">7. Your Rights</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">10. Your Rights</h2>
             <p>
               As an authorized user of this platform, you may request access to, correction of, or
               deletion of your personal data by contacting your system administrator or emailing us
@@ -163,7 +228,7 @@ export function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">8. Changes to This Policy</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">11. Changes to This Policy</h2>
             <p>
               We may update this Privacy Policy from time to time. The "Last updated" date at the
               top of this page reflects the most recent revision. Continued use of the platform
@@ -172,12 +237,21 @@ export function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">9. Contact</h2>
+            <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">12. Contact</h2>
             <p>
               For privacy-related questions or requests, contact us at:{' '}
               <a href="mailto:chaim@cygfinance.com" className="text-[#3BBFB4] underline">
                 chaim@cygfinance.com
               </a>
+            </p>
+            <p className="mt-3">
+              CYG Finance
+              <br />
+              <LegalPlaceholder>LEGAL ENTITY NAME</LegalPlaceholder>
+              <br />
+              <LegalPlaceholder>MAILING ADDRESS</LegalPlaceholder>
+              <br />
+              <LegalPlaceholder>SUPPORT PHONE</LegalPlaceholder>
             </p>
           </section>
         </div>
@@ -186,6 +260,10 @@ export function PrivacyPage() {
           © {new Date().getFullYear()} CYG Finance ·{' '}
           <Link to="/terms" className="text-[#3BBFB4] hover:opacity-80">
             Terms of Service
+          </Link>{' '}
+          ·{' '}
+          <Link to="/sms-opt-in" className="text-[#3BBFB4] hover:opacity-80">
+            Text Message Program
           </Link>
         </div>
       </div>
