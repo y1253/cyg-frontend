@@ -1,5 +1,6 @@
 import {
   Check,
+  Grid3x3,
   Loader2,
   Mic,
   MicOff,
@@ -12,9 +13,11 @@ import {
   CornerDownRight,
   Undo2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatE164 } from '@/lib/phone';
+import { DTMF_KEYS, dtmfTones } from '@/lib/dtmf';
+import { playDtmfTone, unlockAudio } from '@/lib/notificationSound';
 import {
   useSoftphone,
   useSoftphoneActions,
@@ -22,6 +25,16 @@ import {
   type TransferView,
 } from '@/context/SoftphoneContext';
 import { TransferPicker } from '@/components/Phone/TransferPicker';
+
+/**
+ * One secondary in-call control. Icon over label so four fit a single 358px row.
+ *
+ * A shared constant rather than four copies, because the wrap arithmetic only works if
+ * every one of them carries the same `min-w`.
+ */
+const SECONDARY_BTN =
+  'flex min-w-[5rem] flex-1 flex-col items-center justify-center gap-0.5 ' +
+  'rounded-md px-2 py-1.5 text-[11px] font-medium';
 
 function mmss(total: number): string {
   const m = Math.floor(total / 60);
@@ -43,10 +56,18 @@ function mmss(total: number): string {
 export function CallOverlay() {
   const { phase, info, transfer, canTakeBack, muted, held, seconds } =
     useSoftphone();
-  const { answer, hangup, toggleMute, toggleHold, blindTransfer, takeBack } =
-    useSoftphoneActions();
+  const {
+    answer,
+    hangup,
+    toggleMute,
+    toggleHold,
+    blindTransfer,
+    takeBack,
+    sendDigit,
+  } = useSoftphoneActions();
   const navigate = useNavigate();
   const [transferOpen, setTransferOpen] = useState(false);
+  const [padOpen, setPadOpen] = useState(false);
 
   if (phase === 'idle') return null;
 
@@ -84,13 +105,18 @@ export function CallOverlay() {
     <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
       <div
         className={[
-          'pointer-events-auto w-full max-w-sm rounded-xl border bg-background shadow-2xl',
+          // A flex column with a viewport cap, because the dial pad can add ~256px and
+          // HANG UP IS AT THE BOTTOM — a card taller than the window would push the one
+          // control you can never afford to lose off-screen. Only the pad scrolls.
+          // `dvh`, not `vh`: a mobile URL bar makes them differ.
+          'pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-sm flex-col',
+          'rounded-xl border bg-background shadow-2xl',
           ringing
             ? 'border-teal-400 ring-2 ring-teal-400/40 animate-pulse'
             : 'border-border',
         ].join(' ')}
       >
-        <div className="flex items-start gap-3 p-4">
+        <div className="flex shrink-0 items-start gap-3 p-4">
           <div
             className={[
               'flex size-10 shrink-0 items-center justify-center rounded-full',
@@ -137,7 +163,21 @@ export function CallOverlay() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t p-3">
+        {/*
+          Keyed on the call sid, NOT merely mounted. `takeBack` calls setPhase('idle')
+          and tryPair() synchronously, so React batches them into one render, the portal
+          never unmounts, and this card survives a change of sid — leaving the digits
+          typed at the previous party on screen. The key drops them.
+
+          Collapsed while HELD rather than left open and refusing: `sendDigit` would
+          reject every press, and the pad's only failure wording is about tone support,
+          which would be a lie. `padOpen` is untouched, so it reappears on resume.
+        */}
+        {padOpen && !ringing && !held && (
+          <DialPad key={info?.callSid} onDigit={sendDigit} />
+        )}
+
+        <div className="flex shrink-0 flex-wrap gap-2 border-t p-3">
           {ringing && !outgoing ? (
             <>
               <button
@@ -166,35 +206,61 @@ export function CallOverlay() {
             </button>
           ) : (
             <>
+              {/*
+                Four secondary controls at `min-w-[5rem]`, stacked icon-over-label.
+                The inner width is 358px, so at the old `min-w-[7rem]` only THREE fit a
+                row and a fourth pushed Hang up up beside it, halving the one button that
+                must never shrink. At 5rem all four share row one (4x80 + 3x8 = 344) and
+                Hang up wraps alone to the full width, exactly as it does today.
+              */}
               <button
                 onClick={toggleHold}
                 className={[
-                  'flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  SECONDARY_BTN,
                   held
                     ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                     : 'bg-muted hover:bg-muted/70',
                 ].join(' ')}
               >
-                {held ? <Play size={14} /> : <Pause size={14} />}
+                {held ? <Play size={16} /> : <Pause size={16} />}
                 {held ? 'Resume' : 'Hold'}
               </button>
               <button
                 onClick={toggleMute}
                 className={[
-                  'flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  SECONDARY_BTN,
                   muted
                     ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                     : 'bg-muted hover:bg-muted/70',
                 ].join(' ')}
               >
-                {muted ? <MicOff size={14} /> : <Mic size={14} />}
+                {muted ? <MicOff size={16} /> : <Mic size={16} />}
                 {muted ? 'Unmute' : 'Mute'}
               </button>
               <button
-                onClick={() => setTransferOpen(true)}
-                className="flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md bg-muted px-3 py-2 text-sm font-medium hover:bg-muted/70"
+                onClick={() => setPadOpen((open) => !open)}
+                disabled={held}
+                title={
+                  held
+                    ? 'The caller is on hold and would not hear the tones'
+                    : undefined
+                }
+                className={[
+                  SECONDARY_BTN,
+                  'disabled:cursor-not-allowed disabled:opacity-40',
+                  padOpen
+                    ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
+                    : 'bg-muted hover:bg-muted/70',
+                ].join(' ')}
               >
-                <PhoneForwarded size={14} />
+                <Grid3x3 size={16} />
+                Keypad
+              </button>
+              <button
+                onClick={() => setTransferOpen(true)}
+                className={[SECONDARY_BTN, 'bg-muted hover:bg-muted/70'].join(' ')}
+              >
+                <PhoneForwarded size={16} />
                 Transfer
               </button>
               <button
@@ -329,6 +395,106 @@ function TransferringCard({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The in-call keypad.
+ *
+ * ── WHY IT IS INLINE AND NOT A DIALOG ─────────────────────────────────────────
+ * `TransferPicker` is a shadcn `Dialog` and gets away with it because a transfer ends the
+ * agent's involvement in the call. A dial pad is the opposite: it is used *while listening
+ * to an IVR*, so a focus trap and a page-blocking backdrop are exactly wrong — and
+ * `DialogContent` portals at `z-50`, i.e. BEHIND this overlay's own `z-[200]`.
+ *
+ * Owns its own `digits` so the parent can drop them with a `key` when the call sid
+ * changes, and so a re-render of the card does not churn them.
+ */
+function DialPad({ onDigit }: { onDigit: (digit: string) => boolean }) {
+  const [digits, setDigits] = useState('');
+  const [failed, setFailed] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  // Focus on open, which is what makes the keyboard handler below reachable at all.
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  function press(key: string) {
+    // The context is normally unlocked by NotificationContext's one-shot global listener
+    // long before any call, but `resume()` is async — doing it here too costs nothing and
+    // covers a genuinely cold tab. Only the local beep depends on it; the digit does not.
+    unlockAudio();
+    const ok = onDigit(key);
+    if (!ok) {
+      setFailed(true);
+      return;
+    }
+    // Cleared on success, so a transient refusal does not leave the warning standing over
+    // a pad that is now working.
+    setFailed(false);
+    const tones = dtmfTones(key);
+    // Played for the same length the wire tone is held, or the echo stops meaning what it
+    // looks like it means.
+    if (tones) playDtmfTone(tones[0], tones[1], 160);
+    setDigits((prev) => prev + key);
+  }
+
+  return (
+    <div
+      ref={ref}
+      // ⚠️ tabIndex + a handler ON THIS CONTAINER, never a `window` listener. The overlay
+      // follows the user onto every page for the whole call, so a document-level handler
+      // would take digits typed into any field anywhere — and the usual
+      // `e.target instanceof HTMLInputElement` guard misses `contentEditable`, which is
+      // exactly what the email composer is. Scoping by focus makes that unreachable by
+      // construction. Not a focus trap: Tab still leaves.
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        // Holding a key fires ~30 keydowns a second, which would be seconds of
+        // machine-gun DTMF into somebody's IVR.
+        if (e.repeat) return;
+        if (!(DTMF_KEYS as readonly string[]).includes(e.key)) return;
+        e.preventDefault();
+        press(e.key);
+      }}
+      // `min-h-0` is load-bearing: a flex child defaults to `min-height:auto`, which
+      // defeats `overflow-y-auto` and would let the card grow past the viewport and push
+      // Hang up off-screen. `overscroll-contain` stops a scroll here chaining to the page
+      // behind an overlay that is deliberately not modal.
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t px-3 pb-3 pt-2 outline-none"
+    >
+      <div className="mb-2 flex h-6 items-center justify-between gap-2">
+        <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+          {failed ? 'Tones unavailable' : 'Sent'}
+        </span>
+        {failed ? (
+          <span className="truncate text-xs text-amber-700">
+            This call did not negotiate tone support
+          </span>
+        ) : (
+          // Tail-clipped rather than wrapped: an unbounded string in a flex row would
+          // stretch the pad below it. There is deliberately no backspace — a sent digit
+          // cannot be recalled, and a delete key would imply otherwise.
+          <span className="truncate text-right font-mono text-sm tabular-nums text-muted-foreground">
+            {digits.slice(-24)}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {DTMF_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => press(key)}
+            className="rounded-md bg-muted py-2.5 text-base font-medium tabular-nums hover:bg-muted/70 active:bg-muted/50"
+          >
+            {key}
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -35,6 +35,7 @@ import {
 } from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
+import { isDtmfKey } from '@/lib/dtmf';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
 
 /**
@@ -216,6 +217,15 @@ interface SoftphoneActions {
    * colleague's branch.
    */
   takeBack: () => void;
+  /**
+   * Press a key on the far end — an IVR menu, an extension.
+   *
+   * Returns whether the digit could be sent, and the pad SHOWS a failure. Swallowing it
+   * would be the defect `blindTransfer` above warns about in its own words: an agent who
+   * believes they pressed 1 and is waiting for a menu that never comes has no way to tell
+   * that from an IVR being slow.
+   */
+  sendDigit: (digit: string) => boolean;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -265,6 +275,18 @@ const TRANSFER_SETTLE_MS = 2_500;
  * a choice.
  */
 const TRANSFER_MAX_MS = 35_000;
+
+/**
+ * How long each DTMF tone is held, and the silence between two of them.
+ *
+ * The browser defaults (100ms / 70ms) are at the low end of what an older IVR detects
+ * reliably, and they also set how long a queued digit can be overwritten for — see
+ * `sendDigit`. 160ms matches the `Duration=160` that sip.js's own SIP INFO idiom sends.
+ * The local feedback tone is played for the same length, or the echo stops meaning what
+ * it looks like it means.
+ */
+const DTMF_DURATION_MS = 160;
+const DTMF_GAP_MS = 80;
 
 const log = (...args: unknown[]) => console.log('[softphone]', ...args);
 
@@ -918,6 +940,59 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             },
           })
           .catch(() => endCall());
+      },
+      /**
+       * Send one DTMF digit down the live call.
+       *
+       * ── WHY THE RAW RTCDTMFSender, AND NOT sip.js's `sendDtmf` ────────────────────
+       * `sendDtmf` exists and is typed, but it calls `insertDTMF(tones)` and nothing
+       * else — and per the WebRTC spec `insertDTMF` **SETS** the tone buffer, it does not
+       * append. The playout task then dequeues one character and sleeps
+       * `duration + interToneGap`. So a second press inside that window OVERWRITES the
+       * first, and the pending digit is silently dropped while its local beep has already
+       * played. At one-digit-per-press that is a ~240ms hole; an agent typing a six-digit
+       * extension at normal speed loses digits, intermittently.
+       *
+       * Appending to the pending `toneBuffer` is the fix, and it is only expressible on
+       * the raw sender. It costs nothing in types: `toneBuffer` and `canInsertDTMF` are
+       * both in lib.dom, `RTCRtpSender.dtmf` is `RTCDTMFSender | null`, and
+       * `audioSenderOf` already does the one cast this file needs. It also picks the
+       * audio sender BY KIND, where sip.js takes `getSenders()[0]` by index — safe today
+       * only because the UA is audio-only.
+       *
+       * ⚠️ A `true` here means the browser queued the telephone-events. Whether
+       * SignalWire's `<Dial>` bridge relays them to the far leg is NOT observable from
+       * the client, and is not something this return value claims.
+       */
+      sendDigit: (digit: string) => {
+        // Guards live here rather than only on the pad: the pad reads `phase` from a
+        // render, while `phaseRef` is written synchronously by `setPhase`, and a keyboard
+        // press can outrun a `disabled` prop.
+        if (phaseRef.current !== 'active') return false;
+        // While held the far end hears music. Refused because the digit WOULD arrive —
+        // DTMF is unaffected by `replaceTrack` and by `track.enabled = false`, since the
+        // sender owns it, not the track — and reaching an IVR while the agent believes
+        // the caller is parked is worse than not sending it.
+        if (holdMusicRef.current || micTrackRef.current) return false;
+        // insertDTMF throws InvalidCharacterError on an illegal character and rejects the
+        // WHOLE string, which with the append below would discard the queued digits too.
+        if (!isDtmfKey(digit)) return false;
+
+        const dtmf = audioSenderOf(invitationRef.current)?.dtmf;
+        // False when the far end never negotiated `telephone-event`, or the transceiver
+        // is not sending. Either way RTP DTMF cannot work on this call, and the pad says
+        // so rather than pretending.
+        if (!dtmf?.canInsertDTMF) {
+          log('dtmf unavailable', digit);
+          return false;
+        }
+
+        try {
+          dtmf.insertDTMF(dtmf.toneBuffer + digit, DTMF_DURATION_MS, DTMF_GAP_MS);
+        } catch {
+          return false;
+        }
+        return true;
       },
       toggleMute: () => {
         const sender = audioSenderOf(invitationRef.current);
