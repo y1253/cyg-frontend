@@ -3,23 +3,18 @@ import { Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { OverrideField } from '@/components/CompanySettings/OverrideField';
 import { SignatureField } from '@/components/CompanySettings/SignatureField';
 import {
   useCompanySignature,
+  useCompanySignatureImages,
   usePreviewSignature,
   useResetCompanySignature,
-  useSignatureImages,
   useUpdateCompanySignature,
 } from '@/hooks/useEmailSignature';
 import type { EmailSignatureOverrides } from '@/api/emailSignature';
+import { SignatureLogoPicker } from './SignatureLogoPicker';
+import { logoLabel } from './signature-logo';
 
 /**
  * This company's email signature: inherited from the firm-wide default unless overridden.
@@ -33,7 +28,9 @@ import type { EmailSignatureOverrides } from '@/api/emailSignature';
  */
 export function SignatureSettingsSection({ companyId }: { companyId: number }) {
   const { data, isLoading } = useCompanySignature(companyId);
-  const { data: images } = useSignatureImages();
+  // Scoped, not the firm-wide list: this company may also have logos of its own, and a
+  // label lookup that could not see them would render its own selection as "Unavailable".
+  const { data: images } = useCompanySignatureImages(companyId);
   const save = useUpdateCompanySignature(companyId);
   const reset = useResetCompanySignature(companyId);
   const preview = usePreviewSignature();
@@ -84,13 +81,6 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
   const overrideCount = Object.values(overrides).filter(
     (v) => v !== null,
   ).length;
-
-  const logoOptions: Record<string, string> = {
-    '0': 'No logo',
-    ...Object.fromEntries((images ?? []).map((i) => [String(i.id), i.name])),
-  };
-  const logoLabel = (id: number) =>
-    logoOptions[String(id)] ?? 'Unavailable logo';
 
   const set = <K extends keyof EmailSignatureOverrides>(
     key: K,
@@ -180,7 +170,7 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
           </div>
           {effective.signatureImageId > 0 && (
             <span className="text-[11px] text-muted-foreground">
-              Logo: {logoLabel(effective.signatureImageId)}
+              Logo: {logoLabel(images, effective.signatureImageId)}
             </span>
           )}
         </div>
@@ -215,28 +205,20 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
 
           <OverrideField
             label="Logo"
+            hint="Untick to give this company its own logo."
             inherited={defaults.signatureImageId}
             value={draft.signatureImageId}
             onChange={(next) => set('signatureImageId', next)}
-            renderInherited={(id) => logoLabel(id)}
+            // Text, not a picker: the inherited state is a read-only statement about the
+            // firm-wide default, and rendering a grid there would invite clicking it.
+            renderInherited={(id) => logoLabel(images, id)}
           >
             {(value, setValue) => (
-              <Select
-                items={logoOptions}
-                value={String(value)}
-                onValueChange={(v) => setValue(Number(v ?? '0'))}
-              >
-                <SelectTrigger size="sm" className="max-w-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(logoOptions).map(([v, label]) => (
-                    <SelectItem key={v} value={v}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SignatureLogoPicker
+                companyId={companyId}
+                value={value}
+                onChange={setValue}
+              />
             )}
           </OverrideField>
 

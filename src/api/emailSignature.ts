@@ -57,6 +57,13 @@ export interface SignatureImage {
   createdAt: string;
   /** Absolute and UNAUTHENTICATED — the same URL that goes into an email. */
   url: string;
+  /**
+   * `null` = a firm-wide logo from the admin library; a number = private to that company.
+   *
+   * Drives the "Only here" badge and, more importantly, whether the tile offers a delete —
+   * a company may USE a firm-wide logo but never edit one.
+   */
+  companyId: number | null;
 }
 
 /** Nest's error body, so the server's message reaches the admin verbatim. */
@@ -156,6 +163,12 @@ export async function previewSignature(
 }
 
 // ── The logo library ────────────────────────────────────────────────────────
+//
+// Two scopes, four operations each. The firm-wide functions hit `/signature-images`
+// (ADMIN, the /admin/company-settings library, and the source of the DEFAULT signature's
+// logo); the company ones hit `/signature-images/companies/:id` (ADMIN+MANAGER, private to
+// that company). The server keeps them apart — a company's list is firm-wide PLUS its own,
+// while the firm-wide list is firm-wide ONLY.
 
 export async function fetchSignatureImages(
   token: string,
@@ -167,15 +180,33 @@ export async function fetchSignatureImages(
   return res.json() as Promise<SignatureImage[]>;
 }
 
-/**
- * XHR rather than fetch, so `upload.onprogress` can drive a bar — the same reason
- * `uploadPhoneAudio` is shaped this way.
- *
- * Content-Type is deliberately NOT set: the browser must set it so the multipart boundary
- * is included.
- */
-export function uploadSignatureImage(
+/** The firm-wide logos PLUS this company's own — everything its picker may offer. */
+export async function fetchCompanySignatureImages(
   token: string,
+  companyId: number,
+): Promise<SignatureImage[]> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/signature-images/companies/${companyId}`,
+    { method: 'GET' },
+  );
+  await throwOnError(res, 'Failed to load the logo library');
+  return res.json() as Promise<SignatureImage[]>;
+}
+
+/**
+ * The one upload primitive, shared by both scopes.
+ *
+ * XHR rather than fetch, so `upload.onprogress` can drive a bar — the same reason
+ * `uploadPhoneAudio` is shaped this way. Content-Type is deliberately NOT set: the browser
+ * must set it so the multipart boundary is included.
+ *
+ * It is factored out rather than copied because the 413-is-nginx branch and the
+ * no-Content-Type rule are exactly the things that would drift between two copies.
+ */
+function postImageForm(
+  token: string,
+  url: string,
   file: File,
   name: string,
   onProgress?: (fraction: number) => void,
@@ -186,7 +217,7 @@ export function uploadSignatureImage(
     form.append('name', name);
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API}/signature-images`);
+    xhr.open('POST', url);
     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
     xhr.upload.onprogress = (e) => {
@@ -194,7 +225,11 @@ export function uploadSignatureImage(
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText) as SignatureImage);
+        try {
+          resolve(JSON.parse(xhr.responseText) as SignatureImage);
+        } catch {
+          reject(new Error('The server returned an unreadable response'));
+        }
         return;
       }
       // 413 is nginx, not our handler, so it has no JSON body to unwrap.
@@ -216,8 +251,36 @@ export function uploadSignatureImage(
       reject(new Error(message));
     };
     xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onabort = () => reject(new Error('Upload cancelled'));
     xhr.send(form);
   });
+}
+
+/** Upload into the firm-wide library. ADMIN only, server-side. */
+export function uploadSignatureImage(
+  token: string,
+  file: File,
+  name: string,
+  onProgress?: (fraction: number) => void,
+): Promise<SignatureImage> {
+  return postImageForm(token, `${API}/signature-images`, file, name, onProgress);
+}
+
+/** Upload a logo that belongs to ONE company. ADMIN or MANAGER. */
+export function uploadCompanySignatureImage(
+  token: string,
+  companyId: number,
+  file: File,
+  name: string,
+  onProgress?: (fraction: number) => void,
+): Promise<SignatureImage> {
+  return postImageForm(
+    token,
+    `${API}/signature-images/companies/${companyId}`,
+    file,
+    name,
+    onProgress,
+  );
 }
 
 export async function renameSignatureImage(
@@ -234,6 +297,22 @@ export async function renameSignatureImage(
   return res.json() as Promise<SignatureImage>;
 }
 
+/** Rename one of this company's OWN logos. A firm-wide id 404s here, by design. */
+export async function renameCompanySignatureImage(
+  token: string,
+  companyId: number,
+  id: number,
+  name: string,
+): Promise<SignatureImage> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/signature-images/companies/${companyId}/${id}`,
+    { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ name }) },
+  );
+  await throwOnError(res, 'Failed to rename the logo');
+  return res.json() as Promise<SignatureImage>;
+}
+
 export async function deleteSignatureImage(
   token: string,
   id: number,
@@ -241,5 +320,19 @@ export async function deleteSignatureImage(
   const res = await fetchWithAuth(token, `${API}/signature-images/${id}`, {
     method: 'DELETE',
   });
+  await throwOnError(res, 'Failed to remove the logo');
+}
+
+/** Delete one of this company's OWN logos. A firm-wide id 404s here, by design. */
+export async function deleteCompanySignatureImage(
+  token: string,
+  companyId: number,
+  id: number,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/signature-images/companies/${companyId}/${id}`,
+    { method: 'DELETE' },
+  );
   await throwOnError(res, 'Failed to remove the logo');
 }

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
+import { ImagePlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,8 @@ import {
   useSignatureImages,
   useUploadSignatureImage,
 } from '@/hooks/useEmailSignature';
+import { ConfirmRemoveButton } from './ConfirmRemoveButton';
+import { SignatureImageThumb } from './SignatureImageThumb';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -108,13 +110,7 @@ export function SignatureImageLibrary() {
         <ul className="divide-y rounded-md border">
           {images.map((image) => (
             <li key={image.id} className="flex items-center gap-3 p-3">
-              <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded border bg-white">
-                <img
-                  src={image.url}
-                  alt=""
-                  className="max-h-10 max-w-14 object-contain"
-                />
-              </div>
+              <SignatureImageThumb image={image} />
               <Input
                 defaultValue={image.name}
                 className="h-8 max-w-[16rem]"
@@ -131,36 +127,14 @@ export function SignatureImageLibrary() {
                 {image.width}×{image.height} · {formatBytes(image.size)}
               </span>
               <div className="ml-auto flex items-center gap-1.5">
-                {confirmId === image.id ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => {
-                        remove.mutate(image.id);
-                        setConfirmId(null);
-                      }}
-                    >
-                      Remove
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setConfirmId(null)}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${image.name}`}
-                    onClick={() => setConfirmId(image.id)}
-                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-red-600"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+                <ConfirmRemoveButton
+                  label={image.name}
+                  confirming={confirmId === image.id}
+                  onConfirmingChange={(open) =>
+                    setConfirmId(open ? image.id : null)
+                  }
+                  onRemove={() => remove.mutate(image.id)}
+                />
               </div>
             </li>
           ))}
