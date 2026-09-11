@@ -1,5 +1,10 @@
 import { fetchWithAuth } from './client';
-import type { CallSummary, TransferResult, TransferStatus } from './phone';
+import type {
+  CallSummary,
+  ConferenceStatus,
+  TransferResult,
+  TransferStatus,
+} from './phone';
 
 const API = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -190,4 +195,109 @@ export async function fetchInternalTransferStatus(
   );
   await throwOnError(res, 'Could not check the transfer');
   return res.json() as Promise<TransferStatus>;
+}
+
+// ─── Conference: bring a third colleague onto a staff call ───────────────────
+//
+// ⚠️ COLLEAGUE-ONLY. There is no `phone` or `contactId` variant here and the server has
+// no field that would accept one: a staff call has no caller ID of its own, and
+// borrowing a company's support number would bill and brand a client's number — and
+// surface the leg in that client's timeline.
+
+async function internalConference(
+  token: string,
+  sid: string,
+  op: string,
+  body: Record<string, unknown> | undefined,
+  fallback: string,
+): Promise<ConferenceStatus> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/conference/${op}`,
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body ?? {}) },
+  );
+  await throwOnError(res, fallback);
+  return res.json() as Promise<ConferenceStatus>;
+}
+
+export function addToInternalConference(
+  token: string,
+  sid: string,
+  targetUserId: number,
+): Promise<ConferenceStatus> {
+  return internalConference(
+    token,
+    sid,
+    'add',
+    { targetUserId },
+    'Could not add them to the call',
+  );
+}
+
+export function setInternalConferenceHold(
+  token: string,
+  sid: string,
+  partyId: string,
+  held: boolean,
+): Promise<ConferenceStatus> {
+  return internalConference(
+    token,
+    sid,
+    'hold',
+    { partyId, held },
+    held ? 'Could not put them on hold' : 'Could not take them off hold',
+  );
+}
+
+export function swapInternalConference(
+  token: string,
+  sid: string,
+): Promise<ConferenceStatus> {
+  return internalConference(
+    token,
+    sid,
+    'swap',
+    undefined,
+    'Could not swap calls',
+  );
+}
+
+export function mergeInternalConference(
+  token: string,
+  sid: string,
+): Promise<ConferenceStatus> {
+  return internalConference(
+    token,
+    sid,
+    'merge',
+    undefined,
+    'Could not merge the calls',
+  );
+}
+
+export function dropInternalConferenceParty(
+  token: string,
+  sid: string,
+  partyId: string,
+): Promise<ConferenceStatus> {
+  return internalConference(
+    token,
+    sid,
+    'drop',
+    { partyId },
+    'Could not remove them from the call',
+  );
+}
+
+/** ⚠️ `sid` is the ROOT sid, the only one `assertParticipant` can look up. */
+export async function fetchInternalConferenceStatus(
+  token: string,
+  sid: string,
+): Promise<ConferenceStatus> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/conference-status`,
+  );
+  await throwOnError(res, 'Could not check the call');
+  return res.json() as Promise<ConferenceStatus>;
 }

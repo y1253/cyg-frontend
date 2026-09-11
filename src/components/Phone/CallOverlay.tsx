@@ -12,10 +12,15 @@ import {
   Building2,
   CornerDownRight,
   Undo2,
+  UserPlus,
+  ArrowLeftRight,
+  UserMinus,
+  Users,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatE164 } from '@/lib/phone';
+import type { ConferenceStatus } from '@/api/phone';
 import { DTMF_KEYS, dtmfTones } from '@/lib/dtmf';
 import { playDtmfTone, unlockAudio } from '@/lib/notificationSound';
 import {
@@ -25,15 +30,31 @@ import {
   type TransferView,
 } from '@/context/SoftphoneContext';
 import { TransferPicker } from '@/components/Phone/TransferPicker';
+import { AddCallPicker } from '@/components/Phone/AddCallPicker';
+import {
+  canMerge,
+  canSwap,
+  partyRows,
+  holdAllLabel,
+  showConferenceCard,
+} from '@/components/Phone/conference-parties';
 
 /**
- * One secondary in-call control. Icon over label so four fit a single 358px row.
+ * One secondary in-call control. Icon over label.
  *
- * A shared constant rather than four copies, because the wrap arithmetic only works if
- * every one of them carries the same `min-w`.
+ * ── WHY A GRID CELL RATHER THAN A min-w AND A WRAP ───────────────────────────
+ * These used to be `min-w-[5rem] flex-1` inside a `flex-wrap`, with a comment doing the
+ * arithmetic: inner width 358px, four buttons at 4x80 + 3x8 = 344, so all four share one
+ * row and Hang up wraps alone beneath them. That held for exactly four buttons. A fifth
+ * needs 432 and wraps, which pushes Hang up up beside it and halves the one control that
+ * must never shrink.
+ *
+ * Shrinking to `min-w-[4rem]` would leave six pixels of slack — too tight to trust across
+ * fonts. So the row is now a 3-column grid, which cannot mis-wrap whatever is added to
+ * it: five buttons fill two rows, and Hang up stays outside the grid at full width.
  */
 const SECONDARY_BTN =
-  'flex min-w-[5rem] flex-1 flex-col items-center justify-center gap-0.5 ' +
+  'flex w-full flex-col items-center justify-center gap-0.5 ' +
   'rounded-md px-2 py-1.5 text-[11px] font-medium';
 
 function mmss(total: number): string {
@@ -54,8 +75,16 @@ function mmss(total: number): string {
  * call state, so navigation never tears down a live call.
  */
 export function CallOverlay() {
-  const { phase, info, transfer, canTakeBack, muted, held, seconds } =
-    useSoftphone();
+  const {
+    phase,
+    info,
+    transfer,
+    conference,
+    canTakeBack,
+    muted,
+    held,
+    seconds,
+  } = useSoftphone();
   const {
     answer,
     hangup,
@@ -64,10 +93,24 @@ export function CallOverlay() {
     blindTransfer,
     takeBack,
     sendDigit,
+    addCall,
+    holdParty,
+    swapParties,
+    mergeParties,
+    dropParty,
   } = useSoftphoneActions();
   const navigate = useNavigate();
   const [transferOpen, setTransferOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [padOpen, setPadOpen] = useState(false);
+
+  /**
+   * More than two people on the line.
+   *
+   * Drives the controls that change meaning in a conference — never `phase`, which stays
+   * `'active'` for the reason `SoftphoneState.conference` gives.
+   */
+  const inConference = showConferenceCard(conference);
 
   if (phase === 'idle') return null;
 
@@ -190,7 +233,17 @@ export function CallOverlay() {
           reject every press, and the pad's only failure wording is about tone support,
           which would be a lie. `padOpen` is untouched, so it reappears on resume.
         */}
-        {padOpen && !ringing && !held && (
+        {inConference && conference && (
+          <ConferenceCard
+            view={conference}
+            onHoldParty={(id, next) => void holdParty(id, next).catch(() => undefined)}
+            onSwap={() => void swapParties().catch(() => undefined)}
+            onMerge={() => void mergeParties().catch(() => undefined)}
+            onDrop={(id) => void dropParty(id).catch(() => undefined)}
+          />
+        )}
+
+        {padOpen && !ringing && !held && !inConference && (
           <DialPad key={info?.callSid} onDigit={sendDigit} />
         )}
 
@@ -223,13 +276,9 @@ export function CallOverlay() {
             </button>
           ) : (
             <>
-              {/*
-                Four secondary controls at `min-w-[5rem]`, stacked icon-over-label.
-                The inner width is 358px, so at the old `min-w-[7rem]` only THREE fit a
-                row and a fourth pushed Hang up up beside it, halving the one button that
-                must never shrink. At 5rem all four share row one (4x80 + 3x8 = 344) and
-                Hang up wraps alone to the full width, exactly as it does today.
-              */}
+              {/* See SECONDARY_BTN: a 3-column grid, so adding a control cannot push
+                  Hang up out of its own full-width row. */}
+              <div className="grid w-full grid-cols-3 gap-2">
               <button
                 onClick={toggleHold}
                 className={[
@@ -239,8 +288,18 @@ export function CallOverlay() {
                     : 'bg-muted hover:bg-muted/70',
                 ].join(' ')}
               >
-                {held ? <Play size={16} /> : <Pause size={16} />}
-                {held ? 'Resume' : 'Hold'}
+                {inConference ? (
+                  <Users size={16} />
+                ) : held ? (
+                  <Play size={16} />
+                ) : (
+                  <Pause size={16} />
+                )}
+                {inConference
+                  ? holdAllLabel(conference!)
+                  : held
+                    ? 'Resume'
+                    : 'Hold'}
               </button>
               <button
                 onClick={toggleMute}
@@ -256,11 +315,13 @@ export function CallOverlay() {
               </button>
               <button
                 onClick={() => setPadOpen((open) => !open)}
-                disabled={held}
+                disabled={held || inConference}
                 title={
-                  held
-                    ? 'The caller is on hold and would not hear the tones'
-                    : undefined
+                  inConference
+                    ? 'Everyone on the call would hear the tones'
+                    : held
+                      ? 'The caller is on hold and would not hear the tones'
+                      : undefined
                 }
                 className={[
                   SECONDARY_BTN,
@@ -275,11 +336,39 @@ export function CallOverlay() {
               </button>
               <button
                 onClick={() => setTransferOpen(true)}
-                className={[SECONDARY_BTN, 'bg-muted hover:bg-muted/70'].join(' ')}
+                disabled={inConference}
+                title={
+                  inConference
+                    ? 'Transferring would take the other people off the call'
+                    : undefined
+                }
+                className={[
+                  SECONDARY_BTN,
+                  'disabled:cursor-not-allowed disabled:opacity-40',
+                  'bg-muted hover:bg-muted/70',
+                ].join(' ')}
               >
                 <PhoneForwarded size={16} />
                 Transfer
               </button>
+              <button
+                onClick={() => setAddOpen(true)}
+                disabled={ringing || (conference ? !conference.canAdd : false)}
+                title={
+                  conference && !conference.canAdd
+                    ? 'That is as many people as one call can hold'
+                    : undefined
+                }
+                className={[
+                  SECONDARY_BTN,
+                  'disabled:cursor-not-allowed disabled:opacity-40',
+                  'bg-muted hover:bg-muted/70',
+                ].join(' ')}
+              >
+                <UserPlus size={16} />
+                Add call
+              </button>
+              </div>
               <button
                 onClick={hangup}
                 className="flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
@@ -297,6 +386,15 @@ export function CallOverlay() {
         onOpenChange={setTransferOpen}
         onTransfer={blindTransfer}
       />
+      {info && (
+        <AddCallPicker
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          companyId={info.companyId}
+          internal={info.kind === 'internal'}
+          onAdd={addCall}
+        />
+      )}
     </div>
   );
 }
@@ -314,6 +412,106 @@ export function CallOverlay() {
  * Hang up mean anything here — there is no longer a bridge to act on — and leaving them
  * on screen would invite an agent to press them.
  */
+/**
+ * Who else is on the call, and what can be done to each of them.
+ *
+ * Scrolls (`min-h-0 overflow-y-auto`) like the dial pad, and for the same reason: with
+ * several parties this can outgrow a short viewport, and Hang up sits below it.
+ *
+ * The `⇄` swap shortcut appears ONLY at exactly two present parties, where "swap" has an
+ * unambiguous meaning. With three it would be a guess about which two, and the per-party
+ * hold buttons already say it precisely. See `conference-parties.ts`.
+ */
+function ConferenceCard({
+  view,
+  onHoldParty,
+  onSwap,
+  onMerge,
+  onDrop,
+}: {
+  view: ConferenceStatus;
+  onHoldParty: (partyId: string, held: boolean) => void;
+  onSwap: () => void;
+  onMerge: () => void;
+  onDrop: (partyId: string) => void;
+}) {
+  const rows = partyRows(view);
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t">
+      <ul className="divide-y">
+        {rows.map((row) => (
+          <li key={row.id} className="flex items-center gap-2 px-3 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">
+                {row.label}
+              </span>
+              <span
+                className={[
+                  'flex items-center gap-1 text-xs',
+                  row.state === 'held'
+                    ? 'text-amber-700'
+                    : row.state === 'gone'
+                      ? 'text-muted-foreground/60'
+                      : 'text-muted-foreground',
+                ].join(' ')}
+              >
+                {row.state === 'ringing' && (
+                  <Loader2 size={11} className="shrink-0 animate-spin" />
+                )}
+                {row.status}
+              </span>
+            </span>
+
+            {canSwap(view) && !row.held && row.state === 'connected' && (
+              <button
+                onClick={onSwap}
+                title="Talk to the other person instead"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <ArrowLeftRight size={14} />
+              </button>
+            )}
+            <button
+              onClick={() => onHoldParty(row.id, !row.held)}
+              disabled={!row.canHold}
+              title={row.held ? `Bring ${row.label} back` : `Hold ${row.label}`}
+              className={[
+                'rounded-md p-1.5 disabled:cursor-not-allowed disabled:opacity-30',
+                row.held
+                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              ].join(' ')}
+            >
+              {row.held ? <Play size={14} /> : <Pause size={14} />}
+            </button>
+            <button
+              onClick={() => onDrop(row.id)}
+              disabled={!row.canDrop}
+              title={`Remove ${row.label} from the call`}
+              className="rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <UserMinus size={14} />
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {canMerge(view) && (
+        <div className="border-t p-2">
+          <button
+            onClick={onMerge}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md bg-teal-50 px-3 py-2 text-xs font-medium text-teal-800 hover:bg-teal-100"
+          >
+            <Users size={14} />
+            Merge everyone
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TransferringCard({
   info,
   transfer,

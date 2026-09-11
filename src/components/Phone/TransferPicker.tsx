@@ -66,7 +66,18 @@ export function TransferPicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/*
+        ⚠️ Above the call overlay, which sits at `z-[200]`.
+
+        The shadcn dialog defaults to `z-50`, so an in-call picker opens BEHIND the call
+        card — the card covers its middle and the controls under it are unreachable.
+        Every other dialog in the app is fine at 50 because nothing else renders that
+        high; these two are the only ones raised from inside a live call.
+
+        The backdrop stays at 50 deliberately, so the call card is NOT dimmed and Hang up
+        stays clickable — the one control that must never be blocked.
+      */}
+      <DialogContent className="z-[210]">
         <DialogHeader>
           <DialogTitle>Transfer this call</DialogTitle>
         </DialogHeader>

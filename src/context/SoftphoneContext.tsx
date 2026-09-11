@@ -27,11 +27,25 @@ import {
   setCallHold,
   transferCallBlind,
   fetchTransferStatus,
+  addCallToConference,
+  setConferenceHold,
+  swapConference,
+  mergeConference,
+  dropConferenceParty,
+  fetchConferenceStatus,
+  type AddCallTarget,
+  type ConferenceStatus,
   type TransferState,
 } from '@/api/phone';
 import {
   fetchInternalTransferStatus,
   transferInternalCallBlind,
+  addToInternalConference,
+  setInternalConferenceHold,
+  swapInternalConference,
+  mergeInternalConference,
+  dropInternalConferenceParty,
+  fetchInternalConferenceStatus,
 } from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
@@ -153,6 +167,16 @@ interface SoftphoneState {
   status: SoftphoneStatus;
   phase: CallPhase;
   info: IncomingCallInfo | null;
+  /**
+   * More than two people on this call, once somebody has been added.
+   *
+   * ⚠️ A FIELD beside `phase`, deliberately NOT a new CallPhase value — the same rule
+   * `held` states below. `phase` drives tryPair's `!== 'idle'` guard, the overlay portal,
+   * the call timer and sendDigit's `=== 'active'` check; a fifth value would have to be
+   * added to each of those and every omission is a silent bug. A conference is an
+   * ordinary active call that happens to have more people in it.
+   */
+  conference: ConferenceStatus | null;
   /** Non-null exactly while `phase === 'transferring'`. */
   transfer: TransferView | null;
   /**
@@ -234,6 +258,29 @@ interface SoftphoneActions {
    * that from an IVR being slow.
    */
   sendDigit: (digit: string) => boolean;
+  /**
+   * Bring one more person onto the call.
+   *
+   * Whoever is already on it is put on hold first, exactly as a phone does — that
+   * happens server-side, in one request, so a failure cannot leave a stranger listening
+   * to a client who was never parked.
+   *
+   * Rejects rather than swallowing, like `blindTransfer` and unlike `setCallHold`.
+   *
+   * ⚠️ No optimistic phase change, unlike `blindTransfer`: nothing here tears the SIP
+   * session down. The agent's own leg is redirected in place and keeps its dialog, so
+   * the only visible change is a re-INVITE for the new media — which the stateChange
+   * listener ignores, since it acts only on Established and Terminated.
+   */
+  addCall: (target: AddCallTarget) => Promise<void>;
+  /** Park or un-park one person. `partyId` is the server's opaque id, never a sid. */
+  holdParty: (partyId: string, held: boolean) => Promise<void>;
+  /** Talk to the other one. Only offered with exactly two people on the call. */
+  swapParties: () => Promise<void>;
+  /** Everybody hears everybody. */
+  mergeParties: () => Promise<void>;
+  /** Remove one person; the call continues with whoever is left. */
+  dropParty: (partyId: string) => Promise<void>;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -268,6 +315,15 @@ const PAIR_WINDOW_MS = 33_000;
 
 /** How often the transferring agent's card asks whether the colleague picked up. */
 const TRANSFER_POLL_MS = 3_000;
+
+/**
+ * How often the conference card re-reads its party list.
+ *
+ * Slower than the transfer poll: each tick costs the server a `listParticipants` plus a
+ * `getCall` for anybody still ringing, and unlike a transfer there is no deadline to
+ * race — nothing here resolves on its own.
+ */
+const CONFERENCE_POLL_MS = 4_000;
 /**
  * How long the card lingers on its final wording before clearing itself.
  *
@@ -324,6 +380,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [phase, setPhaseState] = useState<CallPhase>('idle');
   const [info, setInfoState] = useState<IncomingCallInfo | null>(null);
   const [transfer, setTransfer] = useState<TransferView | null>(null);
+  const [conference, setConference] = useState<ConferenceStatus | null>(
+    null,
+  );
   const [muted, setMuted] = useState(false);
   const [held, setHeld] = useState(false);
   /** The real microphone track, parked here while hold music takes its place. */
@@ -391,6 +450,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const setTransferBoth = useCallback((next: TransferView | null) => {
     transferRef.current = next;
     setTransfer(next);
+  }, []);
+
+  /**
+   * Mirrored to a ref for the same reason as `transfer`: the poll below and the actions
+   * read it from callbacks that would otherwise close over a stale render.
+   */
+  const conferenceRef = useRef<ConferenceStatus | null>(null);
+  const setConferenceBoth = useCallback((next: ConferenceStatus | null) => {
+    conferenceRef.current = next;
+    setConference(next);
   }, []);
 
   // ── Media ─────────────────────────────────────────────────────────────────
@@ -463,7 +532,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setPhase('idle');
     setInfo(null);
     setTransferBoth(null);
-  }, [releaseMedia, setInfo, setPhase, setTransferBoth]);
+    setConferenceBoth(null);
+  }, [releaseMedia, setInfo, setPhase, setTransferBoth, setConferenceBoth]);
 
   // ── Incoming calls ────────────────────────────────────────────────────────
   /**
@@ -818,6 +888,107 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     };
   }, [phase, endCall, setTransferBoth]);
 
+  // ── Conference ────────────────────────────────────────────────────────────
+
+  /**
+   * Keep the party list honest while a conference is live.
+   *
+   * A bare `setInterval` rather than TanStack, for the reason the transfer poll above
+   * gives in its own words: this feeds a state machine, not a render-time cache read,
+   * and the app-wide retry plus refetch-on-focus would turn one answer into several.
+   *
+   * ⚠️ NO equivalent of TRANSFER_MAX_MS. A transfer resolves in seconds so a backstop is
+   * a safety net; a conference legitimately runs for an hour, and giving up on one would
+   * blank the controls out from under a call that is still going.
+   *
+   * An inactive answer clears the card and NOTHING else — `endCall` stays owned by the
+   * SIP Terminated listener, which is the only thing that actually knows the call ended.
+   */
+  useEffect(() => {
+    if (!conference || !token) return;
+    let stopped = false;
+
+    const tick = () => {
+      const call = infoRef.current;
+      if (!call) return;
+      const fetching =
+        call.kind === 'internal'
+          ? fetchInternalConferenceStatus(token, call.callSid)
+          : fetchConferenceStatus(token, call.companyId, call.callSid);
+
+      void fetching
+        .then((view) => {
+          if (stopped) return;
+          setConferenceBoth(view.active ? view : null);
+        })
+        // A blip must not blank a live call's controls; the next tick re-asks.
+        .catch(() => undefined);
+    };
+
+    const id = setInterval(tick, CONFERENCE_POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [conference, token, setConferenceBoth]);
+
+
+  /**
+   * Run one conference operation against whichever API this call belongs to.
+   *
+   * Company and internal calls have separate endpoints because they have separate
+   * authorization primitives (`assertMayUseCompanyPhone` + `assertCallBelongsTo` versus
+   * `assertParticipant`), and unifying them server-side would weaken one. This is the
+   * single place the client picks between them.
+   *
+   * ⚠️ Reads `infoRef`, never `pendingRef`. During an add, this browser is guaranteed to
+   * receive an unrelated INVITE and to poll `/pending-call` — `pendingRef` holds the
+   * newest event SEEN, which is not necessarily the call we are on. That is the exact
+   * bug `blindTransfer` and `toggleHold` already carry warnings about.
+   *
+   * Every operation returns the new view, so the card updates without waiting for the
+   * next poll.
+   */
+  const runConference = useCallback(
+    async (
+      op: (call: IncomingCallInfo, internal: boolean) => Promise<ConferenceStatus>,
+    ): Promise<void> => {
+      const call = infoRef.current;
+      if (!call || !token) return;
+      const view = await op(call, call.kind === 'internal');
+      setConferenceBoth(view.active ? view : null);
+    },
+    [token, setConferenceBoth],
+  );
+
+  /**
+   * Park everybody who is not already parked.
+   *
+   * Sequential rather than `Promise.all`: these are writes against one conference, and a
+   * failure half way through should stop rather than race the rest. The last answer is
+   * the one returned, which is the fully-applied view.
+   */
+  const holdAllParties = useCallback(
+    async (call: IncomingCallInfo, internal: boolean) => {
+      const parties = conferenceRef.current?.parties ?? [];
+      let view = conferenceRef.current!;
+      for (const party of parties) {
+        if (party.state === 'held' || party.state === 'gone') continue;
+        view = internal
+          ? await setInternalConferenceHold(token!, call.callSid, party.id, true)
+          : await setConferenceHold(
+              token!,
+              call.companyId,
+              call.callSid,
+              party.id,
+              true,
+            );
+      }
+      return view;
+    },
+    [token],
+  );
+
   // ── Actions ───────────────────────────────────────────────────────────────
   const actions = useMemo<SoftphoneActions>(
     () => ({
@@ -972,6 +1143,63 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
        * SignalWire's `<Dial>` bridge relays them to the far leg is NOT observable from
        * the client, and is not something this return value claims.
        */
+      addCall: (target: AddCallTarget) =>
+        runConference((call, internal) => {
+          if (internal) {
+            if (!('targetUserId' in target)) {
+              // Structurally unreachable: the internal picker offers colleagues only.
+              // Stated anyway, because the alternative is dialling a number from a call
+              // that has no caller ID to present.
+              throw new Error('Only a colleague can be added to a staff call');
+            }
+            return addToInternalConference(
+              token!,
+              call.callSid,
+              target.targetUserId,
+            );
+          }
+          return addCallToConference(
+            token!,
+            call.companyId,
+            call.callSid,
+            target,
+          );
+        }),
+
+      holdParty: (partyId: string, held: boolean) =>
+        runConference((call, internal) =>
+          internal
+            ? setInternalConferenceHold(token!, call.callSid, partyId, held)
+            : setConferenceHold(
+                token!,
+                call.companyId,
+                call.callSid,
+                partyId,
+                held,
+              ),
+        ),
+
+      swapParties: () =>
+        runConference((call, internal) =>
+          internal
+            ? swapInternalConference(token!, call.callSid)
+            : swapConference(token!, call.companyId, call.callSid),
+        ),
+
+      mergeParties: () =>
+        runConference((call, internal) =>
+          internal
+            ? mergeInternalConference(token!, call.callSid)
+            : mergeConference(token!, call.companyId, call.callSid),
+        ),
+
+      dropParty: (partyId: string) =>
+        runConference((call, internal) =>
+          internal
+            ? dropInternalConferenceParty(token!, call.callSid, partyId)
+            : dropConferenceParty(token!, call.companyId, call.callSid, partyId),
+        ),
+
       sendDigit: (digit: string) => {
         // Guards live here rather than only on the pad: the pad reads `phase` from a
         // render, while `phaseRef` is written synchronously by `setPhase`, and a keyboard
@@ -1031,6 +1259,35 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
        * is on a live call and the agent has already stopped talking to them.
        */
       toggleHold: () => {
+        /**
+         * ⚠️ In a conference, hold is a SERVER operation and nothing below runs.
+         *
+         * The browser's hold works by replacing the microphone on the agent's own
+         * outgoing track — and in a conference that track is mixed to EVERY participant.
+         * Holding would therefore play hold music to the very person it claims you are
+         * still talking to, and mute the agent to both. `setCallHold` would also pause
+         * the recording of the whole conference rather than one party's share of it.
+         *
+         * So the two-party path below is left exactly as it was, including its
+         * load-bearing pause-before-music ordering, and conference hold goes through
+         * per-participant holds instead.
+         */
+        if (conferenceRef.current) {
+          // One button, two meanings: "hold everyone" while the call is merged, and
+          // "merge everyone" once anybody is held. Merge is the only way back, so the
+          // button has to offer it.
+          const merged = conferenceRef.current.merged;
+          void runConference((call, internal) => {
+            if (!merged) {
+              return internal
+                ? mergeInternalConference(token!, call.callSid)
+                : mergeConference(token!, call.companyId, call.callSid);
+            }
+            return holdAllParties(call, internal);
+          }).catch(() => undefined);
+          return;
+        }
+
         if (holdBusyRef.current) return;
         const sender = audioSenderOf(invitationRef.current);
         // `infoRef`, not `pendingRef` — same bug as `blindTransfer` had. `pendingRef`
@@ -1091,7 +1348,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     // `setPhase` / `setTransferBoth` / `setInfo` are all identity-stable useCallbacks, so
     // listing them keeps the linter honest without churning this memo — which must stay
     // identity-stable, since a consumer that only wants the buttons re-renders on it.
-    [endCall, setPhase, setTransferBoth, teardownHold, token, tryPair],
+    [
+      endCall,
+      setPhase,
+      setTransferBoth,
+      teardownHold,
+      token,
+      tryPair,
+      runConference,
+      holdAllParties,
+    ],
   );
 
   const state = useMemo<SoftphoneState>(
@@ -1100,6 +1366,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       phase,
       info,
       transfer,
+      conference,
       // Both halves matter: the colleague has not answered yet, AND our fork of the
       // transfer <Dial> is still alive. The server can say the first; only the browser
       // knows the second, and without it the button would offer a dead session.
@@ -1109,7 +1376,17 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       seconds,
       hasHeldInvite,
     }),
-    [status, phase, info, transfer, muted, held, seconds, hasHeldInvite],
+    [
+      status,
+      phase,
+      info,
+      transfer,
+      conference,
+      muted,
+      held,
+      seconds,
+      hasHeldInvite,
+    ],
   );
 
   return (

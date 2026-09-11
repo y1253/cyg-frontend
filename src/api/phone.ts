@@ -587,3 +587,165 @@ export async function fetchPresence(
   if (!res.ok) throw await failure(res, 'Failed to load who is available');
   return res.json() as Promise<{ userIds: number[] }>;
 }
+
+// ─── Conference: add call, hold, swap, merge, drop ───────────────────────────
+
+/**
+ * How one other person on the call appears.
+ *
+ * `ringing` is a leg that has been dialled but has not joined the room yet, and it is
+ * genuinely different from `gone` — dropping the row the instant it has no participant
+ * would make a party vanish a fraction of a second after the agent asked for them.
+ */
+export type PartyState = 'ringing' | 'connected' | 'held' | 'gone';
+
+export interface ConferenceParty {
+  /**
+   * An OPAQUE id the server issued (`peer`, `p2`, …) — never a call sid.
+   *
+   * Post this back to name a person. A leg sid would be refused: every guard runs on the
+   * root sid and the server derives the rest itself.
+   */
+  id: string;
+  label: string;
+  state: PartyState;
+}
+
+export interface ConferenceStatus {
+  active: boolean;
+  parties: ConferenceParty[];
+  /** Nobody is held: everybody can hear everybody. */
+  merged: boolean;
+  canAdd: boolean;
+  /** Swapping only means something with exactly two other people to swap between. */
+  canSwap: boolean;
+}
+
+/** Exactly one of these. The server resolves it — the client never picks the number. */
+export type AddCallTarget =
+  | { targetUserId: number }
+  | { phone: string }
+  | { contactId: number };
+
+const conferenceUrl = (companyId: number, callSid: string, op: string) =>
+  `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/conference/${op}`;
+
+/**
+ * Every conference action THROWS on failure, following `transferCallBlind`'s rule and
+ * not `setCallHold`'s.
+ *
+ * A hold or swap that silently did nothing leaves an agent talking to the wrong person,
+ * or believing a client is parked while that client is listening. That has to reach the
+ * UI; pausing a recording does not.
+ *
+ * ⚠️ `callSid` is always the ROOT sid (`info.callSid`).
+ */
+async function conferenceAction(
+  token: string,
+  companyId: number,
+  callSid: string,
+  op: string,
+  body: Record<string, unknown> | undefined,
+  fallback: string,
+): Promise<ConferenceStatus> {
+  const res = await fetchWithAuth(token, conferenceUrl(companyId, callSid, op), {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) throw await failure(res, fallback);
+  return res.json() as Promise<ConferenceStatus>;
+}
+
+export function addCallToConference(
+  token: string,
+  companyId: number,
+  callSid: string,
+  target: AddCallTarget,
+): Promise<ConferenceStatus> {
+  return conferenceAction(
+    token,
+    companyId,
+    callSid,
+    'add',
+    target,
+    'Could not add them to the call',
+  );
+}
+
+export function setConferenceHold(
+  token: string,
+  companyId: number,
+  callSid: string,
+  partyId: string,
+  held: boolean,
+): Promise<ConferenceStatus> {
+  return conferenceAction(
+    token,
+    companyId,
+    callSid,
+    'hold',
+    { partyId, held },
+    held ? 'Could not put them on hold' : 'Could not take them off hold',
+  );
+}
+
+export function swapConference(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<ConferenceStatus> {
+  return conferenceAction(
+    token,
+    companyId,
+    callSid,
+    'swap',
+    undefined,
+    'Could not swap calls',
+  );
+}
+
+export function mergeConference(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<ConferenceStatus> {
+  return conferenceAction(
+    token,
+    companyId,
+    callSid,
+    'merge',
+    undefined,
+    'Could not merge the calls',
+  );
+}
+
+export function dropConferenceParty(
+  token: string,
+  companyId: number,
+  callSid: string,
+  partyId: string,
+): Promise<ConferenceStatus> {
+  return conferenceAction(
+    token,
+    companyId,
+    callSid,
+    'drop',
+    { partyId },
+    'Could not remove them from the call',
+  );
+}
+
+/** Polled while a conference is live. `callSid` is the ROOT sid. */
+export async function fetchConferenceStatus(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<ConferenceStatus> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/conference-status`,
+  );
+  if (!res.ok) throw await failure(res, 'Could not check the call');
+  return res.json() as Promise<ConferenceStatus>;
+}
