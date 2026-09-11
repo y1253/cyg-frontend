@@ -21,9 +21,10 @@ import { InboxNotices } from './InboxNotices';
 import { InboxRow } from './InboxRow';
 import { formatE164 } from '@/lib/phone';
 import {
-  FOLDERS, KIND_FILTER_LABELS, MAILBOX_ONLY_FOLDERS,
+  KIND_FILTER_LABELS,
   type CompleteTarget, type KindFilter, type UnifiedItem,
 } from './types';
+import { FolderTabs } from './FolderTabs';
 import { AdvancedSearchPanel } from './AdvancedSearchPanel';
 import type { SearchFilters } from './search-filters';
 
@@ -372,37 +373,13 @@ export function InboxView({
         onDismissConnect={onDismissConnect}
       />
 
-      {/* Folder tabs */}
-      <div className="flex items-center gap-1 border-b">
-        {FOLDERS.filter(
-          // Sent / Spam / Trash are mailbox folders. With no mailbox they would render
-          // as tabs that are permanently empty and can never fill.
-          (f) => account || !MAILBOX_ONLY_FOLDERS.includes(f.id),
-        ).map(({ id, label, icon: Icon }) => {
-          const badge =
-            id === 'UNCOMPLETED' ? uncompletedCount : id === 'UNREAD' ? unreadCount : 0;
-          return (
-            <button
-              key={id}
-              onClick={() => onSelectFolder(id)}
-              className={[
-                'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors',
-                selectedLabel === id
-                  ? 'text-teal-700 border-b-2 border-teal-600 font-medium -mb-px'
-                  : 'text-muted-foreground hover:text-foreground',
-              ].join(' ')}
-            >
-              <Icon size={13} />
-              {label}
-              {badge > 0 && (
-                <span className="ml-0.5 text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 font-semibold leading-none">
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <FolderTabs
+        account={account}
+        selectedLabel={selectedLabel}
+        onSelectFolder={onSelectFolder}
+        unreadCount={unreadCount}
+        uncompletedCount={uncompletedCount}
+      />
 
       {/* Search + filter toolbar. Search works in every folder; the kind filter and
           multi-select are inbox-only (chats and completion state live there). */}

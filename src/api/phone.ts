@@ -155,6 +155,8 @@ export interface IncomingCallPayload {
   companyId: number;
   companyName: string;
   from: string;
+  /** The saved contact's name for `from`. Absent when nobody has saved the caller. */
+  fromName?: string;
   callSid: string;
   at: number;
 }
@@ -177,8 +179,16 @@ interface PhoneItemBase {
   id: string;
   sid: string;
   direction: 'inbound' | 'outbound';
-  /** The customer's number — what the row shows and what "call back" dials. */
+  /** The customer's number — what "call back" dials and what keys an SMS thread. */
   counterparty: string;
+  /**
+   * The saved contact's name for `counterparty`, or null when nobody has saved it.
+   *
+   * Resolved per request on the server, so renaming a contact relabels every row within
+   * one poll. Display as `counterpartyName ?? formatE164(counterparty)` — never INSTEAD
+   * of keeping the number available, which is what a call-back or a reply needs.
+   */
+  counterpartyName?: string | null;
   supportNumber: string;
   /** ISO. The merge key against emails and chat messages. */
   at: string;

@@ -39,9 +39,12 @@ export function RingingCallBanner({
         </span>
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="text-sm font-semibold text-teal-900">
-            Incoming call · {formatE164(call.from) || 'Unknown caller'}
+            Incoming call ·{' '}
+            {call.fromName || formatE164(call.from) || 'Unknown caller'}
           </span>
           <span className="truncate text-xs text-teal-800/80">
+            {/* With a name above, the number belongs here — otherwise it is nowhere. */}
+            {call.fromName && <>{formatE164(call.from)} · </>}
             Ringing {call.companyName} now
           </span>
         </span>

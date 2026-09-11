@@ -89,6 +89,14 @@ export interface IncomingCallInfo {
   companyId: number;
   companyName: string;
   from: string;
+  /**
+   * The saved contact's name for `from`, when this company has one. INBOUND only —
+   * an outbound call's other party is `to`, which no contact lookup covers.
+   *
+   * Absent on an event from an older build, and absent whenever nobody has saved the
+   * caller, which is most calls. The card falls back to formatting `from`.
+   */
+  fromName?: string;
   /** The number being dialled. Outbound only. */
   to?: string;
   /** Absent on an event from an older build — treated as inbound. */

@@ -153,9 +153,16 @@ export function CallDetailView({
           </div>
           <div className="min-w-0">
             <p className="text-lg font-semibold truncate">
-              {call ? formatE164(call.counterparty) : 'Call'}
+              {call
+                ? call.counterpartyName || formatE164(call.counterparty)
+                : 'Call'}
             </p>
             <p className="text-sm text-muted-foreground">
+              {/* The number stays visible under a named caller: it is what somebody
+                  reads out, dials from another phone, or checks against a contact. */}
+              {call?.counterpartyName && (
+                <span className="mr-1.5">{formatE164(call.counterparty)} ·</span>
+              )}
               {call ? formatEmailDate(call.at) : ''}
             </p>
           </div>

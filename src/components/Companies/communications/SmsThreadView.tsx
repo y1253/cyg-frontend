@@ -73,6 +73,15 @@ export function SmsThreadView({
   onUncomplete: (kind: ItemKind, id: string) => void;
 }) {
   const { data, isLoading } = useSmsThread(companyId, peer, active);
+  /**
+   * The saved contact's name for this thread, read off whichever message carries it.
+   *
+   * Taken from the rows rather than a second lookup: every row in a thread has the same
+   * counterparty by construction, so the first one that has a name has the name. Null
+   * until the thread loads, which is why the number stays the fallback everywhere.
+   */
+  const peerName =
+    data?.messages.find((m) => m.counterpartyName)?.counterpartyName ?? null;
   const sendMutation = useSendSms(companyId);
   const markUnread = useMarkPhoneItem(companyId, 'unread');
 
@@ -114,7 +123,7 @@ export function SmsThreadView({
   };
 
   const handlePrint = () => {
-    const title = `Texts with ${formatE164(peer)}`;
+    const title = `Texts with ${peerName || formatE164(peer)}`;
     openPrintWindow(
       title,
       `<h2>${escapeHtml(title)}</h2>` +
@@ -143,7 +152,13 @@ export function SmsThreadView({
           >
             <MessageSquareText size={11} /> Text
           </Badge>
-          <span className="text-sm font-semibold">{formatE164(peer)}</span>
+          <span className="text-sm font-semibold">
+            {peerName || formatE164(peer)}
+          </span>
+          {peerName && (
+            // Keep the number readable: it is what somebody dials from another phone.
+            <span className="text-xs text-muted-foreground">{formatE164(peer)}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" className="gap-1" onClick={() => onCall(peer)}>
@@ -223,7 +238,7 @@ export function SmsThreadView({
       {/* Reply */}
       <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Reply to {formatE164(peer)}
+          Reply to {peerName || formatE164(peer)}
           {supportNumber && ` from ${formatE164(supportNumber)}`}
         </p>
         {/* A plain textarea, NOT RichTextEditor: SMS carries no formatting, and the

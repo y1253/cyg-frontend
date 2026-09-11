@@ -223,6 +223,19 @@ function draftRecipients(msg: EmailSummary): string {
   return (msg.to ?? '').trim();
 }
 
+/**
+ * Who a call or text row is with: the saved contact's name, else the number.
+ *
+ * One helper for both kinds so they can never disagree — the row, the detail view and
+ * the notification bell all name the same person the same way. The NUMBER is still what
+ * `CallBackButton` and the SMS thread key off; this is presentation only.
+ */
+function peerLabel(data: { counterparty: string; counterpartyName?: string | null }) {
+  return (
+    data.counterpartyName || formatE164(data.counterparty) || 'Unknown number'
+  );
+}
+
 function RowTitle({ item, isDraft }: { item: UnifiedItem; isDraft?: boolean }) {
   switch (item.kind) {
     case 'email': {
@@ -247,14 +260,14 @@ function RowTitle({ item, isDraft }: { item: UnifiedItem; isDraft?: boolean }) {
       return (
         <>
           <CallDirectionIcon item={item.data} />
-          {formatE164(item.data.counterparty) || 'Unknown number'}
+          {peerLabel(item.data)}
         </>
       );
     case 'sms':
       return (
         <>
           <KIND_STYLES.sms.Icon size={11} className="text-amber-500 shrink-0" />
-          {formatE164(item.data.counterparty) || 'Unknown number'}
+          {peerLabel(item.data)}
         </>
       );
   }

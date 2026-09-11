@@ -11,6 +11,12 @@ export function useUpdateCompany() {
     onSuccess: (_result, { id }) => {
       void qc.invalidateQueries({ queryKey: ['companies'] });
       void qc.invalidateQueries({ queryKey: ['company', id] });
+      // Saving the Contact or Accountant section rewrites this company's SEEDED contacts
+      // (syncAutoContacts on the server), so the address book open in another tab is now
+      // stale. Cheap, and without it the list silently disagrees with the Details page.
+      void qc.invalidateQueries({ queryKey: ['contacts', id] });
+      // The inbox labels callers from those same rows.
+      void qc.invalidateQueries({ queryKey: ['phone-timeline', id] });
     },
   });
 }

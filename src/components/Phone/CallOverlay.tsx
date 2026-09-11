@@ -100,6 +100,14 @@ export function CallOverlay() {
   // A call we placed: it is connecting, not asking to be answered.
   const outgoing = info?.direction === 'outbound';
   const otherParty = outgoing ? info?.to : info?.from;
+  /**
+   * A saved contact's name for an INBOUND caller.
+   *
+   * Inbound only: `fromName` names `from`, and on an outbound call `otherParty` is `to`.
+   * Labelling a dialled number with the name of whoever we happen to be calling FROM
+   * would be worse than showing no name at all.
+   */
+  const otherPartyName = !outgoing ? info?.fromName : undefined;
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
@@ -135,8 +143,17 @@ export function CallOverlay() {
                 : `On call · ${mmss(seconds)}`}
             </p>
             <p className="truncate text-sm font-semibold">
-              {formatE164(otherParty) || (outgoing ? 'Dialling' : 'Unknown caller')}
+              {otherPartyName ||
+                formatE164(otherParty) ||
+                (outgoing ? 'Dialling' : 'Unknown caller')}
             </p>
+            {otherPartyName && (
+              // The number stays on screen under the name: an agent reads it back,
+              // writes it down, or checks it against the contact they think it is.
+              <p className="truncate text-xs text-muted-foreground">
+                {formatE164(otherParty)}
+              </p>
+            )}
             {info && (
               <button
                 type="button"
@@ -358,7 +375,10 @@ function TransferringCard({
               {headline}
             </p>
             <p className="truncate text-sm font-semibold">
-              {formatE164(otherParty) || info?.from || 'Unknown caller'}
+              {info?.fromName ||
+                formatE164(otherParty) ||
+                info?.from ||
+                'Unknown caller'}
             </p>
             {info && (
               <button

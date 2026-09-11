@@ -1,6 +1,6 @@
 import {
   Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle, FileText,
-  MessageSquare, Phone, MessageSquareText, type LucideIcon,
+  MessageSquare, Phone, MessageSquareText, Contact, type LucideIcon,
 } from 'lucide-react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
 import type { CallItem, SmsItem } from '@/api/phone';
@@ -13,8 +13,21 @@ export const FOLDERS = [
   { id: 'SENT', label: 'Sent', icon: SendHorizonal },
   { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
   { id: 'TRASH', label: 'Trash', icon: Trash },
+  // Not a mail folder at all: it holds no messages and fetches nothing from a provider.
+  // It lives here because it is a TAB, and this array is what the tab strip renders --
+  // but it is deliberately absent from INBOX_TABS and MAILBOX_ONLY_FOLDERS below, and
+  // CommunicationsTab returns the contacts panel before any inbox machinery runs.
+  { id: 'CONTACTS', label: 'Contacts', icon: Contact },
 ] as const;
 
+/** The one folder that is not a folder. Exported so the guards below read as prose. */
+export const CONTACTS_FOLDER = 'CONTACTS';
+
+/**
+ * Every id the persisted view state may name. Its ONLY consumer is the restore check in
+ * `CommunicationsTab`, which is why adding CONTACTS here is safe: it widens what a stored
+ * blob may say, and invalidates nothing already stored.
+ */
 export const ALL_LABELS: string[] = FOLDERS.map((f) => f.id);
 
 /** Folders that need a connected mailbox. Phone-only companies never see them. */

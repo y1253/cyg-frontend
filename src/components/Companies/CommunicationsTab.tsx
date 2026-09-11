@@ -41,13 +41,14 @@ import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
 import { RingingCallBanner } from './communications/RingingCallBanner';
 import { DialCallDialog } from './communications/DialCallDialog';
 import { InboxView } from './communications/InboxView';
+import { ContactsPanel } from './communications/ContactsPanel';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { readIdForSelection } from '@/components/Layout/unread-feed';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { showListSpinner } from './communications/inbox-loading';
 import {
-  ALL_LABELS, FOLDERS, INBOX_TABS,
+  ALL_LABELS, CONTACTS_FOLDER, FOLDERS, INBOX_TABS,
   type CompleteTarget, type ItemKind, type KindFilter,
   type Selection, type UnifiedItem,
 } from './communications/types';
@@ -180,6 +181,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const chatSupported = provider !== 'MICROSOFT' || account?.hasChatScope !== false;
   // INBOX, UNCOMPLETED and UNREAD all render the unified email+chat inbox.
   const isInboxLike = INBOX_TABS.includes(selectedLabel);
+  // The one tab that is not a mail folder. It renders no messages and fetches nothing
+  // from a provider, so it has to be kept out of `emailLabel`'s fall-through below.
+  const isContacts = selectedLabel === CONTACTS_FOLDER;
   // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
   // they get the clamp relaxed + a target-driven auto-load so the list backs the badge.
   const isFilteredFolder = selectedLabel === 'UNREAD' || selectedLabel === 'UNCOMPLETED';
@@ -224,7 +228,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     companyId,
     emailLabel,
     activeSearch,
-    active && !!account,
+    // `!isContacts` is load-bearing: `emailLabel` falls through to `selectedLabel` for
+    // any folder that is not one of the special cases, so without this the Contacts tab
+    // would ask Gmail/Graph for a label literally named CONTACTS on every open.
+    active && !!account && !isContacts,
     searchParams,
     searchKey,
   );
@@ -886,6 +893,34 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onUncomplete={uncomplete}
         />
         {completeConfirm}
+      </>
+    );
+  }
+
+  // ── Contacts ──────────────────────────────────────────────────────────────
+  // Before every piece of inbox machinery below: the spinner logic, the unified merge
+  // and InboxView all describe a list of messages, and none of them has anything to say
+  // about an address book. The folder strip comes along inside the panel so there is a
+  // way back out.
+  if (isContacts) {
+    return (
+      <>
+        {ringingBanner}
+        <ContactsPanel
+          companyId={companyId}
+          account={account ?? null}
+          selectedLabel={selectedLabel}
+          onSelectFolder={handleSelectFolder}
+          unreadCount={unreadCount}
+          uncompletedCount={uncompletedCount}
+          supportNumber={supportNumber}
+          onCall={handleCall}
+          onText={(peer) =>
+            // Drop straight into the conversation, the way the SMS composer does after
+            // sending. An empty msgId means "no anchor" — the thread opens at its end.
+            setSelected({ kind: 'sms', peer, msgId: '', msgTime: new Date().toISOString() })
+          }
+        />
       </>
     );
   }
