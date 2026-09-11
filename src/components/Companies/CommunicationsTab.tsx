@@ -41,6 +41,8 @@ import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
 import { RingingCallBanner } from './communications/RingingCallBanner';
 import { DialCallDialog } from './communications/DialCallDialog';
 import { InboxView } from './communications/InboxView';
+import { InboxNotices } from './communications/InboxNotices';
+import { CommsHeader } from './communications/CommsHeader';
 import { ContactsPanel } from './communications/ContactsPanel';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { readIdForSelection } from '@/components/Layout/unread-feed';
@@ -372,6 +374,66 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       startCallMutation.mutate(number);
     },
     [startCallMutation],
+  );
+
+  /**
+   * The account header, and the two dialogs its buttons open.
+   *
+   * Built here for the SAME reason as `ringingBanner` above: it used to live inside
+   * `InboxView`, so it existed in exactly one branch of this router and vanished the
+   * moment the Contacts tab was opened. Rendered on the two LIST branches — inbox and
+   * contacts — and deliberately not on the four detail views, which have their own.
+   *
+   * ⚠️ `DialCallDialog` and `ComposeSmsDialog` travel WITH it. They used to be mounted
+   * only in the inbox return, so a "New call" button rendered anywhere else would set
+   * state whose dialog never mounts — a button that visibly does nothing.
+   */
+  const headerBar = (
+    <>
+      <CommsHeader
+        companyId={companyId}
+        isAdmin={isAdmin}
+        account={account ?? null}
+        accountAddress={accountAddress}
+        providerLabels={providerLabels}
+        supportNumber={supportNumber}
+        onCompose={() =>
+          account &&
+          openEmail({
+            companyId,
+            fromAddress: accountAddress,
+            cloudLabel,
+            signatureHtml: account.signatureHtml,
+          })
+        }
+        onNewCall={supportNumber ? () => setDialOpen(true) : undefined}
+        onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
+      />
+      {supportNumber && (
+        <DialCallDialog
+          open={dialOpen}
+          onOpenChange={setDialOpen}
+          supportNumber={supportNumber}
+          onDial={handleCall}
+          pending={startCallMutation.isPending}
+          error={(startCallMutation.error as Error)?.message ?? null}
+        />
+      )}
+      {supportNumber && (
+        <ComposeSmsDialog
+          open={composeSmsOpen}
+          onOpenChange={setComposeSmsOpen}
+          companyId={companyId}
+          supportNumber={supportNumber}
+          onSent={(peer, at) => {
+            setComposeSmsOpen(false);
+            // Drop straight into the conversation just started, the way sending an
+            // email opens nothing but sending a chat leaves you in the thread.
+            setSelected({ kind: 'sms', peer, msgId: '', msgTime: at });
+          }}
+        />
+      )}
+    </>
   );
 
   // First error across the per-message state toggles. These calls silently ignored
@@ -906,7 +968,30 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     return (
       <>
         {ringingBanner}
-        <ContactsPanel
+        {/* The same `flex flex-col gap-4` column InboxView uses as its root — without it
+            this tab's children collapse together, because CompanyDetailPage's own
+            wrapper is `display: contents`. */}
+        <div className="flex flex-col gap-4">
+          {headerBar}
+          <InboxNotices
+            account={account ?? null}
+            provider={provider}
+            providerLabels={providerLabels}
+            isInboxLike={false}
+            chatItemCount={0}
+            chatsFailed={false}
+            chatNeedsReconnect={false}
+            emailNeedsReconnect={false}
+            chatStatus={undefined}
+            isAdmin={isAdmin}
+            onReconnect={() => void handleConnect(provider)}
+            onConnect={(prov) => void handleConnect(prov)}
+            onRetryChats={() => undefined}
+            connecting={connecting}
+            connectDismissed={connectDismissed}
+            onDismissConnect={() => setConnectDismissed(true)}
+          />
+          <ContactsPanel
           companyId={companyId}
           account={account ?? null}
           selectedLabel={selectedLabel}
@@ -918,9 +1003,15 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onText={(peer) =>
             // Drop straight into the conversation, the way the SMS composer does after
             // sending. An empty msgId means "no anchor" — the thread opens at its end.
-            setSelected({ kind: 'sms', peer, msgId: '', msgTime: new Date().toISOString() })
-          }
-        />
+              setSelected({
+                kind: 'sms',
+                peer,
+                msgId: '',
+                msgTime: new Date().toISOString(),
+              })
+            }
+          />
+        </div>
       </>
     );
   }
@@ -943,12 +1034,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   return (
     <>
       {ringingBanner}
+      {headerBar}
       <InboxView
         companyId={companyId}
         token={token}
         isAdmin={isAdmin}
         account={account ?? null}
-        accountAddress={accountAddress}
         provider={provider}
         providerLabels={providerLabels}
         listRootRef={listRootRef}
@@ -996,19 +1087,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onResetStateError={resetStateErrors}
         onConnect={(prov) => void handleConnect(prov)}
         onRetryChats={() => void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] })}
-        onCompose={() =>
-          account &&
-          openEmail({
-            companyId,
-            fromAddress: accountAddress,
-            cloudLabel,
-            signatureHtml: account.signatureHtml,
-          })
-        }
-        supportNumber={supportNumber}
         onCall={supportNumber ? handleCall : undefined}
-        onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
-        onNewCall={supportNumber ? () => setDialOpen(true) : undefined}
         connecting={connecting}
         connectDismissed={connectDismissed}
         onDismissConnect={() => setConnectDismissed(true)}
@@ -1021,30 +1100,6 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onBulk={runBulk}
       />
       {completeConfirm}
-      {supportNumber && (
-        <DialCallDialog
-          open={dialOpen}
-          onOpenChange={setDialOpen}
-          supportNumber={supportNumber}
-          onDial={handleCall}
-          pending={startCallMutation.isPending}
-          error={(startCallMutation.error as Error)?.message ?? null}
-        />
-      )}
-      {supportNumber && (
-        <ComposeSmsDialog
-          open={composeSmsOpen}
-          onOpenChange={setComposeSmsOpen}
-          companyId={companyId}
-          supportNumber={supportNumber}
-          onSent={(peer, at) => {
-            setComposeSmsOpen(false);
-            // Drop straight into the conversation just started, the way sending an
-            // email opens nothing but sending a chat leaves you in the thread.
-            setSelected({ kind: 'sms', peer, msgId: '', msgTime: at });
-          }}
-        />
-      )}
     </>
   );
 }
