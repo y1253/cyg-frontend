@@ -1,3 +1,11 @@
+import {
+  RING_TOTAL_SECONDS,
+  TRILL_HIGH_HZ,
+  TRILL_LOW_HZ,
+  TRILL_RATE_HZ,
+  ringSchedule,
+} from './ringtone';
+
 // The new-message chime. Synthesised rather than shipped as an audio file: it keeps
 // a binary out of the repo, keeps the PWA precache globs unchanged, and makes the
 // tone tunable from these constants.
@@ -97,28 +105,38 @@ export function playMessageChime(volume = 0.22): boolean {
 }
 
 // ── Ringtone ────────────────────────────────────────────────────────────────
-// A repeating two-tone ring for an incoming call. Unlike the chime this must be
-// STOPPABLE, so the nodes are held at module scope rather than being fire-and-forget.
+// A phone-bell ring for an incoming call. Unlike the chime this must be STOPPABLE, so the
+// nodes are held at module scope rather than being fire-and-forget.
+//
+// ⚠️ It must never sound like the RINGBACK. It used to be the North-American ringback
+// (440+480 Hz, 2s on / 4s off) — which is exactly the tone the phone network plays to
+// the agent, through the call audio, while an OUTBOUND call rings. Incoming and outgoing
+// were indistinguishable. So this is a telephone bell instead: a fast trill between two
+// pitches, rung "ring-ring … pause". The timing and pitches live in `lib/ringtone.ts`.
 //
 // Scheduling is on the audio clock (`ctx.currentTime`), never `setTimeout` — a
 // backgrounded tab throttles timers to roughly once a minute, and a call arriving while
-// the tab is in the background is exactly the case this exists for.
+// the tab is in the background is exactly the case this exists for. That includes the
+// trill itself: a square-wave LFO flips the pitch on the audio thread, so nothing is
+// scheduled per flip.
 
 let ringNodes: { osc: OscillatorNode[]; gain: GainNode } | null = null;
 
-/** North-American ring cadence: 440+480 Hz, 2s on / 4s off. */
-const RING_HZ = [440, 480];
-const RING_ON = 2;
-const RING_CYCLE = 6;
-/** Rings before giving up, so a missed call cannot ring forever. */
-const RING_CYCLES = 10;
+/** Ramp at each burst edge. Long enough to kill the click, short enough to stay crisp. */
+const RING_EDGE = 0.01;
 
 /**
  * Start ringing. Idempotent — a second call while already ringing is ignored, which
  * matters because a re-INVITE or React StrictMode's double-effect would otherwise
- * stack a second oscillator pair that `stopRinging` could not reach.
+ * stack a second set of oscillators that `stopRinging` could not reach.
+ *
+ * Every oscillator — the tone, its overtone AND the LFO — goes into `ringNodes.osc`, so
+ * `stopRinging` reaches all of them. An LFO left running is silent but never collected.
+ *
+ * Quieter by default than the old chord: a pitch that jumps sounds louder than a steady
+ * one at the same gain.
  */
-export function startRinging(volume = 0.14): boolean {
+export function startRinging(volume = 0.12): boolean {
   if (!ctx || ctx.state !== 'running') {
     void ctx?.resume();
     return false;
@@ -126,28 +144,50 @@ export function startRinging(volume = 0.14): boolean {
   if (ringNodes) return true;
 
   const t0 = ctx.currentTime + 0.02;
+  const end = t0 + RING_TOTAL_SECONDS;
+
+  // The "ring-ring … pause" rhythm, gated on the audio clock up front.
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0, t0);
   gain.connect(ctx.destination);
-
-  // Gate the whole cadence on the audio clock up front.
-  for (let i = 0; i < RING_CYCLES; i++) {
-    const on = t0 + i * RING_CYCLE;
-    gain.gain.setValueAtTime(0, on);
-    gain.gain.linearRampToValueAtTime(volume, on + 0.05);
-    gain.gain.setValueAtTime(volume, on + RING_ON - 0.05);
-    gain.gain.linearRampToValueAtTime(0, on + RING_ON);
+  for (const { on, off } of ringSchedule()) {
+    gain.gain.setValueAtTime(0, t0 + on);
+    gain.gain.linearRampToValueAtTime(volume, t0 + on + RING_EDGE);
+    gain.gain.setValueAtTime(volume, t0 + off - RING_EDGE);
+    gain.gain.linearRampToValueAtTime(0, t0 + off);
   }
 
-  const osc = RING_HZ.map((f) => {
-    const o = ctx!.createOscillator();
-    o.type = 'sine';
-    o.frequency.value = f;
-    o.connect(gain);
+  // The trill: a square LFO swings the pitch ±depth around the centre, so the tone flips
+  // between the two pitches TRILL_RATE_HZ times a second — the sound of a bell striker.
+  const centre = (TRILL_LOW_HZ + TRILL_HIGH_HZ) / 2;
+  const lfo = ctx.createOscillator();
+  lfo.type = 'square';
+  lfo.frequency.value = TRILL_RATE_HZ;
+
+  const tone = ctx.createOscillator();
+  tone.type = 'sine';
+  tone.frequency.value = centre;
+  const toneDepth = ctx.createGain();
+  toneDepth.gain.value = (TRILL_HIGH_HZ - TRILL_LOW_HZ) / 2;
+  lfo.connect(toneDepth).connect(tone.frequency);
+  tone.connect(gain);
+
+  // A quiet octave above, trilling in step, so it rings bright instead of like a test tone.
+  const overtone = ctx.createOscillator();
+  overtone.type = 'sine';
+  overtone.frequency.value = centre * 2;
+  const overtoneDepth = ctx.createGain();
+  overtoneDepth.gain.value = TRILL_HIGH_HZ - TRILL_LOW_HZ;
+  lfo.connect(overtoneDepth).connect(overtone.frequency);
+  const overtoneLevel = ctx.createGain();
+  overtoneLevel.gain.value = 0.15;
+  overtone.connect(overtoneLevel).connect(gain);
+
+  const osc = [lfo, tone, overtone];
+  for (const o of osc) {
     o.start(t0);
-    o.stop(t0 + RING_CYCLES * RING_CYCLE);
-    return o;
-  });
+    o.stop(end);
+  }
 
   ringNodes = { osc, gain };
   return true;
