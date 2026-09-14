@@ -48,6 +48,7 @@ export function CallDetailView({
   call,
   onClose,
   onCall,
+  callBlockedReason = null,
   onRequestComplete,
   onUncomplete,
 }: {
@@ -58,6 +59,8 @@ export function CallDetailView({
   call: CallItem | null;
   onClose: () => void;
   onCall: (number: string) => void;
+  /** Set while this company's line is on a call: Call back is disabled and says why. */
+  callBlockedReason?: string | null;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
 }) {
@@ -99,14 +102,17 @@ export function CallDetailView({
         </div>
         <div className="flex items-center gap-2">
           {call && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => onCall(call.counterparty)}
-            >
-              <Phone size={13} /> Call back
-            </Button>
+            <span title={callBlockedReason ?? undefined}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                disabled={!!callBlockedReason}
+                onClick={() => onCall(call.counterparty)}
+              >
+                <Phone size={13} /> Call back
+              </Button>
+            </span>
           )}
           <Button
             size="sm"

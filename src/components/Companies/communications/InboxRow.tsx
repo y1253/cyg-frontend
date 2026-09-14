@@ -49,6 +49,7 @@ export function InboxRow({
   onToggleRead,
   onToggleComplete,
   onCall,
+  callBlockedReason = null,
   isDraft = false,
 }: {
   item: UnifiedItem;
@@ -65,6 +66,8 @@ export function InboxRow({
   onToggleComplete: () => void;
   /** Dial a number straight from the row. Absent when no support number is attached. */
   onCall?: (number: string) => void;
+  /** Set while this company's line is on a call: the row's Call button is disabled. */
+  callBlockedReason?: string | null;
   /**
    * This row is an unsent draft. A draft stays `kind: 'email'` on purpose — one
    * event, one id, so bulk select and the rest of the row machinery keep working —
@@ -179,7 +182,13 @@ export function InboxRow({
           </div>
         </div>
 
-        <RowBody item={item} companyId={companyId} token={token} onCall={onCall} />
+        <RowBody
+          item={item}
+          companyId={companyId}
+          token={token}
+          onCall={onCall}
+          callBlockedReason={callBlockedReason}
+        />
       </div>
     </div>
   );
@@ -300,11 +309,13 @@ function RowBody({
   companyId,
   token,
   onCall,
+  callBlockedReason,
 }: {
   item: UnifiedItem;
   companyId: number;
   token: string | null;
   onCall?: (number: string) => void;
+  callBlockedReason: string | null;
 }) {
   const isRead = item.data.isRead;
 
@@ -314,9 +325,22 @@ function RowBody({
     case 'chat':
       return <ChatRowBody msg={item.data} isRead={isRead} />;
     case 'call':
-      return <CallRowBody call={item.data} onCall={onCall} />;
+      return (
+        <CallRowBody
+          call={item.data}
+          onCall={onCall}
+          callBlockedReason={callBlockedReason}
+        />
+      );
     case 'sms':
-      return <SmsRowBody msg={item.data} isRead={isRead} onCall={onCall} />;
+      return (
+        <SmsRowBody
+          msg={item.data}
+          isRead={isRead}
+          onCall={onCall}
+          callBlockedReason={callBlockedReason}
+        />
+      );
   }
 }
 
@@ -374,9 +398,11 @@ function ChatRowBody({ msg, isRead }: { msg: ChatInboxMessage; isRead: boolean }
 function CallRowBody({
   call,
   onCall,
+  callBlockedReason,
 }: {
   call: CallItem;
   onCall?: (number: string) => void;
+  callBlockedReason: string | null;
 }) {
   const label =
     call.hasVoicemail
@@ -412,7 +438,11 @@ function CallRowBody({
         {label}
         {suffix}
       </span>
-      <CallBackButton number={call.counterparty} onCall={onCall} />
+      <CallBackButton
+        number={call.counterparty}
+        onCall={onCall}
+        blockedReason={callBlockedReason}
+      />
     </div>
   );
 }
@@ -421,10 +451,12 @@ function SmsRowBody({
   msg,
   isRead,
   onCall,
+  callBlockedReason,
 }: {
   msg: SmsItem;
   isRead: boolean;
   onCall?: (number: string) => void;
+  callBlockedReason: string | null;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
@@ -442,7 +474,11 @@ function SmsRowBody({
           {msg.body || (msg.numMedia > 0 ? 'Attachment' : '(no text)')}
         </span>
       </span>
-      <CallBackButton number={msg.counterparty} onCall={onCall} />
+      <CallBackButton
+        number={msg.counterparty}
+        onCall={onCall}
+        blockedReason={callBlockedReason}
+      />
     </div>
   );
 }
@@ -457,24 +493,35 @@ function SmsRowBody({
 function CallBackButton({
   number,
   onCall,
+  blockedReason,
 }: {
   number: string;
   onCall?: (number: string) => void;
+  /** Set while the line is on a call: disabled, and the wrapper's title says why. */
+  blockedReason: string | null;
 }) {
   if (!onCall) return null;
   return (
-    <button
-      type="button"
-      title={`Call ${formatE164(number)}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onCall(number);
-      }}
-      className="shrink-0 inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 hover:bg-green-100 transition-colors"
+    // The wrapper carries the tooltip (a disabled button shows none) and swallows the
+    // click, so pressing a disabled Call never falls through to opening the row.
+    <span
+      className="shrink-0 inline-flex"
+      title={blockedReason ?? `Call ${formatE164(number)}`}
+      onClick={(e) => e.stopPropagation()}
     >
-      <KIND_STYLES.call.Icon size={10} />
-      Call
-    </button>
+      <button
+        type="button"
+        disabled={!!blockedReason}
+        onClick={(e) => {
+          e.stopPropagation();
+          onCall(number);
+        }}
+        className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 hover:bg-green-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-50"
+      >
+        <KIND_STYLES.call.Icon size={10} />
+        Call
+      </button>
+    </span>
   );
 }
 

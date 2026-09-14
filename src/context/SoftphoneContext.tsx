@@ -33,6 +33,7 @@ import {
   mergeConference,
   dropConferenceParty,
   fetchConferenceStatus,
+  reportCallAnswered,
   type AddCallTarget,
   type ConferenceStatus,
   type TransferState,
@@ -599,6 +600,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setPhase('active');
         setSeconds(0);
         attachRemoteAudio(invitation);
+
+        // Tell the server WHO picked up, so everyone else looking at this company sees
+        // "On a call · <name>". Inbound company calls only: an outbound call's entry
+        // already names the person who dialled, and internal calls have no line.
+        // Best-effort — the call does not depend on it.
+        if (pending.direction !== 'outbound' && pending.kind !== 'internal') {
+          const tok = tokenRef.current;
+          if (tok) {
+            void reportCallAnswered(tok, pending.companyId, pending.callSid).catch(
+              () => undefined,
+            );
+          }
+        }
       }
       if (state === SessionState.Terminated) {
         // The one place the two teardowns differ. During a transfer this BYE is the

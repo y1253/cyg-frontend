@@ -39,6 +39,7 @@ export function CommsHeader({
   onCompose,
   onNewCall,
   onComposeSms,
+  callBlockedReason = null,
 }: {
   companyId: number;
   isAdmin: boolean;
@@ -50,6 +51,8 @@ export function CommsHeader({
   /** Undefined when this company has no number — the button is then not rendered. */
   onNewCall?: () => void;
   onComposeSms?: () => void;
+  /** Set while this company's line is on a call: New call is disabled and says why. */
+  callBlockedReason?: string | null;
 }) {
   const disconnectMutation = useDisconnectGmail(companyId);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
@@ -88,14 +91,18 @@ export function CommsHeader({
             </Button>
           )}
           {supportNumber && onNewCall && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-green-300 text-green-700 hover:bg-green-50 gap-1"
-              onClick={onNewCall}
-            >
-              <Phone size={14} /> New call
-            </Button>
+            // The title sits on a wrapper: a disabled button shows no tooltip of its own.
+            <span title={callBlockedReason ?? undefined}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-green-300 text-green-700 hover:bg-green-50 gap-1"
+                disabled={!!callBlockedReason}
+                onClick={onNewCall}
+              >
+                <Phone size={14} /> New call
+              </Button>
+            </span>
           )}
           {supportNumber && onComposeSms && (
             <Button

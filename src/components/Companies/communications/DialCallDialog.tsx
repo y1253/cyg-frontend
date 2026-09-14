@@ -26,6 +26,7 @@ export function DialCallDialog({
   onDial,
   pending,
   error,
+  blockedReason = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,11 +34,15 @@ export function DialCallDialog({
   onDial: (e164: string) => void;
   pending: boolean;
   error: string | null;
+  /** The line went busy while this was open. Call is disabled and this says why. */
+  blockedReason?: string | null;
 }) {
   const [to, setTo] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
   const submit = () => {
+    // Enter reaches here without the button, so the disabled state alone is not enough.
+    if (blockedReason) return;
     const number = toE164(to);
     if (!number) {
       setLocalError('Enter a valid phone number, e.g. (438) 256-1210');
@@ -87,6 +92,9 @@ export function DialCallDialog({
           <p className="text-xs text-muted-foreground">
             Your browser rings first — answer it and we will dial them.
           </p>
+          {blockedReason && (
+            <p className="text-xs text-amber-700">{blockedReason}</p>
+          )}
           {(localError || error) && (
             <p className="text-xs text-destructive">{localError ?? error}</p>
           )}
@@ -97,7 +105,7 @@ export function DialCallDialog({
             <Button
               size="sm"
               className="gap-1 bg-green-600 text-white hover:bg-green-500"
-              disabled={pending}
+              disabled={pending || !!blockedReason}
               onClick={submit}
             >
               <Phone size={13} />

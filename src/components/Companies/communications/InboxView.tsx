@@ -83,6 +83,7 @@ export function InboxView({
   onToggleComplete,
   onBulk,
   onCall,
+  callBlockedReason = null,
   connecting,
   connectDismissed,
   onDismissConnect,
@@ -147,6 +148,8 @@ export function InboxView({
   /** The company's support number, or null. Labels the channel and gates texting. */
   /** Dial a number from a row. Absent when no support number is attached. */
   onCall?: (number: string) => void;
+  /** Set while this company's line is on a call: every row's Call button is disabled. */
+  callBlockedReason?: string | null;
   /** Start a new text message. */
   /** Dial a number that is not already in the feed. */
   connecting: boolean;
@@ -219,6 +222,7 @@ export function InboxView({
         onToggleComplete({ kind: item.kind, id: item.data.id }, !!item.data.isCompleted)
       }
       onCall={onCall}
+      callBlockedReason={callBlockedReason}
       isDraft={isDrafts}
     />
   );

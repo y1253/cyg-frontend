@@ -430,6 +430,59 @@ export async function fetchRingingCall(
   return text ? (JSON.parse(text) as IncomingCallPayload) : null;
 }
 
+/**
+ * A call on this company's number right now — whoever is on it, in whichever browser.
+ *
+ * Unlike `fetchRingingCall` this is not about answering: it is what lets every other
+ * viewer see the line is busy, and what disables the call buttons while it is.
+ */
+export interface ActiveCall {
+  companyId: number;
+  callSid: string | null;
+  direction: 'inbound' | 'outbound';
+  /** `dialing` is the moment between Call and SignalWire creating the call. */
+  state: 'dialing' | 'ringing' | 'active';
+  /** Null when the server could not tell who it is (e.g. a call it learned of from SignalWire). */
+  userName: string | null;
+  /** The viewer is the person on the call — perhaps in another tab or browser. */
+  isViewer: boolean;
+  /** The customer's number. Empty when unknown. */
+  peer: string;
+  peerName: string | null;
+  /** From the server's clock, so a wrong local clock still shows the right timer. */
+  elapsedSec: number;
+}
+
+export async function fetchActiveCall(
+  token: string,
+  companyId: number,
+): Promise<ActiveCall | null> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/active-call`,
+    { headers: JSON_HEADERS },
+  );
+  if (!res.ok) return null;
+  const text = await res.text();
+  return text ? (JSON.parse(text) as ActiveCall) : null;
+}
+
+/**
+ * Tell the server this browser answered an inbound call, so other viewers see WHO is on it.
+ * Best-effort: the call itself does not depend on it.
+ */
+export async function reportCallAnswered(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<void> {
+  await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(callSid)}/answered`,
+    { method: 'POST', headers: JSON_HEADERS },
+  );
+}
+
 export type PhoneStateAction = 'read' | 'unread' | 'complete' | 'uncomplete';
 
 /** Per-item read / completed state. One function, not four near-identical ones. */

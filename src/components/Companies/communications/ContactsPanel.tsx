@@ -32,6 +32,7 @@ export function ContactsPanel({
   supportNumber,
   onCall,
   onText,
+  callBlockedReason = null,
 }: {
   companyId: number;
   account: unknown;
@@ -43,6 +44,8 @@ export function ContactsPanel({
   supportNumber: string | null;
   onCall: (e164: string) => void;
   onText: (e164: string) => void;
+  /** Set while this company's line is on a call: every Call icon is disabled. */
+  callBlockedReason?: string | null;
 }) {
   const { data: contacts, isLoading, error } = useContacts(companyId);
   const create = useCreateContact(companyId);
@@ -171,15 +174,20 @@ export function ContactsPanel({
               <div className="flex shrink-0 items-center gap-1">
                 {supportNumber && contact.phoneE164 && (
                   <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-green-700 hover:bg-green-50"
-                      title={`Call ${contact.name}`}
-                      onClick={() => onCall(contact.phoneE164!)}
+                    <span
+                      className="inline-flex"
+                      title={callBlockedReason ?? `Call ${contact.name}`}
                     >
-                      <Phone size={14} />
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-green-700 hover:bg-green-50"
+                        disabled={!!callBlockedReason}
+                        onClick={() => onCall(contact.phoneE164!)}
+                      >
+                        <Phone size={14} />
+                      </Button>
+                    </span>
                     <Button
                       variant="ghost"
                       size="sm"

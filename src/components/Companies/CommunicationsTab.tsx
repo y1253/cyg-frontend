@@ -24,6 +24,7 @@ import { usePhoneCounts } from '@/hooks/usePhoneCounts';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { useStartCall } from '@/hooks/useStartCall';
 import { useRingingCall } from '@/hooks/useRingingCall';
+import { useActiveCall } from '@/hooks/useActiveCall';
 import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
 import { unlockAudio } from '@/lib/notificationSound';
 import { fetchAuthUrl } from '@/api/gmail';
@@ -39,6 +40,8 @@ import { SmsThreadView } from './communications/SmsThreadView';
 import { CallDetailView } from './communications/CallDetailView';
 import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
 import { RingingCallBanner } from './communications/RingingCallBanner';
+import { ActiveCallBanner } from './communications/ActiveCallBanner';
+import { callBlockedReason, shouldShowActiveBanner } from './communications/call-busy';
 import { DialCallDialog } from './communications/DialCallDialog';
 import { InboxView } from './communications/InboxView';
 import { InboxNotices } from './communications/InboxNotices';
@@ -331,7 +334,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // has one can accept it — so with nothing held there is nothing to ask about, and the
   // query stays idle. `phase !== 'idle'` means this browser is already showing the call
   // in the floating overlay, or is on another call.
-  const { phase: callPhase, hasHeldInvite } = useSoftphone();
+  const { phase: callPhase, info: callInfo, hasHeldInvite } = useSoftphone();
   const { answerHeld } = useSoftphoneActions();
   const [ignoredCallSid, setIgnoredCallSid] = useState<string | null>(null);
 
@@ -352,13 +355,52 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
    * inbox — so a banner wired only into `InboxView` would vanish the moment somebody
    * opened an email, which is exactly when a call is most likely to arrive unnoticed.
    */
-  const ringingBanner = showRinging ? (
-    <RingingCallBanner
-      call={ringingCall}
-      onAnswer={() => answerHeld(ringingCall)}
-      onDecline={() => setIgnoredCallSid(ringingCall.callSid)}
-    />
-  ) : null;
+  // ── Is this company's line already on a call — anywhere, for anyone? ─────────
+  // Polled regardless of this browser's own state: the point is to see a call somebody
+  // ELSE is on (an admin watching, or the same user in another tab) and to stop anyone
+  // dialling out from a number that is in use. `call-busy.ts` holds the rule.
+  const { data: activeCall } = useActiveCall(companyId, active && !!supportNumber);
+  const localCall = { phase: callPhase, info: callInfo };
+  const callBlocked = callBlockedReason({
+    activeCall,
+    local: localCall,
+    companyId,
+    starting: startCallMutation.isPending,
+  });
+  const showActive =
+    shouldShowActiveBanner(activeCall, localCall, companyId) &&
+    // An admin offered Answer for a ring does not also need "a call is ringing".
+    !(showRinging && ringingCall?.callSid === activeCall?.callSid);
+
+  // A dial refused by the server (the busy poll had not caught up) from a row or a detail
+  // view has no dialog to show its error in, so it is shown with the banners.
+  const callError = (startCallMutation.error as Error | null)?.message ?? null;
+
+  const ringingBanner =
+    showRinging || showActive || callError ? (
+      <>
+        {showRinging && (
+          <RingingCallBanner
+            call={ringingCall}
+            onAnswer={() => answerHeld(ringingCall)}
+            onDecline={() => setIgnoredCallSid(ringingCall.callSid)}
+          />
+        )}
+        {showActive && activeCall && <ActiveCallBanner call={activeCall} />}
+        {callError && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <span>{callError}</span>
+            <button
+              type="button"
+              className="shrink-0 font-medium underline-offset-2 hover:underline"
+              onClick={() => startCallMutation.reset()}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </>
+    ) : null;
 
   /**
    * Dial a number from a row or a detail view.
@@ -382,7 +424,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const startCall = startCallMutation.mutate;
   const handleCall = useCallback(
     (number: string) => {
-      if (startingCallRef.current) return;
+      // Every call button goes through here, so this one check covers a button whose
+      // disabled state has not re-rendered yet. The server refuses a busy dial as well.
+      if (startingCallRef.current || callBlocked) return;
       startingCallRef.current = true;
       unlockAudio();
       startCall(number, {
@@ -391,7 +435,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         },
       });
     },
-    [startCall],
+    [startCall, callBlocked],
   );
 
   /**
@@ -426,6 +470,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         }
         onNewCall={supportNumber ? () => setDialOpen(true) : undefined}
         onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
+        callBlockedReason={callBlocked}
       />
       {supportNumber && (
         <DialCallDialog
@@ -435,6 +480,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onDial={handleCall}
           pending={startCallMutation.isPending}
           error={(startCallMutation.error as Error)?.message ?? null}
+          blockedReason={callBlocked}
         />
       )}
       {supportNumber && (
@@ -949,6 +995,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           active={active}
           onClose={closeDetail}
           onCall={handleCall}
+          callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
         />
@@ -969,6 +1016,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           call={row?.kind === 'call' ? row : null}
           onClose={closeDetail}
           onCall={handleCall}
+          callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
         />
@@ -1018,6 +1066,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           uncompletedCount={uncompletedCount}
           supportNumber={supportNumber}
           onCall={handleCall}
+          callBlockedReason={callBlocked}
           onText={(peer) =>
             // Drop straight into the conversation, the way the SMS composer does after
             // sending. An empty msgId means "no anchor" — the thread opens at its end.
@@ -1106,6 +1155,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onConnect={(prov) => void handleConnect(prov)}
         onRetryChats={() => void qc.invalidateQueries({ queryKey: ['gmail-chats', companyId] })}
         onCall={supportNumber ? handleCall : undefined}
+        callBlockedReason={callBlocked}
         connecting={connecting}
         connectDismissed={connectDismissed}
         onDismissConnect={() => setConnectDismissed(true)}

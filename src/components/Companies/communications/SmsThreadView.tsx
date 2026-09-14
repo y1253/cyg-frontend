@@ -56,6 +56,7 @@ export function SmsThreadView({
   active,
   onClose,
   onCall,
+  callBlockedReason = null,
   onRequestComplete,
   onUncomplete,
 }: {
@@ -69,6 +70,8 @@ export function SmsThreadView({
   active: boolean;
   onClose: () => void;
   onCall: (number: string) => void;
+  /** Set while this company's line is on a call: Call is disabled. Texting is not. */
+  callBlockedReason?: string | null;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
 }) {
@@ -161,9 +164,17 @@ export function SmsThreadView({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="gap-1" onClick={() => onCall(peer)}>
-            <Phone size={13} /> Call
-          </Button>
+          <span title={callBlockedReason ?? undefined}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              disabled={!!callBlockedReason}
+              onClick={() => onCall(peer)}
+            >
+              <Phone size={13} /> Call
+            </Button>
+          </span>
           <Button size="sm" variant="outline" className="gap-1" onClick={handlePrint}>
             <Printer size={13} /> Print
           </Button>
