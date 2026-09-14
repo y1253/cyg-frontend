@@ -5,6 +5,11 @@ import {
   TRILL_RATE_HZ,
   ringSchedule,
 } from './ringtone';
+import {
+  CW_HZ,
+  CW_TOTAL_SECONDS,
+  callWaitingSchedule,
+} from './call-waiting-tone';
 
 // The new-message chime. Synthesised rather than shipped as an audio file: it keeps
 // a binary out of the repo, keeps the PWA precache globs unchanged, and makes the
@@ -200,6 +205,82 @@ export function stopRinging(): void {
   ringNodes = null;
   try {
     // Ramp rather than cut, or the abrupt stop clicks.
+    const now = ctx?.currentTime ?? 0;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.05);
+    osc.forEach((o) => o.stop(now + 0.06));
+  } catch {
+    // Already stopped by its scheduled end. Nothing to do.
+  }
+}
+
+// ── Call waiting ────────────────────────────────────────────────────────────
+// A second call is ringing while the agent is already talking to somebody.
+//
+// ⚠️ ITS OWN MODULE HANDLE. `stopRinging` must never reach these nodes and `stopCallWaiting
+// Tone` must never reach the ringtone's: the two sounds have independent lifetimes — the
+// waiting tone starts while a call is live and stops when it is answered or declined,
+// which is nothing to do with whether the first call is still up.
+//
+// Same construction as `startRinging`: the whole repetition is laid down on the audio clock
+// up front, never with `setTimeout`. A backgrounded tab throttles timers to about once a
+// minute, and an agent whose browser is behind their bookkeeping software is precisely who
+// this is for.
+//
+// It reaches `ctx.destination` only — the agent's own speakers. The outgoing RTP sender
+// carries the microphone track (or the hold-music track), never this context, so the pip
+// cannot leak into either call. Same guarantee `playDtmfTone` documents below.
+
+let waitingNodes: { osc: OscillatorNode[]; gain: GainNode } | null = null;
+
+/**
+ * Start the call-waiting pips. Idempotent, like `startRinging` and for the same reason:
+ * every `publish()` in SoftphoneContext re-derives which tone should be sounding, so this
+ * is called repeatedly while one call waits.
+ *
+ * Quieter than the ringtone by default — it plays OVER a live conversation, and the agent
+ * has to keep hearing the customer through it.
+ */
+export function startCallWaitingTone(volume = 0.09): boolean {
+  if (!ctx || ctx.state !== 'running') {
+    void ctx?.resume();
+    return false;
+  }
+  if (waitingNodes) return true;
+
+  const t0 = ctx.currentTime + 0.02;
+  const end = t0 + CW_TOTAL_SECONDS;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, t0);
+  gain.connect(ctx.destination);
+  for (const { on, off } of callWaitingSchedule()) {
+    gain.gain.setValueAtTime(0, t0 + on);
+    gain.gain.linearRampToValueAtTime(volume, t0 + on + RING_EDGE);
+    gain.gain.setValueAtTime(volume, t0 + off - RING_EDGE);
+    gain.gain.linearRampToValueAtTime(0, t0 + off);
+  }
+
+  // One steady sine, deliberately: the ringtone's identity is its trill, so anything that
+  // wobbles would be heard as "the phone is ringing" rather than "someone is waiting".
+  const tone = ctx.createOscillator();
+  tone.type = 'sine';
+  tone.frequency.value = CW_HZ;
+  tone.connect(gain);
+  tone.start(t0);
+  tone.stop(end);
+
+  waitingNodes = { osc: [tone], gain };
+  return true;
+}
+
+/** Stop the call-waiting pips. Safe to call when they are not playing. */
+export function stopCallWaitingTone(): void {
+  if (!waitingNodes) return;
+  const { osc, gain } = waitingNodes;
+  waitingNodes = null;
+  try {
     const now = ctx?.currentTime ?? 0;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);

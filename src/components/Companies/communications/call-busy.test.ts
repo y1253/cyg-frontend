@@ -7,7 +7,7 @@ import {
   type LocalCallState,
 } from './call-busy';
 
-const IDLE: LocalCallState = { phase: 'idle', info: null };
+const IDLE: LocalCallState = { calls: [] };
 
 function active(over: Partial<ActiveCall> = {}): ActiveCall {
   return {
@@ -63,7 +63,7 @@ describe('callBlockedReason', () => {
     expect(
       callBlockedReason({
         activeCall: null,
-        local: { phase: 'active', info: { companyId: 7, kind: 'company' } },
+        local: { calls: [{ companyId: 7, kind: 'company' }] },
         companyId: 7,
         starting: false,
       }),
@@ -80,7 +80,7 @@ describe('callBlockedReason', () => {
     expect(
       callBlockedReason({
         activeCall: null,
-        local: { phase: 'active', info: { companyId: 8 } },
+        local: { calls: [{ companyId: 8 }] },
         companyId: 7,
         starting: false,
       }),
@@ -91,7 +91,7 @@ describe('callBlockedReason', () => {
     expect(
       callBlockedReason({
         activeCall: null,
-        local: { phase: 'active', info: { companyId: 7, kind: 'internal' } },
+        local: { calls: [{ companyId: 7, kind: 'internal' }] },
         companyId: 7,
         starting: false,
       }),
@@ -105,7 +105,7 @@ describe('shouldShowActiveBanner', () => {
   });
 
   it('hides it in the browser that is on the call, which has the call card', () => {
-    const local: LocalCallState = { phase: 'active', info: { companyId: 7 } };
+    const local: LocalCallState = { calls: [{ companyId: 7 }] };
     expect(shouldShowActiveBanner(active({ isViewer: true }), local, 7)).toBe(false);
   });
 

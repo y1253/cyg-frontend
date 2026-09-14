@@ -151,6 +151,36 @@ export async function fetchPendingCall(
   return text ? (JSON.parse(text) as IncomingCallPayload & { type: string }) : null;
 }
 
+/**
+ * EVERY call ringing this user right now, newest first.
+ *
+ * What the singular route above cannot answer once call waiting exists: an agent already
+ * on a call is holding TWO INVITEs, and one event cannot say which company each belongs
+ * to — pairing them from a single "newest" value is how caller B gets labelled company A.
+ *
+ * Returns `[]` rather than throwing on any failure, including an older server that has no
+ * such route: a browser holding an INVITE and no event simply waits, which is the same
+ * thing it does when the poll has not landed yet.
+ */
+export async function fetchPendingCalls(
+  token: string,
+): Promise<(IncomingCallPayload & { type: string })[]> {
+  try {
+    const res = await fetchWithAuth(token, `${API}/phone/pending-calls`, {
+      headers: JSON_HEADERS,
+    });
+    if (!res.ok) return [];
+    const text = await res.text();
+    if (!text) return [];
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed)
+      ? (parsed as (IncomingCallPayload & { type: string })[])
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface IncomingCallPayload {
   companyId: number;
   companyName: string;
@@ -555,6 +585,34 @@ export async function setCallHold(
   } catch {
     /* best effort — see the docblock */
   }
+}
+
+/**
+ * Send a still-ringing call to voicemail — the waiting call's "Decline".
+ *
+ * THROWS, unlike `setCallHold` above and following `transferCallBlind`'s rule: a decline
+ * that silently did nothing leaves the agent believing they dealt with the caller while
+ * that caller is still ringing.
+ *
+ * Note this is not a local dismissal. Rejecting the INVITE here would end only THIS
+ * browser's branch — every browser shares one SIP credential — so the other branches would
+ * hold the `<Dial>` open until its timeout and the caller would go on ringing. The server
+ * redirects the leg, which ends it for everyone.
+ */
+export async function declineCall(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<{ voicemail: boolean }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(
+      callSid,
+    )}/decline`,
+    { method: 'POST', headers: JSON_HEADERS },
+  );
+  if (!res.ok) throw await failure(res, 'Could not decline the call');
+  return (await res.json()) as { voicemail: boolean };
 }
 
 /**

@@ -12,22 +12,27 @@ import type { ActiveCall } from '@/api/phone';
  * not what keeps the line safe.
  */
 
-/** The softphone fields this needs. Structural, so the test needs no React. */
+/**
+ * The softphone fields this needs. Structural, so the test needs no React.
+ *
+ * ⚠️ A LIST of calls, not one. Call waiting means the agent can be on company A while
+ * company B is parked — and with only "the active call" to look at, company B's tab would
+ * offer a Call button for a line this very browser is holding. The server refuses the dial
+ * either way; this is what keeps the button honest about why.
+ */
 export interface LocalCallState {
-  phase: 'idle' | 'ringing' | 'active' | 'transferring';
-  info: { companyId: number; kind?: 'company' | 'internal' } | null;
+  calls: { companyId: number; kind?: 'company' | 'internal' }[];
 }
 
 export function isOnThisCompanysCall(
   local: LocalCallState,
   companyId: number,
 ): boolean {
-  return (
-    local.phase !== 'idle' &&
-    local.info !== null &&
-    local.info.companyId === companyId &&
-    // An internal call's companyId is a staff workspace id, never a client company.
-    local.info.kind !== 'internal'
+  return local.calls.some(
+    (call) =>
+      call.companyId === companyId &&
+      // An internal call's companyId is a staff workspace id, never a client company.
+      call.kind !== 'internal',
   );
 }
 

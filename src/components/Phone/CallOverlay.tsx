@@ -17,7 +17,7 @@ import {
   UserMinus,
   Users,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatE164 } from '@/lib/phone';
 import type { ConferenceStatus } from '@/api/phone';
@@ -38,6 +38,18 @@ import {
   holdAllLabel,
   showConferenceCard,
 } from '@/components/Phone/conference-parties';
+import {
+  canQuickSwap,
+  otherCallId,
+  showSwitcher,
+  switcherMaxHeightClass,
+  switcherRows,
+  waitingRow,
+} from '@/components/Phone/call-slots';
+import {
+  CallSwitcher,
+  WaitingCallBanner,
+} from '@/components/Phone/CallSwitcher';
 
 /**
  * One secondary in-call control. Icon over label.
@@ -84,6 +96,8 @@ export function CallOverlay() {
     muted,
     held,
     seconds,
+    calls,
+    activeCallId,
   } = useSoftphone();
   const {
     answer,
@@ -98,6 +112,10 @@ export function CallOverlay() {
     swapParties,
     mergeParties,
     dropParty,
+    switchTo,
+    answerWaiting,
+    declineWaiting,
+    endAndAnswer,
   } = useSoftphoneActions();
   const navigate = useNavigate();
   const [transferOpen, setTransferOpen] = useState(false);
@@ -112,6 +130,28 @@ export function CallOverlay() {
    */
   const inConference = showConferenceCard(conference);
 
+  // Call waiting. `waiting` is the ring the agent is NOT on; `rows` is every answered
+  // call, so the two can never describe the same call twice.
+  const waiting = waitingRow(calls, activeCallId);
+  const rows = switcherRows(calls);
+  const strip = showSwitcher(calls) ? (
+    <CallSwitcher
+      rows={rows}
+      maxHeightClass={switcherMaxHeightClass(!!waiting)}
+      onSwitch={switchTo}
+    />
+  ) : null;
+  const waitingBanner = waiting ? (
+    <WaitingCallBanner
+      row={waiting}
+      currentCompany={info?.companyName ?? null}
+      onAnswer={() => answerWaiting(waiting.id)}
+      onEndAndAnswer={() => endAndAnswer(waiting.id)}
+      onDecline={() => declineWaiting(waiting.id)}
+    />
+  ) : null;
+  const swapTo = canQuickSwap(calls) ? otherCallId(calls, activeCallId) : null;
+
   if (phase === 'idle') return null;
 
   if (phase === 'transferring') {
@@ -123,6 +163,17 @@ export function CallOverlay() {
           canTakeBack={canTakeBack}
           onTakeBack={takeBack}
           onOpenCompany={(id) => navigate(`/companies/${id}`)}
+          // With nothing else in hand these are both null and this card is
+          // byte-identical to what it has always rendered. With another call held, or one
+          // ringing, they are the ONLY way back to it — this branch returns early, so a
+          // strip left in the main shell below would simply not exist for the length of
+          // the transfer.
+          extra={
+            <>
+              {waitingBanner}
+              {strip}
+            </>
+          }
         />
         {/*
           Kept MOUNTED, not just hidden. The phase flips to 'transferring' before the
@@ -233,6 +284,9 @@ export function CallOverlay() {
           reject every press, and the pad's only failure wording is about tone support,
           which would be a lie. `padOpen` is untouched, so it reappears on resume.
         */}
+        {waitingBanner}
+        {strip}
+
         {inConference && conference && (
           <ConferenceCard
             view={conference}
@@ -368,6 +422,21 @@ export function CallOverlay() {
                 <UserPlus size={16} />
                 Add call
               </button>
+              {/* The free 6th cell the grid comment above was written for: with exactly
+                  two calls in hand, "the other one" is unambiguous and worth one press. */}
+              {swapTo && (
+                <button
+                  onClick={() => switchTo(swapTo)}
+                  title="Talk to the other caller"
+                  className={[
+                    SECONDARY_BTN,
+                    'bg-muted hover:bg-muted/70',
+                  ].join(' ')}
+                >
+                  <ArrowLeftRight size={16} />
+                  Swap
+                </button>
+              )}
               </div>
               <button
                 onClick={hangup}
@@ -518,12 +587,22 @@ function TransferringCard({
   canTakeBack,
   onTakeBack,
   onOpenCompany,
+  extra,
 }: {
   info: IncomingCallInfo | null;
   transfer: TransferView | null;
   canTakeBack: boolean;
   onTakeBack: () => void;
   onOpenCompany: (companyId: number) => void;
+  /**
+   * The waiting-call banner and the call switcher, when there are other calls in hand.
+   *
+   * Null in the ordinary single-call transfer, which is what keeps this card exactly what
+   * it has always been. This branch returns early from the main shell, so without this
+   * the strip would not exist for the whole length of a transfer — leaving the agent with
+   * no way back to a caller they have parked.
+   */
+  extra?: ReactNode;
 }) {
   const name = transfer?.target.name ?? 'your colleague';
   const state = transfer?.state ?? 'ringing';
@@ -613,6 +692,7 @@ function TransferringCard({
             </button>
           </div>
         )}
+        {extra}
       </div>
     </div>
   );

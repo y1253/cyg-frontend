@@ -23,15 +23,36 @@ export interface HoldMusic {
  * Never throws: hold must still work when this fails. A null result means the caller falls
  * back to silence, which is a worse hold but a working one.
  */
+/**
+ * ONE AudioContext for every hold, created lazily and never closed.
+ *
+ * ⚠️ It used to be one context per held call. Browsers cap how many a page may have — six
+ * or so in Chrome — and call waiting lets an agent park several callers at once, so the
+ * per-call version would start returning `null` partway down the list. That failure is
+ * graceful and therefore invisible: the caller falls through to a SILENT hold, and the only
+ * symptom is a customer who says we hung up on them.
+ *
+ * Each HoldMusic still owns its own <audio>, source node and destination — it must, since
+ * each feeds a different peer connection and has to stop independently. Only the context is
+ * shared, which is why `stop()` below no longer closes it.
+ */
+let sharedCtx: AudioContext | null = null;
+
+function holdContext(): AudioContext | null {
+  if (sharedCtx && sharedCtx.state !== 'closed') return sharedCtx;
+  const Ctor: typeof AudioContext | undefined =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!Ctor) return null;
+  sharedCtx = new Ctor();
+  return sharedCtx;
+}
+
 export async function startHoldMusic(url: string): Promise<HoldMusic | null> {
   try {
-    const Ctor: typeof AudioContext | undefined =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    if (!Ctor) return null;
-
-    const ctx = new Ctor();
+    const ctx = holdContext();
+    if (!ctx) return null;
     // Safari starts contexts suspended even inside a gesture.
     if (ctx.state === 'suspended') await ctx.resume();
 
@@ -50,15 +71,15 @@ export async function startHoldMusic(url: string): Promise<HoldMusic | null> {
     const track = dest.stream.getAudioTracks()[0];
     if (!track) {
       el.pause();
-      void ctx.close();
       return null;
     }
 
     return {
       track,
       stop: () => {
-        // Order matters only in that everything must happen even if one step throws —
-        // a leaked AudioContext per call is a real leak, and browsers cap how many exist.
+        // Order matters only in that everything must happen even if one step throws. The
+        // context is deliberately NOT closed: it is shared with every other held call, and
+        // a closed AudioContext cannot be reopened.
         try {
           el.pause();
           el.src = '';
@@ -75,7 +96,11 @@ export async function startHoldMusic(url: string): Promise<HoldMusic | null> {
         } catch {
           /* ignore */
         }
-        void ctx.close().catch(() => undefined);
+        try {
+          dest.disconnect();
+        } catch {
+          /* ignore */
+        }
       },
     };
   } catch {

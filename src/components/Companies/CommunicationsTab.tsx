@@ -334,18 +334,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // has one can accept it — so with nothing held there is nothing to ask about, and the
   // query stays idle. `phase !== 'idle'` means this browser is already showing the call
   // in the floating overlay, or is on another call.
-  const { phase: callPhase, info: callInfo, hasHeldInvite } = useSoftphone();
+  const { calls: localCalls, hasHeldInvite } = useSoftphone();
   const { answerHeld } = useSoftphoneActions();
   const [ignoredCallSid, setIgnoredCallSid] = useState<string | null>(null);
 
   const { data: ringingCall } = useRingingCall(
     companyId,
-    hasHeldInvite && callPhase === 'idle' && active && !!supportNumber,
+    hasHeldInvite && active && !!supportNumber,
   );
+  /**
+   * ⚠️ No longer gated on `callPhase === 'idle'`.
+   *
+   * That gate meant an admin already on a call could not pick up a second one from the
+   * company tab — which is precisely what call waiting exists to allow. What replaces it
+   * is narrower and truer: hide the banner for a call the softphone has ALREADY paired,
+   * because that one is showing in the floating overlay with better controls than this
+   * banner has.
+   */
   const showRinging =
     !!ringingCall &&
     hasHeldInvite &&
-    callPhase === 'idle' &&
+    !localCalls.some((c) => c.info.callSid === ringingCall.callSid) &&
     ringingCall.callSid !== ignoredCallSid;
 
   /**
@@ -360,7 +369,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // ELSE is on (an admin watching, or the same user in another tab) and to stop anyone
   // dialling out from a number that is in use. `call-busy.ts` holds the rule.
   const { data: activeCall } = useActiveCall(companyId, active && !!supportNumber);
-  const localCall = { phase: callPhase, info: callInfo };
+  const localCall = {
+    calls: localCalls.map((c) => ({
+      companyId: c.info.companyId,
+      kind: c.info.kind,
+    })),
+  };
   const callBlocked = callBlockedReason({
     activeCall,
     local: localCall,

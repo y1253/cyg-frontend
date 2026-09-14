@@ -20,7 +20,8 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import {
   fetchHoldAudio,
-  fetchPendingCall,
+  fetchPendingCalls,
+  declineCall,
   fetchSipCredentials,
   phoneAudioUrl,
   phoneEventsUrl,
@@ -49,7 +50,13 @@ import {
   fetchInternalConferenceStatus,
 } from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
-import { startRinging, stopRinging, unlockAudio } from '@/lib/notificationSound';
+import {
+  startCallWaitingTone,
+  startRinging,
+  stopCallWaitingTone,
+  stopRinging,
+  unlockAudio,
+} from '@/lib/notificationSound';
 import { isDtmfKey } from '@/lib/dtmf';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
 
@@ -69,19 +76,60 @@ function audioSenderOf(session: Session | null): RTCRtpSender | undefined {
 }
 
 /**
- * The X-Cyg-Call marker on an INVITE, or null.
+ * The two SIP headers that can identify an INVITE.
+ *
+ * `X-Cyg-Call` is the internal-call token, and predates this. `X-Cyg-Leg` carries a
+ * company call's own sid and is what makes two concurrent calls distinguishable. They are
+ * separate names on purpose — see `ringAndDial` on the server: reusing `X-Cyg-Call` for
+ * company calls would make an older cached client build refuse every inbound call.
+ */
+interface InviteMarkers {
+  call: string | null;
+  leg: string | null;
+}
+
+/**
+ * Both markers on an INVITE.
  *
  * sip.js exposes the raw INVITE as `invitation.request`, and SignalWire delivers the
- * `?X-Cyg-Call=…` parameter we put on the <Sip> noun as a SIP header of that name.
+ * `?X-Cyg-…=` parameters we put on the <Sip> noun as SIP headers of those names.
  */
-function markerOf(invitation: Invitation): string | null {
-  try {
-    return invitation.request.getHeader('X-Cyg-Call') ?? null;
-  } catch {
-    // Never let header parsing break call pairing — a missing marker just means this
-    // INVITE is treated as an ordinary (company) leg.
-    return null;
-  }
+function markersOf(invitation: Invitation): InviteMarkers {
+  const read = (name: string): string | null => {
+    try {
+      return invitation.request.getHeader(name) ?? null;
+    } catch {
+      // Never let header parsing break call pairing — a missing marker just means this
+      // INVITE falls back to order-based matching, i.e. the pre-call-waiting behaviour.
+      return null;
+    }
+  };
+  return { call: read('X-Cyg-Call'), leg: read('X-Cyg-Leg') };
+}
+
+/**
+ * Does this INVITE belong to this event?
+ *
+ * ── WHY THIS IS NOT JUST AN EQUALITY TEST ANY MORE ─────────────────────────────
+ * With call waiting the browser can be holding SEVERAL INVITEs and SEVERAL events at
+ * once, and it used to pair whatever it had with whatever it had — which across two
+ * concurrent calls means labelling caller B with company A.
+ *
+ * ⚠️ The leg marker is ADVISORY, never required. `<Sip>` URI parameters arriving as SIP
+ * headers is still unverified against the live SignalWire account, so an absent marker
+ * falls through to order-based matching — exactly what this file did before. If headers
+ * are never delivered, nothing regresses; if they are, every pairing is exact. The log
+ * line in `pair` says which happened, from real traffic, with no deploy.
+ */
+function invitePairsWith(markers: InviteMarkers, info: IncomingCallInfo): boolean {
+  // An INTERNAL callee's event names the token its own leg must carry. Unchanged rule.
+  if (info.token != null) return markers.call === info.token;
+  // Every other event is a company call, or an internal CALLER's own leg. Neither
+  // carries a token, so an INVITE that carries one is somebody else's leg.
+  if (markers.call != null) return false;
+  // A company leg's marker is the call's own sid.
+  if (markers.leg != null) return markers.leg === info.callSid;
+  return true;
 }
 
 /** Where the SIP registration currently stands. Surfaced so it is never a mystery. */
@@ -164,6 +212,35 @@ export interface TransferView {
   transferredSid: string;
 }
 
+/**
+ * One live call, as render sees it. Immutable; rebuilt by `publish()`.
+ *
+ * `id` is a MINTED slot id, never the call sid. A sid is not a stable key here: on a
+ * transfer take-back the same slot is deliberately re-pointed at a different sid
+ * (`transferredSid`), and on an inbound transfer the transferrer's and transferee's
+ * entries name the SAME sid. `info.callSid` remains what every API call is made against.
+ */
+export interface CallView {
+  id: string;
+  info: IncomingCallInfo;
+  /** A slot never reaches `'idle'` — it is removed instead. */
+  phase: Exclude<CallPhase, 'idle'>;
+  held: boolean;
+  /**
+   * Parked because the agent switched away, rather than because they pressed Hold.
+   *
+   * The difference decides whether switching BACK resumes the call. A manual hold is an
+   * instruction about that caller ("stay parked"); silently un-parking them would put
+   * them live on a call the agent believes is still held.
+   */
+  heldAuto: boolean;
+  muted: boolean;
+  seconds: number;
+  isActive: boolean;
+  conference: ConferenceStatus | null;
+  transfer: TransferView | null;
+}
+
 interface SoftphoneState {
   status: SoftphoneStatus;
   phase: CallPhase;
@@ -196,6 +273,23 @@ interface SoftphoneState {
   held: boolean;
   /** Seconds since the call was answered. */
   seconds: number;
+  /**
+   * EVERY live call, oldest first — call waiting's whole surface.
+   *
+   * Every field above it now means "the ACTIVE call's". That is deliberate: `phase` is
+   * still the overlay's portal gate and `hasHeldInvite && phase === 'idle'` is still the
+   * Communications tab's Answer-banner gate, so redefining either would quietly change
+   * who can answer a call from where. With one call in the list — which is almost every
+   * call — every one of those reads means exactly what it meant before.
+   */
+  calls: CallView[];
+  activeCallId: string | null;
+  /**
+   * A call that is ringing and is NOT the one the agent is on. Derived, never stored, so
+   * the FIRST call ringing on an idle phone (active AND ringing) can never be mistaken
+   * for a call waiting.
+   */
+  waitingCallId: string | null;
   /**
    * This browser is holding a live INVITE it has not been told to display.
    *
@@ -282,6 +376,27 @@ interface SoftphoneActions {
   mergeParties: () => Promise<void>;
   /** Remove one person; the call continues with whoever is left. */
   dropParty: (partyId: string) => Promise<void>;
+  /**
+   * Talk to a different one of the calls in hand.
+   *
+   * Parks the current caller first and AWAITS it, then resumes the target if it was
+   * auto-held. Park-then-resume, never the reverse: resuming first would leave both calls
+   * live for the length of a hold round-trip, i.e. the first customer listening to the
+   * agent talk to the second.
+   */
+  switchTo: (callId: string) => void;
+  /** Answer a call that is ringing while another is in progress. Parks the current one. */
+  answerWaiting: (callId: string) => void;
+  /**
+   * Send a waiting caller to voicemail.
+   *
+   * Goes through the server, which redirects that leg. Rejecting the INVITE here would
+   * end only THIS browser's branch — every browser shares one SIP credential — and the
+   * caller would go on ringing into the other branches until the dial timed out.
+   */
+  declineWaiting: (callId: string) => void;
+  /** Hang up on the current caller and take the waiting one instead. */
+  endAndAnswer: (callId: string) => void;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -374,307 +489,553 @@ const log = (...args: unknown[]) => console.log('[softphone]', ...args);
  * up while the user browses to another company — and unmounts on logout, which
  * deregisters.
  */
+/**
+ * One live call. MUTABLE and ref-only — never put in state; `publish()` snapshots it.
+ *
+ * Everything here used to be a singleton ref on the provider (`invitationRef`, `infoRef`,
+ * `micTrackRef`, `holdMusicRef`, `holdBusyRef`, `transferInviteRef`, …). Gathering them
+ * into a record is the whole refactor: with one slot in the registry, every operation
+ * below does exactly what it did before.
+ */
+interface CallSlot {
+  /** Minted `call-1`, `call-2`, … — see `CallView.id` for why this is not the sid. */
+  id: string;
+  invitation: Invitation;
+  info: IncomingCallInfo;
+  phase: Exclude<CallPhase, 'idle'>;
+  /** This call's own remote-audio sink. */
+  audio: HTMLAudioElement;
+  /** The real microphone, parked here while hold music takes its place. */
+  micTrack: MediaStreamTrack | null;
+  music: HoldMusic | null;
+  held: boolean;
+  heldAuto: boolean;
+  /** Serialises hold/resume on THIS slot. A chain, not a flag — `switchTo` must await it. */
+  holdOp: Promise<void> | null;
+  muted: boolean;
+  /**
+   * The agent has pressed Answer and `accept()` is in flight.
+   *
+   * ⚠️ Load-bearing for the TONE, not for the call. `syncTones` derives what should be
+   * sounding from the active slot's phase, and a call being answered is still `'ringing'`
+   * until Established lands — so without this, answering a WAITING call makes it the
+   * active ringing slot for a few hundred milliseconds and the full ringtone blares at an
+   * agent who just picked the call up.
+   */
+  answering: boolean;
+  /** Epoch ms at Established; null while ringing. `seconds` is derived from it. */
+  answeredAt: number | null;
+  /** Epoch ms this slot was last the active one. Decides who is promoted on hang-up. */
+  lastActiveAt: number;
+  conference: ConferenceStatus | null;
+  transfer: TransferView | null;
+  /** Our own fork of this call's transfer `<Dial><Sip>`, claimed once and never replaced. */
+  takeBackInvite: Invitation | null;
+  transferTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** An INVITE that has arrived with no matching event YET. */
+interface HeldInvite {
+  invitation: Invitation;
+  /** Read ONCE, on arrival. */
+  markers: InviteMarkers;
+  at: number;
+  /** Its OWN release timer — there is no longer a single shared one. */
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Ceiling on unpaired INVITEs.
+ *
+ * Every browser receives every INVITE for the whole firm, because they all share one SIP
+ * credential. This used to be a single slot that each new INVITE overwrote, so it could
+ * not grow; a list can, on a busy afternoon in an idle admin's browser.
+ */
+const MAX_HELD_INVITES = 8;
+
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
 
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
-  const [phase, setPhaseState] = useState<CallPhase>('idle');
-  const [info, setInfoState] = useState<IncomingCallInfo | null>(null);
-  const [transfer, setTransfer] = useState<TransferView | null>(null);
-  const [conference, setConference] = useState<ConferenceStatus | null>(
-    null,
-  );
-  const [muted, setMuted] = useState(false);
-  const [held, setHeld] = useState(false);
-  /** The real microphone track, parked here while hold music takes its place. */
-  const micTrackRef = useRef<MediaStreamTrack | null>(null);
-  const holdMusicRef = useRef<HoldMusic | null>(null);
-  /** Guards a double-click: two swaps in flight would fight over one sender. */
-  const holdBusyRef = useRef(false);
-  const [seconds, setSeconds] = useState(0);
-  // Mirrors `unpairedRef` into render, so the tab can offer Answer only when there is
-  // genuinely something to answer.
+  const [calls, setCalls] = useState<CallView[]>([]);
+  const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [hasHeldInvite, setHasHeldInvite] = useState(false);
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
-  const invitationRef = useRef<Invitation | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  /** The newest SSE event, waiting for (or already paired with) an INVITE. */
-  const pendingRef = useRef<IncomingCallInfo | null>(null);
-  /** An INVITE that has arrived but has no matching event YET. */
-  const unpairedRef = useRef<Invitation | null>(null);
-  const unpairedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
-  /**
-   * The fork of OUR OWN transfer's `<Dial><Sip>`, claimed once and never overwritten.
-   *
-   * Take-back cannot use `unpairedRef`: `onInvite` overwrites that unconditionally, so
-   * any unrelated inbound call arriving during the thirty-second transfer ring would
-   * replace it — and "Take it back" would then answer a stranger while labelling them
-   * with the transferred call's caller and company. Whether that happened would depend
-   * on timing, which is the worst way to find out.
-   */
-  const transferInviteRef = useRef<Invitation | null>(null);
-  const transferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
+  /** Holds every slot's <audio>. Outside the React tree, so nothing can detach one. */
+  const audioHostRef = useRef<HTMLDivElement | null>(null);
+
+  /** Every live call, keyed by minted slot id, in the order they arrived. */
+  const slotsRef = useRef<Map<string, CallSlot>>(new Map());
+  const activeIdRef = useRef<string | null>(null);
+  const slotSeqRef = useRef(0);
+  const switchBusyRef = useRef(false);
+
+  /** INVITEs waiting for an event, and events waiting for an INVITE. Both are LISTS now. */
+  const invitesRef = useRef<HeldInvite[]>([]);
+  const eventsRef = useRef<IncomingCallInfo[]>([]);
+
   /** Read from callbacks without making them depend on it. */
   const tokenRef = useRef(token);
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
 
+  const slotList = useCallback(() => [...slotsRef.current.values()], []);
+  const activeSlot = useCallback(
+    () =>
+      activeIdRef.current
+        ? slotsRef.current.get(activeIdRef.current) ?? null
+        : null,
+    [],
+  );
+  /** The exact replacement for every `phaseRef.current` read. */
+  const phaseNow = useCallback(
+    (): CallPhase => activeSlot()?.phase ?? 'idle',
+    [activeSlot],
+  );
+  const slotIn = useCallback(
+    (phase: CallSlot['phase']) =>
+      slotList().find((s) => s.phase === phase) ?? null,
+    [slotList],
+  );
+
   /**
-   * Current phase, readable from callbacks without making them a dependency.
+   * Which tone should be sounding right now, DERIVED rather than commanded.
    *
-   * ⚠️ Written by `setPhase` below, NOT by an effect. It used to lag one render behind,
-   * which is invisible until something sets the phase and then immediately calls
-   * something guarded on the ref in the same tick — take-back does exactly that, and
-   * would have been a silent no-op.
+   * Called from `publish()` and nowhere else, so "forgot to stop the beep" is unreachable
+   * — the characteristic failure of a sound that plays over a live conversation. Both
+   * starters are idempotent and both stoppers are no-ops when silent, so running this on
+   * every publish (including the 1 Hz tick) costs nothing.
+   *
+   * The branches are mutually exclusive on the ACTIVE slot's phase, so the ringtone and
+   * the call-waiting pips can never sound together.
    */
-  const phaseRef = useRef<CallPhase>('idle');
-  const setPhase = useCallback((next: CallPhase) => {
-    phaseRef.current = next;
-    setPhaseState(next);
-  }, []);
-
-  /** The PAIRED call. See `infoRef` below for why this is not `pendingRef`. */
-  const infoRef = useRef<IncomingCallInfo | null>(null);
-  const setInfo = useCallback((next: IncomingCallInfo | null) => {
-    infoRef.current = next;
-    setInfoState(next);
-  }, []);
-
-  const transferRef = useRef<TransferView | null>(null);
-  const setTransferBoth = useCallback((next: TransferView | null) => {
-    transferRef.current = next;
-    setTransfer(next);
-  }, []);
+  const syncTones = useCallback(() => {
+    const active = activeSlot();
+    const othersRinging = slotList().some(
+      (s) => s !== active && s.phase === 'ringing',
+    );
+    if (
+      active?.phase === 'ringing' &&
+      !active.answering &&
+      active.info.direction !== 'outbound'
+    ) {
+      stopCallWaitingTone();
+      startRinging();
+    } else if (active && othersRinging) {
+      stopRinging();
+      startCallWaitingTone();
+    } else {
+      stopRinging();
+      stopCallWaitingTone();
+    }
+  }, [activeSlot, slotList]);
 
   /**
-   * Mirrored to a ref for the same reason as `transfer`: the poll below and the actions
-   * read it from callbacks that would otherwise close over a stale render.
+   * Rebuild the render-visible snapshot from the registry. The ONE way state changes.
+   *
+   * Replaces the four paired ref+setState setters this file used to carry (`setPhase`,
+   * `setInfo`, `setTransferBoth`, `setConferenceBoth`): that pattern gives one pair per
+   * value, which does not scale to N calls. Their synchronous-read property is preserved
+   * for free, because a slot's fields are plain mutable properties.
    */
-  const conferenceRef = useRef<ConferenceStatus | null>(null);
-  const setConferenceBoth = useCallback((next: ConferenceStatus | null) => {
-    conferenceRef.current = next;
-    setConference(next);
-  }, []);
+  const publish = useCallback(() => {
+    const now = Date.now();
+    const activeId = activeIdRef.current;
+    setCalls(
+      slotList().map((s) => ({
+        id: s.id,
+        info: s.info,
+        phase: s.phase,
+        held: s.held,
+        heldAuto: s.heldAuto,
+        muted: s.muted,
+        // DERIVED, not ticked: a held call's timer keeps running, and a throttled
+        // background tab can no longer under-count.
+        seconds: s.answeredAt ? Math.floor((now - s.answeredAt) / 1000) : 0,
+        isActive: s.id === activeId,
+        conference: s.conference,
+        transfer: s.transfer,
+      })),
+    );
+    setActiveCallId(activeId);
+    setHasHeldInvite(invitesRef.current.length > 0);
+    syncTones();
+  }, [slotList, syncTones]);
 
-  // ── Media ─────────────────────────────────────────────────────────────────
-  const attachRemoteAudio = useCallback((session: Session) => {
+  /** Route a slot's remote audio into its own element. Synchronous, as it always was. */
+  const attachRemoteAudio = useCallback((slot: CallSlot) => {
     const pc = (
-      session.sessionDescriptionHandler as unknown as {
+      slot.invitation.sessionDescriptionHandler as unknown as {
         peerConnection?: RTCPeerConnection;
       }
     )?.peerConnection;
-    if (!pc || !audioRef.current) return;
+    if (!pc) return;
     const remote = new MediaStream();
     pc.getReceivers().forEach((r) => r.track && remote.addTrack(r.track));
-    audioRef.current.srcObject = remote;
-    void audioRef.current.play().catch(() => undefined);
+    slot.audio.srcObject = remote;
+    void slot.audio.play().catch(() => undefined);
   }, []);
 
   /**
-   * Put the microphone back and tear the music down.
+   * Put the microphone back and tear the music down, for ONE slot.
    *
-   * Called by resume AND by endCall: hanging up while still held must not leave a live
-   * microphone track or an open AudioContext behind. Browsers cap how many contexts a
-   * page may have, and a track left running keeps the tab’s recording indicator lit.
+   * Called by resume AND by teardown: hanging up while still held must not leave a live
+   * microphone track or a playing element behind.
    */
-  const teardownHold = useCallback((sender?: RTCRtpSender) => {
-    const mic = micTrackRef.current;
+  const teardownHold = useCallback((slot: CallSlot, sender?: RTCRtpSender) => {
+    const mic = slot.micTrack;
     if (mic) {
       // Re-enabled because a silent hold disables the track in place rather than
       // replacing it; a no-op when music was used.
       mic.enabled = true;
       if (sender) void sender.replaceTrack(mic).catch(() => undefined);
     }
-    micTrackRef.current = null;
-    holdMusicRef.current?.stop();
-    holdMusicRef.current = null;
-    if (audioRef.current) audioRef.current.muted = false;
+    slot.micTrack = null;
+    slot.music?.stop();
+    slot.music = null;
+    // This slot's OWN element. It used to be the one shared <audio>, which with several
+    // calls in hand would unmute whichever call happened to be playing through it.
+    slot.audio.muted = false;
+    slot.held = false;
+    slot.heldAuto = false;
   }, []);
 
   /**
-   * Give up the MEDIA — microphone, hold music, remote audio, the session itself — while
-   * leaving the held invitations alone.
+   * Give up ONE slot's media, leaving the registry and every held INVITE alone.
    *
-   * Split out of `endCall` for one caller: a transfer. When the agent hands a call over,
-   * their own leg is hung up by the server and the session terminates, but the browser
-   * must keep holding its fork of the transfer `<Dial>` or "Take it back" has nothing to
-   * accept. Every other exit still wants the full reset.
-   *
-   * ⚠️ `teardownHold` reads `invitationRef.current` for its sender, so it must run BEFORE
-   * that ref is cleared or the microphone track leaks and the tab keeps its recording
-   * indicator lit.
+   * Split out for the same caller as before: a transfer, where the server hangs up our leg
+   * but the browser must keep holding its fork of the transfer `<Dial>` or "Take it back"
+   * has nothing to accept.
    */
-  const releaseMedia = useCallback(() => {
-    stopRinging();
-    teardownHold(audioSenderOf(invitationRef.current));
-    setHeld(false);
-    holdBusyRef.current = false;
-    invitationRef.current = null;
-    pendingRef.current = null;
-    setMuted(false);
-    setSeconds(0);
-    if (audioRef.current) audioRef.current.srcObject = null;
-  }, [teardownHold]);
+  const releaseSlotMedia = useCallback(
+    (slot: CallSlot) => {
+      // ⚠️ BEFORE anything drops the session: `audioSenderOf` reads it, and without a
+      // sender the microphone track leaks and the tab keeps its recording indicator lit.
+      teardownHold(slot, audioSenderOf(slot.invitation));
+      slot.holdOp = null;
+      slot.muted = false;
+      slot.answeredAt = null;
+      slot.audio.srcObject = null;
+    },
+    [teardownHold],
+  );
 
-  const endCall = useCallback(() => {
-    releaseMedia();
-    clearTimeout(unpairedTimerRef.current);
-    clearTimeout(transferTimerRef.current);
-    unpairedRef.current = null;
-    transferInviteRef.current = null;
-    setHasHeldInvite(false);
-    setPhase('idle');
-    setInfo(null);
-    setTransferBoth(null);
-    setConferenceBoth(null);
-  }, [releaseMedia, setInfo, setPhase, setTransferBoth, setConferenceBoth]);
+  /** Serialise hold/resume on one slot. A chain, so `switchTo` can AWAIT a hold in flight. */
+  const queueHold = useCallback(
+    (slot: CallSlot, op: () => Promise<void>): Promise<void> => {
+      const next = (slot.holdOp ?? Promise.resolve())
+        .catch(() => undefined)
+        .then(op);
+      slot.holdOp = next;
+      return next;
+    },
+    [],
+  );
 
-  // ── Incoming calls ────────────────────────────────────────────────────────
   /**
-   * Shows the call once BOTH halves are in hand, whichever order they arrived in.
+   * Park one caller.
    *
-   * A call needs two independent signals: the INVITE (the media, which every browser
-   * gets because they all share one SIP credential) and the SSE event (which company,
-   * and whether this user is a target). Nothing guarantees their order — the server
-   * pushes the event before returning the LaML, but they travel different connections.
-   *
-   * The previous version only handled event-then-INVITE and dropped the invitation
-   * outright in the other order, so the call rang for 30 seconds with no popup.
-   * Both callers now funnel through here.
+   * ORDER IS LOAD-BEARING and unchanged: the recording is paused BEFORE the music starts,
+   * and resumed AFTER it stops. The opposite order records a slice of music at each
+   * boundary, which is the whole defect the pause exists to prevent.
    */
-  const tryPair = useCallback(() => {
-    if (phaseRef.current !== 'idle') return;
-    const invitation = unpairedRef.current;
-    const pending = pendingRef.current;
-    if (!invitation || !pending) return;
-    if (Date.now() - pending.at > EVENT_STALE_MS) return;
+  const holdSlot = useCallback(
+    async (slot: CallSlot, kind: 'manual' | 'auto'): Promise<void> => {
+      const sender = audioSenderOf(slot.invitation);
+      if (!sender || slot.held) return;
+      const tok = tokenRef.current;
+      const call = slot.info;
 
-    // ── WHICH LEG IS THIS? ────────────────────────────────────────────────────────
-    // An internal call rings the shared SIP address TWICE — once to reach the caller,
-    // once to reach the callee — and every registered browser receives both. Nothing
-    // else here distinguishes them: this function pairs whatever INVITE it is holding
-    // with whatever event it has, and never matches on call sid.
-    //
-    // So without this the callee can answer the CALLER's own leg, and whether it
-    // happens depends on arrival timing — it would pass a first test and fail later.
-    // The callee's event carries the token that its leg's header must match; the
-    // caller's event carries none, so it pairs only an unmarked INVITE.
-    //
-    // Company calls have neither, so `null === null` and this is a no-op for them.
-    if ((pending.token ?? null) !== markerOf(invitation)) return;
+      if (tok) await setCallHold(tok, call.companyId, call.callSid, true);
 
-    clearTimeout(unpairedTimerRef.current);
-    unpairedRef.current = null;
-    setHasHeldInvite(false);
-    invitationRef.current = invitation;
-    log('paired call', pending.companyName, pending.from);
+      slot.micTrack = sender.track ?? null;
+      slot.audio.muted = true;
 
-    setInfo(pending);
-    setPhase('ringing');
-
-    if (pending.direction === 'outbound') {
-      // The user already clicked "Call"; making them then click "Answer" to reach the
-      // person THEY dialled would be absurd. Accept immediately and let the overlay
-      // read "Calling…" until the far end picks up.
-      void invitation
-        .accept({
-          sessionDescriptionHandlerOptions: {
-            constraints: { audio: true, video: false },
-          },
-        })
-        .catch(() => endCall());
-    } else {
-      startRinging();
-    }
-
-    invitation.stateChange.addListener((state) => {
-      if (state === SessionState.Established) {
-        stopRinging();
-        setPhase('active');
-        setSeconds(0);
-        attachRemoteAudio(invitation);
-
-        // Tell the server WHO picked up, so everyone else looking at this company sees
-        // "On a call · <name>". Inbound company calls only: an outbound call's entry
-        // already names the person who dialled, and internal calls have no line.
-        // Best-effort — the call does not depend on it.
-        if (pending.direction !== 'outbound' && pending.kind !== 'internal') {
-          const tok = tokenRef.current;
-          if (tok) {
-            void reportCallAnswered(tok, pending.companyId, pending.callSid).catch(
-              () => undefined,
-            );
+      let music: HoldMusic | null = null;
+      if (tok) {
+        try {
+          const { audioId } = await fetchHoldAudio(tok, call.companyId);
+          if (audioId !== null) {
+            music = await startHoldMusic(phoneAudioUrl(tok, audioId));
           }
+        } catch {
+          /* fall through to a silent hold */
         }
       }
-      if (state === SessionState.Terminated) {
-        // The one place the two teardowns differ. During a transfer this BYE is the
-        // server hanging up our leg on purpose; the card must stay up and the held
-        // fork must survive, so only the media goes.
-        if (phaseRef.current === 'transferring') releaseMedia();
-        else endCall();
+
+      if (music) {
+        slot.music = music;
+        await sender.replaceTrack(music.track).catch(() => undefined);
+      } else if (sender.track) {
+        // Silent hold. The track is disabled rather than replaced, and `micTrack` still
+        // holds it so resume and mute both behave.
+        sender.track.enabled = false;
       }
-    });
-  }, [attachRemoteAudio, endCall, releaseMedia, setInfo, setPhase]);
+      slot.held = true;
+      slot.heldAuto = kind === 'auto';
+      publish();
+    },
+    [publish],
+  );
+
+  const resumeSlot = useCallback(
+    async (slot: CallSlot): Promise<void> => {
+      if (!slot.held) return;
+      teardownHold(slot, audioSenderOf(slot.invitation));
+      publish();
+      const tok = tokenRef.current;
+      if (tok) {
+        await setCallHold(tok, slot.info.companyId, slot.info.callSid, false);
+      }
+    },
+    [publish, teardownHold],
+  );
+
+  /**
+   * The active call ended while others are in hand — who does the agent land on?
+   *
+   * Focus MOVES (the overlay would otherwise show nothing coherent and Hang up would be
+   * ambiguous), to the call they were most recently on. Audio resumes only in the one
+   * unambiguous case: a single survivor that this browser parked itself. Putting the agent
+   * live on a call they did not choose, in the same tick as hanging up on somebody else,
+   * is worse than leaving them a Resume button.
+   */
+  const promoteAfterEnd = useCallback(() => {
+    const remaining = slotList();
+    if (remaining.length === 0) return;
+    const next = remaining.reduce((a, b) =>
+      b.lastActiveAt > a.lastActiveAt ? b : a,
+    );
+    activeIdRef.current = next.id;
+    next.lastActiveAt = Date.now();
+    if (remaining.length === 1 && next.heldAuto) {
+      void queueHold(next, () => resumeSlot(next)).catch(() => undefined);
+    }
+  }, [queueHold, resumeSlot, slotList]);
+
+  /**
+   * End ONE call and forget it.
+   *
+   * ⚠️ This is where the old global `endCall` was wrong in a way call waiting exposes: it
+   * cleared the single unpaired-INVITE slot, so hanging up on call 1 threw away a live,
+   * answerable INVITE for a call 2 that was still ringing. Nothing here touches
+   * `invitesRef` or `eventsRef` — every held INVITE carries its own release timer and its
+   * own Terminated listener, so none of them leaks.
+   */
+  const endSlot = useCallback(
+    (id: string, reason: string) => {
+      const slot = slotsRef.current.get(id);
+      if (!slot) return;
+      clearTimeout(slot.transferTimer);
+      releaseSlotMedia(slot);
+      slot.audio.remove();
+      slot.takeBackInvite = null;
+      slotsRef.current.delete(id);
+      if (activeIdRef.current === id) {
+        activeIdRef.current = null;
+        promoteAfterEnd();
+      }
+      log('call ended', id, reason);
+      publish();
+    },
+    [promoteAfterEnd, publish, releaseSlotMedia],
+  );
+
+  /** Drop a held INVITE from the list, whatever became of it. */
+  const releaseInvite = useCallback((held: HeldInvite) => {
+    clearTimeout(held.timer);
+    invitesRef.current = invitesRef.current.filter((h) => h !== held);
+    setHasHeldInvite(invitesRef.current.length > 0);
+  }, []);
+
+  /**
+   * Turn one matched (INVITE, event) pair into a live slot.
+   *
+   * `path` is logged rather than branched on: it is how a field report says whether the
+   * `X-Cyg-Leg` header actually arrives from SignalWire, which is still unverified.
+   */
+  const pair = useCallback(
+    (held: HeldInvite, info: IncomingCallInfo, path: 'marker' | 'order') => {
+      releaseInvite(held);
+      eventsRef.current = eventsRef.current.filter((e) => e !== info);
+
+      const id = `call-${++slotSeqRef.current}`;
+      const audio = new Audio();
+      audio.autoplay = true;
+      audioHostRef.current?.appendChild(audio);
+
+      const slot: CallSlot = {
+        id,
+        invitation: held.invitation,
+        info,
+        phase: 'ringing',
+        audio,
+        micTrack: null,
+        music: null,
+        held: false,
+        heldAuto: false,
+        holdOp: null,
+        muted: false,
+        answering: false,
+        answeredAt: null,
+        lastActiveAt: Date.now(),
+        conference: null,
+        transfer: null,
+        takeBackInvite: null,
+        transferTimer: undefined,
+      };
+      slotsRef.current.set(id, slot);
+      // The first call in hand becomes the active one; a later call is WAITING until the
+      // agent answers it, which is what stops a second ring hijacking a live conversation.
+      if (activeIdRef.current === null) activeIdRef.current = id;
+
+      log('paired call', path, info.companyName, info.from, id);
+
+      if (info.direction === 'outbound') {
+        // The user already clicked "Call"; making them then click "Answer" to reach the
+        // person THEY dialled would be absurd.
+        void held.invitation
+          .accept({
+            sessionDescriptionHandlerOptions: {
+              constraints: { audio: true, video: false },
+            },
+          })
+          .catch(() => endSlot(id, 'outbound accept failed'));
+      }
+
+      held.invitation.stateChange.addListener((state) => {
+        if (state === SessionState.Established) {
+          slot.answeredAt = Date.now();
+          slot.phase = 'active';
+          attachRemoteAudio(slot);
+
+          // Tell the server WHO picked up, so everyone else looking at this company sees
+          // "On a call · <name>". Inbound company calls only. Best-effort.
+          if (info.direction !== 'outbound' && info.kind !== 'internal') {
+            const tok = tokenRef.current;
+            if (tok) {
+              void reportCallAnswered(tok, info.companyId, info.callSid).catch(
+                () => undefined,
+              );
+            }
+          }
+          publish();
+        }
+        if (state === SessionState.Terminated) {
+          // The one place the two teardowns differ. During a transfer this BYE is the
+          // server hanging up our leg on purpose; the card must stay up and the held fork
+          // must survive, so only the media goes.
+          if (slot.phase === 'transferring') {
+            releaseSlotMedia(slot);
+            publish();
+          } else {
+            endSlot(slot.id, 'terminated');
+          }
+        }
+      });
+
+      publish();
+    },
+    [attachRemoteAudio, endSlot, publish, releaseInvite, releaseSlotMedia],
+  );
+
+  /**
+   * Match every INVITE in hand against every event in hand.
+   *
+   * ⚠️ The `phaseRef.current !== 'idle'` guard this used to open with is GONE — it is what
+   * made a second call unpairable. It was doing a second job too (stopping a transferring
+   * browser being rung by its own `<Dial><Sip>` fork), and that job now belongs entirely
+   * to the claim in `onInvite`, which runs first and is scoped to the transferring slot.
+   */
+  const tryPair = useCallback(() => {
+    const now = Date.now();
+    eventsRef.current = eventsRef.current.filter(
+      (e) => now - e.at <= EVENT_STALE_MS,
+    );
+
+    for (const held of [...invitesRef.current]) {
+      const info = eventsRef.current.find((e) =>
+        invitePairsWith(held.markers, e),
+      );
+      if (!info) continue;
+      const exact = held.markers.call !== null || held.markers.leg !== null;
+      pair(held, info, exact ? 'marker' : 'order');
+    }
+  }, [pair]);
+
+  /**
+   * Record an event and try to place it. The single writer for `eventsRef`.
+   *
+   * De-dupes on sid, because the SSE frame and the `/pending-calls` response for one call
+   * are the same fact arriving twice, and ignores anything already paired.
+   */
+  const pushEvent = useCallback(
+    (info: IncomingCallInfo) => {
+      if (slotList().some((s) => s.info.callSid === info.callSid)) return;
+      eventsRef.current = [
+        ...eventsRef.current.filter((e) => e.callSid !== info.callSid),
+        info,
+      ];
+      tryPair();
+    },
+    [slotList, tryPair],
+  );
 
   const onInvite = useCallback(
     (invitation: Invitation) => {
-      log('INVITE received');
+      const markers = markersOf(invitation);
+      log('INVITE received', markers.leg ?? markers.call ?? 'unmarked');
 
-      // Claimed ONCE. While a transfer of ours is ringing, the first INVITE to arrive is
-      // its fork coming back to us — every browser shares one SIP credential — and it is
-      // the handle "Take it back" accepts. `unpairedRef` below is overwritten by every
-      // later INVITE, so it cannot serve: an unrelated call arriving mid-ring would make
-      // take-back answer a stranger under the transferred call's name.
-      if (phaseRef.current === 'transferring' && !transferInviteRef.current) {
-        transferInviteRef.current = invitation;
+      // Claimed ONCE, and scoped to the slot that is actually transferring. While a
+      // transfer of ours is ringing, an UNMARKED INVITE is its fork coming back to us —
+      // every browser shares one SIP credential — and it is the handle "Take it back"
+      // accepts. A MARKED INVITE is provably not our fork, since the transfer <Dial><Sip>
+      // deliberately carries none.
+      const transferring = slotIn('transferring');
+      if (transferring && !transferring.takeBackInvite && markers.call === null) {
+        transferring.takeBackInvite = invitation;
         setHasHeldInvite(true);
         invitation.stateChange.addListener((state) => {
           if (state !== SessionState.Terminated) return;
-          if (transferInviteRef.current !== invitation) return;
+          if (transferring.takeBackInvite !== invitation) return;
           // SignalWire cancelled our branch: the colleague answered, or it rang out.
-          transferInviteRef.current = null;
-          setHasHeldInvite(false);
+          transferring.takeBackInvite = null;
+          publish();
         });
         return;
       }
 
-      // ALWAYS hold it, even with no context yet — it may still be on its way, and for
-      // a whole company's worth of admins it never will: the call is somebody else's to
-      // be shown, but any of them may still pick it up from that company's tab.
-      unpairedRef.current = invitation;
+      // ALWAYS hold it, even with no context yet — it may still be on its way, and for a
+      // whole company's worth of admins it never will: the call is somebody else's to be
+      // shown, but any of them may still pick it up from that company's tab.
+      const held: HeldInvite = {
+        invitation,
+        markers,
+        at: Date.now(),
+        timer: setTimeout(() => {
+          if (!invitesRef.current.includes(held)) return;
+          // The ring is over. Release it and do NOTHING: a reject on one forked branch can
+          // tear down a call another branch is about to answer. Ignoring lets ours simply
+          // time out.
+          releaseInvite(held);
+          log('INVITE released unpaired — ring window elapsed');
+        }, PAIR_WINDOW_MS),
+      };
+      // Oldest first, and bounded: every browser receives every INVITE for the whole firm.
+      invitesRef.current = [...invitesRef.current, held].slice(-MAX_HELD_INVITES);
       setHasHeldInvite(true);
-      clearTimeout(unpairedTimerRef.current);
-      unpairedTimerRef.current = setTimeout(() => {
-        if (unpairedRef.current !== invitation) return;
-        // The ring is over. Release it and do NOTHING: a reject on one forked branch can
-        // tear down a call another branch is about to answer. Ignoring lets ours simply
-        // time out.
-        unpairedRef.current = null;
-        setHasHeldInvite(false);
-        log('INVITE released unpaired — ring window elapsed');
-      }, PAIR_WINDOW_MS);
 
-      // Attached HERE, not only in tryPair. An unpaired invitation used to carry no
-      // listener at all, which was survivable while it was dropped after 6s. Now that it
-      // is held for the full ring, this is what notices SignalWire CANCELling our branch
-      // when another browser answers — without it the tab would keep offering "Answer"
-      // for a call that is already gone. Terminated is idempotent with the listener
-      // tryPair adds: whichever fires, `endCall` resets the same state.
+      // Its OWN Terminated listener, replacing the single one the shared slot used to
+      // carry. This is what notices SignalWire CANCELling our branch when another browser
+      // answers — without it the tab keeps offering "Answer" for a call that is gone.
       invitation.stateChange.addListener((state) => {
         if (state !== SessionState.Terminated) return;
-        if (unpairedRef.current === invitation) {
-          unpairedRef.current = null;
-          setHasHeldInvite(false);
-          log('held INVITE terminated — answered elsewhere or rang out');
-        }
+        if (!invitesRef.current.includes(held)) return;
+        releaseInvite(held);
+        log('held INVITE terminated — answered elsewhere or rang out');
       });
 
       // Try the push first (instant where SSE works), then ASK.
@@ -688,23 +1049,23 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       if (!tok) return;
       let attempt = 0;
       const ask = () => {
-        if (unpairedRef.current !== invitation) return; // paired or released already
-        void fetchPendingCall(tok)
-          .then((call) => {
-            if (!call || unpairedRef.current !== invitation) return;
-            log('pending-call fetched', call.companyName, call.from);
-            pendingRef.current = call;
-            tryPair();
+        if (!invitesRef.current.includes(held)) return; // paired or released already
+        void fetchPendingCalls(tok)
+          .then((pending: IncomingCallInfo[]) => {
+            if (!invitesRef.current.includes(held)) return;
+            // EVERY ringing call, not just the newest. With two in flight, the singular
+            // answer could hand call 1's INVITE call 2's event.
+            for (const call of pending) pushEvent(call);
           })
           .finally(() => {
-            if (++attempt < 4 && unpairedRef.current === invitation) {
+            if (++attempt < 4 && invitesRef.current.includes(held)) {
               setTimeout(ask, 400);
             }
           });
       };
       ask();
     },
-    [tryPair],
+    [publish, pushEvent, releaseInvite, slotIn, tryPair],
   );
 
   // Read the handler through a ref so a re-created callback never churns the UserAgent.
@@ -770,6 +1131,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       stopRinging();
+      stopCallWaitingTone();
       void regRef.current?.unregister().catch(() => undefined);
       void uaRef.current?.stop().catch(() => undefined);
       uaRef.current = null;
@@ -805,9 +1167,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             return;
           }
           log('SSE', payload.type, payload.companyName, payload.from);
-          pendingRef.current = payload;
-          // The INVITE may already be waiting; tryPair handles either order.
-          tryPair();
+          pushEvent(payload);
         } catch {
           /* malformed frame — ignore */
         }
@@ -834,48 +1194,57 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     // `token` ONLY. Including call state here tore the stream down and reopened it on
     // every change — visible in nginx as a run of `GET /api/phone/events … 200 6`.
     // The stream must live as long as the session, like useInternalMessageStream.
-  }, [token, tryPair]);
+  }, [token, pushEvent]);
 
   // ── Call timer ────────────────────────────────────────────────────────────
+  /**
+   * ONE interval for every call, rather than one per call: `seconds` is derived inside
+   * `publish` from each slot's `answeredAt`, so this only has to nudge a re-render. It
+   * runs while ANY call is answered, which is what keeps a held caller's timer moving.
+   */
+  const anyAnswered = calls.some((c) => c.phase !== 'ringing');
   useEffect(() => {
-    if (phase !== 'active') return;
-    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    if (!anyAnswered) return;
+    const id = setInterval(() => publish(), 1000);
     return () => clearInterval(id);
-  }, [phase]);
+  }, [anyAnswered, publish]);
 
   // ── "Has my colleague picked up yet?" ─────────────────────────────────────
   /**
    * A bare interval rather than a TanStack query, even though the provider sits inside
-   * QueryClientProvider. This feeds a state MACHINE — the card's wording, then `endCall`
-   * — not a render-time cache read, and the app-wide `retry` plus refetch-on-focus would
-   * turn one terminal answer into several `endCall()`s. Every other timer in this file
+   * QueryClientProvider. This feeds a state MACHINE — the card's wording, then the call's
+   * teardown — not a render-time cache read, and the app-wide `retry` plus refetch-on-focus
+   * would turn one terminal answer into several teardowns. Every other timer in this file
    * is a bare interval for the same reason.
    */
+  const transferringId = calls.find((c) => c.phase === 'transferring')?.id ?? null;
   useEffect(() => {
-    if (phase !== 'transferring') return;
+    if (!transferringId) return;
     const tok = tokenRef.current;
-    const call = infoRef.current;
-    if (!tok || !call) return;
+    const slot = slotsRef.current.get(transferringId);
+    if (!tok || !slot) return;
+    const call = slot.info;
 
     let stopped = false;
     const settle = (next: TransferState) => {
       if (stopped) return;
       stopped = true;
-      setTransferBoth(
-        transferRef.current ? { ...transferRef.current, state: next } : null,
-      );
+      if (slot.transfer) slot.transfer = { ...slot.transfer, state: next };
+      publish();
       // The server's agent-leg hangup is best-effort and swallowed. When it failed,
       // no BYE ever arrives and this session would linger until the media times out,
       // so it is closed explicitly rather than waiting on a listener that may not fire.
-      const inv = invitationRef.current;
-      if (inv && inv.state === SessionState.Established) {
-        void inv.bye().catch(() => undefined);
+      if (slot.invitation.state === SessionState.Established) {
+        void slot.invitation.bye().catch(() => undefined);
       }
-      transferTimerRef.current = setTimeout(endCall, TRANSFER_SETTLE_MS);
+      slot.transferTimer = setTimeout(
+        () => endSlot(slot.id, 'transfer settled'),
+        TRANSFER_SETTLE_MS,
+      );
     };
 
     const tick = () => {
-      const view = transferRef.current;
+      const view = slot.transfer;
       if (stopped || !view) return;
       const ask =
         call.kind === 'internal'
@@ -883,7 +1252,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           : fetchTransferStatus(tok, call.companyId, call.callSid);
       void ask
         .then(({ state }) => {
-          if (stopped || transferRef.current !== view) return;
+          if (stopped || slot.transfer !== view) return;
           if (state === 'ringing') return;
           settle(state);
         })
@@ -900,7 +1269,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       clearInterval(id);
       clearTimeout(giveUp);
     };
-  }, [phase, endCall, setTransferBoth]);
+  }, [transferringId, endSlot, publish]);
 
   // ── Conference ────────────────────────────────────────────────────────────
 
@@ -908,23 +1277,24 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
    * Keep the party list honest while a conference is live.
    *
    * A bare `setInterval` rather than TanStack, for the reason the transfer poll above
-   * gives in its own words: this feeds a state machine, not a render-time cache read,
-   * and the app-wide retry plus refetch-on-focus would turn one answer into several.
+   * gives in its own words: this feeds a state machine, not a render-time cache read.
    *
    * ⚠️ NO equivalent of TRANSFER_MAX_MS. A transfer resolves in seconds so a backstop is
    * a safety net; a conference legitimately runs for an hour, and giving up on one would
    * blank the controls out from under a call that is still going.
    *
-   * An inactive answer clears the card and NOTHING else — `endCall` stays owned by the
-   * SIP Terminated listener, which is the only thing that actually knows the call ended.
+   * An inactive answer clears the card and NOTHING else — ending the call stays owned by
+   * the SIP Terminated listener, which is the only thing that actually knows it ended.
    */
+  const conferencingId = calls.find((c) => c.conference)?.id ?? null;
   useEffect(() => {
-    if (!conference || !token) return;
+    if (!conferencingId || !token) return;
     let stopped = false;
 
     const tick = () => {
-      const call = infoRef.current;
-      if (!call) return;
+      const slot = slotsRef.current.get(conferencingId);
+      if (!slot) return;
+      const call = slot.info;
       const fetching =
         call.kind === 'internal'
           ? fetchInternalConferenceStatus(token, call.callSid)
@@ -933,7 +1303,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       void fetching
         .then((view) => {
           if (stopped) return;
-          setConferenceBoth(view.active ? view : null);
+          slot.conference = view.active ? view : null;
+          publish();
         })
         // A blip must not blank a live call's controls; the next tick re-asks.
         .catch(() => undefined);
@@ -944,35 +1315,32 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       stopped = true;
       clearInterval(id);
     };
-  }, [conference, token, setConferenceBoth]);
-
+  }, [conferencingId, token, publish]);
 
   /**
-   * Run one conference operation against whichever API this call belongs to.
+   * Run one conference operation against whichever API the ACTIVE call belongs to.
    *
    * Company and internal calls have separate endpoints because they have separate
    * authorization primitives (`assertMayUseCompanyPhone` + `assertCallBelongsTo` versus
    * `assertParticipant`), and unifying them server-side would weaken one. This is the
    * single place the client picks between them.
    *
-   * ⚠️ Reads `infoRef`, never `pendingRef`. During an add, this browser is guaranteed to
-   * receive an unrelated INVITE and to poll `/pending-call` — `pendingRef` holds the
-   * newest event SEEN, which is not necessarily the call we are on. That is the exact
-   * bug `blindTransfer` and `toggleHold` already carry warnings about.
-   *
-   * Every operation returns the new view, so the card updates without waiting for the
-   * next poll.
+   * ⚠️ Reads the ACTIVE SLOT, never the newest event seen. `eventsRef` holds calls this
+   * browser is not on — during a ring for another company that is that other company's
+   * call, and acting on it would be a write against a call the agent is not on. That was
+   * the original `pendingRef` bug, and a registry makes it structurally unavailable.
    */
   const runConference = useCallback(
     async (
       op: (call: IncomingCallInfo, internal: boolean) => Promise<ConferenceStatus>,
     ): Promise<void> => {
-      const call = infoRef.current;
-      if (!call || !token) return;
-      const view = await op(call, call.kind === 'internal');
-      setConferenceBoth(view.active ? view : null);
+      const slot = activeSlot();
+      if (!slot || !token) return;
+      const view = await op(slot.info, slot.info.kind === 'internal');
+      slot.conference = view.active ? view : null;
+      publish();
     },
-    [token, setConferenceBoth],
+    [activeSlot, publish, token],
   );
 
   /**
@@ -984,8 +1352,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
    */
   const holdAllParties = useCallback(
     async (call: IncomingCallInfo, internal: boolean) => {
-      const parties = conferenceRef.current?.parties ?? [];
-      let view = conferenceRef.current!;
+      const slot = activeSlot();
+      const parties = slot?.conference?.parties ?? [];
+      let view = slot!.conference!;
       for (const party of parties) {
         if (party.state === 'held' || party.state === 'gone') continue;
         view = internal
@@ -1000,48 +1369,159 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       return view;
     },
-    [token],
+    [activeSlot, token],
+  );
+
+  /**
+   * Move the agent's ear and microphone to a different call.
+   *
+   * ⚠️ PARK THEN RESUME, never the reverse: resuming first leaves both calls live for the
+   * length of a hold round-trip that includes an HTTP request, i.e. the first customer
+   * listening to the agent talk to the second.
+   *
+   * ⚠️ Step 1 is SYNCHRONOUS and happens before any await. That round-trip is a few
+   * hundred milliseconds and the agent is already talking, so the mute and
+   * `track.enabled = false` make the separation instant while the music and the recording
+   * pause land behind it. `holdSlot` still finds `sender.track` to park, and
+   * `teardownHold` re-enables it.
+   */
+  const switchTo = useCallback(
+    (callId: string) => {
+      if (switchBusyRef.current) return;
+      const target = slotsRef.current.get(callId);
+      if (!target || callId === activeIdRef.current) return;
+      switchBusyRef.current = true;
+      // A real user gesture, which is what keeps audio playable.
+      unlockAudio();
+
+      void (async () => {
+        try {
+          const previous = activeSlot();
+
+          if (previous && !previous.held) {
+            previous.audio.muted = true;
+            const sender = audioSenderOf(previous.invitation);
+            if (sender?.track) sender.track.enabled = false;
+          }
+
+          if (previous && previous.phase === 'active' && !previous.held) {
+            await queueHold(previous, () => holdSlot(previous, 'auto'));
+          }
+
+          if (previous) previous.lastActiveAt = Date.now();
+          activeIdRef.current = callId;
+          target.lastActiveAt = Date.now();
+          publish();
+
+          // A MANUAL hold stays held: the agent parked that caller deliberately, and
+          // un-parking them silently would put them live on a call their agent believes
+          // is still on hold.
+          if (target.heldAuto) {
+            await queueHold(target, () => resumeSlot(target));
+          }
+        } catch (err) {
+          // A `void`ed async IIFE that rejects is an unhandled rejection, which this
+          // codebase treats as a real hazard rather than noise. Nothing here can leave the
+          // agent stuck — `finally` frees the mutex either way — so log and carry on.
+          log('switch failed', err);
+        } finally {
+          switchBusyRef.current = false;
+          publish();
+        }
+      })();
+    },
+    [activeSlot, holdSlot, publish, queueHold, resumeSlot],
+  );
+
+  /** Accept one slot's INVITE and make it the call the agent is on. */
+  const answerSlot = useCallback(
+    (callId: string) => {
+      const slot = slotsRef.current.get(callId);
+      if (!slot) return;
+      // BEFORE anything that can publish — see `CallSlot.answering`.
+      slot.answering = true;
+      // Also the first reliable user gesture, which is what lets audio play at all.
+      unlockAudio();
+      const wasActive = activeIdRef.current === callId;
+      if (!wasActive) switchTo(callId);
+      else stopRinging();
+      void slot.invitation
+        .accept({
+          sessionDescriptionHandlerOptions: {
+            constraints: { audio: true, video: false },
+          },
+        })
+        .catch(() => endSlot(callId, 'accept failed'));
+    },
+    [endSlot, switchTo],
   );
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const actions = useMemo<SoftphoneActions>(
     () => ({
       answer: () => {
-        // Also the first reliable user gesture, which is what lets audio play at all.
-        unlockAudio();
-        stopRinging();
-        void invitationRef.current
-          ?.accept({
-            sessionDescriptionHandlerOptions: {
-              constraints: { audio: true, video: false },
-            },
-          })
-          .catch(() => endCall());
+        const id = activeIdRef.current;
+        if (id) answerSlot(id);
       },
       hangup: () => {
-        const inv = invitationRef.current;
-        if (!inv) return endCall();
+        const slot = activeSlot();
+        if (!slot) return;
+        const inv = slot.invitation;
         // Before answering the correct rejection is a decline; after, a BYE.
         if (inv.state === SessionState.Established) {
           void inv.bye().catch(() => undefined);
         } else {
           void inv.reject().catch(() => undefined);
         }
-        endCall();
+        endSlot(slot.id, 'hung up');
+      },
+      switchTo,
+      answerWaiting: (callId: string) => answerSlot(callId),
+      endAndAnswer: (callId: string) => {
+        // Marked BEFORE the hang-up below, because `endSlot` promotes this slot to active
+        // and publishes — which would ring at the agent for the call they are answering.
+        const target = slotsRef.current.get(callId);
+        if (target) target.answering = true;
+        const current = activeSlot();
+        if (current && current.id !== callId) {
+          const inv = current.invitation;
+          if (inv.state === SessionState.Established) {
+            void inv.bye().catch(() => undefined);
+          } else {
+            void inv.reject().catch(() => undefined);
+          }
+          endSlot(current.id, 'ended to answer another call');
+        }
+        answerSlot(callId);
+      },
+      declineWaiting: (callId: string) => {
+        const slot = slotsRef.current.get(callId);
+        const tok = tokenRef.current;
+        if (!slot) return;
+        const { companyId, callSid } = slot.info;
+        // The server redirects the leg into voicemail, which ends the ring for EVERY
+        // branch. Rejecting here would only end ours. If it fails we still drop the call
+        // locally — the agent said no, and a dismissal is better than a stuck card — but
+        // then it goes on ringing for whoever else is holding it, which is the old
+        // "Ignore" behaviour rather than a new failure.
+        if (tok) {
+          void declineCall(tok, companyId, callSid).catch((err: unknown) =>
+            log('decline failed, dismissing locally', err),
+          );
+        }
+        endSlot(callId, 'declined');
       },
       blindTransfer: async (targetUserId: number) => {
-        // `infoRef`, NOT `pendingRef`. `pendingRef` is overwritten by every SSE frame and
-        // every /pending-call response, including ones for a call this browser is not on
-        // — so a ring for another company arriving mid-call would make this POST against
-        // that company's id and sid. `info` is the call we are actually paired with.
-        const call = infoRef.current;
-        if (!token || !call) throw new Error('No call to transfer');
+        const slot = activeSlot();
+        if (!token || !slot) throw new Error('No call to transfer');
+        const call = slot.info;
 
         // Optimistic, and it has to be: the BYE and the transfer fork travel the
         // already-open SIP WebSocket while this request is still in flight, so a phase
         // set after the await is reliably too late.
-        const previous = phaseRef.current;
-        setPhase('transferring');
+        const previous = slot.phase;
+        slot.phase = 'transferring';
+        publish();
         try {
           const result =
             call.kind === 'internal'
@@ -1056,107 +1536,92 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                   call.callSid,
                   targetUserId,
                 );
-          setTransferBoth({
+          slot.transfer = {
             target: result.target,
             state: 'ringing',
             transferredSid: result.transferredSid,
-          });
+          };
+          publish();
         } catch (err) {
-          setPhase(previous);
+          slot.phase = previous;
+          publish();
           throw err;
         }
-        // Deliberately no endCall() here. SignalWire tears the bridge down as a result
-        // of the redirect, our session goes Terminated, and `releaseMedia` runs through
+        // Deliberately no teardown here. SignalWire tears the bridge down as a result of
+        // the redirect, our session goes Terminated, and `releaseSlotMedia` runs through
         // the existing listener. The card is closed by the status poll instead.
       },
       takeBack: () => {
-        const invitation = transferInviteRef.current;
-        const call = infoRef.current;
-        const view = transferRef.current;
-        if (!invitation || !call || !view) return;
+        const slot = slotIn('transferring');
+        const invitation = slot?.takeBackInvite;
+        if (!slot || !invitation) return;
+        const view = slot.transfer;
+        clearTimeout(slot.transferTimer);
+        slot.takeBackInvite = null;
 
-        // The first real user gesture since the transfer, so audio can play again.
-        unlockAudio();
-        clearTimeout(transferTimerRef.current);
-        transferInviteRef.current = null;
-        setHasHeldInvite(false);
-        setTransferBoth(null);
-
-        // Re-pair through the normal path so `info` and `phase` are set by the same code
-        // that sets them for every other call. `callSid` becomes the transferred leg:
-        // on an inbound call it is the sid we already had, but on an outbound one the
-        // old root was our OWN leg and is now dead, so keeping it would break hold,
-        // hang-up and any second transfer.
-        unpairedRef.current = invitation;
-        pendingRef.current = {
-          ...call,
-          callSid: view.transferredSid,
-          at: Date.now(),
+        // Re-point this slot at the leg we are taking back, and accept it.
+        slot.invitation = invitation;
+        slot.info = {
+          ...slot.info,
+          callSid: view?.transferredSid ?? slot.info.callSid,
           direction: 'inbound',
           transferFrom: undefined,
-          // ⚠️ `token` MUST be dropped. `tryPair` compares it against the INVITE's
-          // X-Cyg-Call header, and a transfer deliberately carries none — so an internal
-          // call's original token would compare `'tok' !== null` and take-back would
-          // silently never pair. Company calls have no token and were never affected,
-          // which is exactly how this would have shipped unnoticed.
+          // ⚠️ `token` MUST be dropped. It is compared against the INVITE's X-Cyg-Call
+          // header, and a transfer deliberately carries none — so an internal call's
+          // original token would compare `'tok' !== null` and this leg would never match
+          // itself. Company calls have none and were never affected, which is exactly how
+          // this would have shipped unnoticed.
           token: undefined,
         };
-        setPhase('idle');
-        tryPair();
+        slot.transfer = null;
+        slot.phase = 'ringing';
+        // Same reason as `answerSlot`: this leg is being accepted, not offered, so the
+        // tone derivation must not treat it as a fresh incoming ring.
+        slot.answering = true;
+        slot.answeredAt = null;
+        activeIdRef.current = slot.id;
+        slot.lastActiveAt = Date.now();
+        publish();
+
         // Pairing an inbound call starts the ringtone; there is nothing to answer here.
         stopRinging();
-        void invitationRef.current
-          ?.accept({
+        void invitation
+          .accept({
             sessionDescriptionHandlerOptions: {
               constraints: { audio: true, video: false },
             },
           })
-          .catch(() => endCall());
+          .catch(() => endSlot(slot.id, 'take-back accept failed'));
+
+        invitation.stateChange.addListener((state) => {
+          if (state === SessionState.Established) {
+            slot.answeredAt = Date.now();
+            slot.phase = 'active';
+            attachRemoteAudio(slot);
+            publish();
+          }
+          if (state === SessionState.Terminated) {
+            if (slot.phase === 'transferring') {
+              releaseSlotMedia(slot);
+              publish();
+            } else {
+              endSlot(slot.id, 'terminated');
+            }
+          }
+        });
       },
-      answerHeld: (call: IncomingCallInfo) => {
+      answerHeld: (info: IncomingCallInfo) => {
         // Unlock audio on this click, while it is still a real user gesture.
         unlockAudio();
-        // Feed the pairing path rather than accepting directly: pairing is what sets
-        // `info` and `phase`, and therefore what raises the overlay that follows the
-        // user for the rest of the call. `at` is refreshed so the staleness guard in
-        // tryPair cannot reject a call the user is deliberately picking up.
-        pendingRef.current = { ...call, at: Date.now(), direction: 'inbound' };
-        tryPair();
-        // Pairing an inbound call starts the ringtone and waits for Answer. The user
-        // just pressed Answer, so silence it in the same tick — before accept, or the
-        // oscillator gets a moment to sound.
-        stopRinging();
-        void invitationRef.current
-          ?.accept({
-            sessionDescriptionHandlerOptions: {
-              constraints: { audio: true, video: false },
-            },
-          })
-          .catch(() => endCall());
+        // Feed the pairing path rather than accepting directly: pairing is what builds
+        // the slot, and therefore what raises the overlay that follows the user for the
+        // rest of the call. `at` is refreshed so the staleness sweep in `tryPair` cannot
+        // reject a call the user is deliberately picking up.
+        pushEvent({ ...info, at: Date.now(), direction: 'inbound' });
+        const slot = slotList().find((s) => s.info.callSid === info.callSid);
+        if (slot) answerSlot(slot.id);
       },
-      /**
-       * Send one DTMF digit down the live call.
-       *
-       * ── WHY THE RAW RTCDTMFSender, AND NOT sip.js's `sendDtmf` ────────────────────
-       * `sendDtmf` exists and is typed, but it calls `insertDTMF(tones)` and nothing
-       * else — and per the WebRTC spec `insertDTMF` **SETS** the tone buffer, it does not
-       * append. The playout task then dequeues one character and sleeps
-       * `duration + interToneGap`. So a second press inside that window OVERWRITES the
-       * first, and the pending digit is silently dropped while its local beep has already
-       * played. At one-digit-per-press that is a ~240ms hole; an agent typing a six-digit
-       * extension at normal speed loses digits, intermittently.
-       *
-       * Appending to the pending `toneBuffer` is the fix, and it is only expressible on
-       * the raw sender. It costs nothing in types: `toneBuffer` and `canInsertDTMF` are
-       * both in lib.dom, `RTCRtpSender.dtmf` is `RTCDTMFSender | null`, and
-       * `audioSenderOf` already does the one cast this file needs. It also picks the
-       * audio sender BY KIND, where sip.js takes `getSenders()[0]` by index — safe today
-       * only because the UA is audio-only.
-       *
-       * ⚠️ A `true` here means the browser queued the telephone-events. Whether
-       * SignalWire's `<Dial>` bridge relays them to the far leg is NOT observable from
-       * the client, and is not something this return value claims.
-       */
+
       addCall: (target: AddCallTarget) =>
         runConference((call, internal) => {
           if (internal) {
@@ -1214,21 +1679,39 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             : dropConferenceParty(token!, call.companyId, call.callSid, partyId),
         ),
 
+      /**
+       * Send one DTMF digit down the live call.
+       *
+       * ── WHY THE RAW RTCDTMFSender, AND NOT sip.js's `sendDtmf` ────────────────────
+       * `sendDtmf` exists and is typed, but it calls `insertDTMF(tones)` and nothing
+       * else — and per the WebRTC spec `insertDTMF` **SETS** the tone buffer, it does not
+       * append. The playout task then dequeues one character and sleeps
+       * `duration + interToneGap`. So a second press inside that window OVERWRITES the
+       * first, and the pending digit is silently dropped while its local beep has already
+       * played. At one-digit-per-press that is a ~240ms hole; an agent typing a six-digit
+       * extension at normal speed loses digits, intermittently.
+       *
+       * Appending to the pending `toneBuffer` is the fix, and it is only expressible on
+       * the raw sender.
+       *
+       * ⚠️ A `true` here means the browser queued the telephone-events. Whether
+       * SignalWire's `<Dial>` bridge relays them to the far leg is NOT observable from
+       * the client, and is not something this return value claims.
+       */
       sendDigit: (digit: string) => {
-        // Guards live here rather than only on the pad: the pad reads `phase` from a
-        // render, while `phaseRef` is written synchronously by `setPhase`, and a keyboard
-        // press can outrun a `disabled` prop.
-        if (phaseRef.current !== 'active') return false;
-        // While held the far end hears music. Refused because the digit WOULD arrive —
-        // DTMF is unaffected by `replaceTrack` and by `track.enabled = false`, since the
-        // sender owns it, not the track — and reaching an IVR while the agent believes
-        // the caller is parked is worse than not sending it.
-        if (holdMusicRef.current || micTrackRef.current) return false;
-        // insertDTMF throws InvalidCharacterError on an illegal character and rejects the
-        // WHOLE string, which with the append below would discard the queued digits too.
+        // The pad reads `phase` from a render, while the slot's fields are written
+        // synchronously — and a keyboard press can outrun a `disabled` prop.
+        if (phaseNow() !== 'active') return false;
+        const slot = activeSlot();
+        if (!slot) return false;
+        // ⚠️ Hold refuses because DTMF WORKS, not because it fails: the RTCDTMFSender
+        // belongs to the sender, not the track, so it is unaffected by hold's
+        // replaceTrack. A digit pressed while held really would reach the IVR, with the
+        // agent believing the caller is parked.
+        if (slot.music || slot.micTrack) return false;
         if (!isDtmfKey(digit)) return false;
 
-        const dtmf = audioSenderOf(invitationRef.current)?.dtmf;
+        const dtmf = audioSenderOf(slot.invitation)?.dtmf;
         // False when the far end never negotiated `telephone-event`, or the transceiver
         // is not sending. Either way RTP DTMF cannot work on this call, and the pad says
         // so rather than pretending.
@@ -1236,43 +1719,41 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           log('dtmf unavailable', digit);
           return false;
         }
-
         try {
           dtmf.insertDTMF(dtmf.toneBuffer + digit, DTMF_DURATION_MS, DTMF_GAP_MS);
+          return true;
         } catch {
           return false;
         }
-        return true;
       },
+
       toggleMute: () => {
-        const sender = audioSenderOf(invitationRef.current);
-        if (!sender) return;
-        setMuted((prev) => {
-          const next = !prev;
-          // While held, the sender carries the music track — muting must still apply to
-          // the microphone, so it is parked in micTrackRef and toggled there instead.
-          const track = micTrackRef.current ?? sender.track;
-          if (track) track.enabled = !next;
-          return next;
-        });
+        const slot = activeSlot();
+        const sender = audioSenderOf(slot?.invitation ?? null);
+        if (!slot || !sender) return;
+        const next = !slot.muted;
+        slot.muted = next;
+        // The parked microphone, when held, so unmuting mid-hold cannot un-park it.
+        const track = slot.micTrack ?? sender.track;
+        if (track) track.enabled = !next;
+        publish();
       },
 
       /**
        * Put the caller on hold, or take them off it.
        *
        * Swaps the microphone for a looping music track on the outgoing stream. The far
-       * end hears music; the agent hears nothing, because the remote audio element is
-       * muted locally for the duration.
+       * end hears music; the agent hears nothing, because that call's own remote audio
+       * element is muted for the duration.
        *
-       * ORDER IS LOAD-BEARING. The recording is paused BEFORE the music starts and
-       * resumed AFTER it stops — the opposite order records a slice of music at each
-       * boundary, which is the whole defect the pause exists to prevent.
-       *
-       * With no track configured this is simply a silent hold, which is also what
-       * happens if the music fails to build. Hold must never fail outright: the caller
-       * is on a live call and the agent has already stopped talking to them.
+       * With no track configured this is simply a silent hold, which is also what happens
+       * if the music fails to build. Hold must never fail outright: the caller is on a
+       * live call and the agent has already stopped talking to them.
        */
       toggleHold: () => {
+        const slot = activeSlot();
+        if (!slot) return;
+
         /**
          * ⚠️ In a conference, hold is a SERVER operation and nothing below runs.
          *
@@ -1281,16 +1762,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
          * Holding would therefore play hold music to the very person it claims you are
          * still talking to, and mute the agent to both. `setCallHold` would also pause
          * the recording of the whole conference rather than one party's share of it.
-         *
-         * So the two-party path below is left exactly as it was, including its
-         * load-bearing pause-before-music ordering, and conference hold goes through
-         * per-participant holds instead.
          */
-        if (conferenceRef.current) {
+        if (slot.conference) {
           // One button, two meanings: "hold everyone" while the call is merged, and
           // "merge everyone" once anybody is held. Merge is the only way back, so the
           // button has to offer it.
-          const merged = conferenceRef.current.merged;
+          const merged = slot.conference.merged;
           void runConference((call, internal) => {
             if (!merged) {
               return internal
@@ -1302,121 +1779,78 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (holdBusyRef.current) return;
-        const sender = audioSenderOf(invitationRef.current);
-        // `infoRef`, not `pendingRef` — same bug as `blindTransfer` had. `pendingRef`
-        // holds the newest event this browser has SEEN, which during a ring for another
-        // company is that other company's call, and pausing its recording would be a
-        // write against a call the agent is not on.
-        const call = infoRef.current;
-        if (!sender) return;
-        holdBusyRef.current = true;
-
-        void (async () => {
-          try {
-            if (holdMusicRef.current || micTrackRef.current) {
-              // ── Resume ──
-              teardownHold(sender);
-              setHeld(false);
-              if (token && call) {
-                await setCallHold(token, call.companyId, call.callSid, false);
-              }
-              return;
-            }
-
-            // ── Hold ──
-            if (token && call) {
-              await setCallHold(token, call.companyId, call.callSid, true);
-            }
-
-            micTrackRef.current = sender.track ?? null;
-            if (audioRef.current) audioRef.current.muted = true;
-
-            let music: HoldMusic | null = null;
-            if (token && call) {
-              try {
-                const { audioId } = await fetchHoldAudio(token, call.companyId);
-                if (audioId !== null) {
-                  music = await startHoldMusic(phoneAudioUrl(token, audioId));
-                }
-              } catch {
-                /* fall through to a silent hold */
-              }
-            }
-
-            if (music) {
-              holdMusicRef.current = music;
-              await sender.replaceTrack(music.track).catch(() => undefined);
-            } else if (sender.track) {
-              // Silent hold. The track is disabled rather than replaced, and
-              // micTrackRef still holds it so resume and mute both behave.
-              sender.track.enabled = false;
-            }
-            setHeld(true);
-          } finally {
-            holdBusyRef.current = false;
-          }
-        })();
+        void queueHold(slot, () =>
+          slot.held ? resumeSlot(slot) : holdSlot(slot, 'manual'),
+        ).catch(() => undefined);
       },
     }),
-    // `setPhase` / `setTransferBoth` / `setInfo` are all identity-stable useCallbacks, so
-    // listing them keeps the linter honest without churning this memo — which must stay
-    // identity-stable, since a consumer that only wants the buttons re-renders on it.
+    // Every entry is an identity-stable useCallback, so this memo stays identity-stable —
+    // which matters, because a consumer that only wants the buttons re-renders on it.
     [
-      endCall,
-      setPhase,
-      setTransferBoth,
-      teardownHold,
-      token,
-      tryPair,
-      runConference,
+      activeSlot,
+      answerSlot,
+      attachRemoteAudio,
+      endSlot,
       holdAllParties,
+      holdSlot,
+      phaseNow,
+      publish,
+      pushEvent,
+      queueHold,
+      releaseSlotMedia,
+      resumeSlot,
+      runConference,
+      slotIn,
+      slotList,
+      switchTo,
+      token,
     ],
   );
 
-  const state = useMemo<SoftphoneState>(
-    () => ({
+  const state = useMemo<SoftphoneState>(() => {
+    const active = calls.find((c) => c.id === activeCallId) ?? null;
+    const waiting =
+      calls.find((c) => c.phase === 'ringing' && c.id !== activeCallId) ?? null;
+    return {
       status,
-      phase,
-      info,
-      transfer,
-      conference,
+      // Every field here is THE ACTIVE CALL'S, which with one call in hand — almost every
+      // call — means exactly what it meant before this file learned to hold several.
+      phase: active?.phase ?? 'idle',
+      info: active?.info ?? null,
+      transfer: active?.transfer ?? null,
+      conference: active?.conference ?? null,
       // Both halves matter: the colleague has not answered yet, AND our fork of the
       // transfer <Dial> is still alive. The server can say the first; only the browser
       // knows the second, and without it the button would offer a dead session.
-      canTakeBack: transfer?.state === 'ringing' && hasHeldInvite,
-      muted,
-      held,
-      seconds,
+      canTakeBack:
+        active?.transfer?.state === 'ringing' &&
+        !!(activeCallId && slotsRef.current.get(activeCallId)?.takeBackInvite),
+      muted: active?.muted ?? false,
+      held: active?.held ?? false,
+      seconds: active?.seconds ?? 0,
       hasHeldInvite,
-    }),
-    [
-      status,
-      phase,
-      info,
-      transfer,
-      conference,
-      muted,
-      held,
-      seconds,
-      hasHeldInvite,
-    ],
-  );
+      calls,
+      activeCallId,
+      waitingCallId: waiting?.id ?? null,
+    };
+  }, [status, calls, activeCallId, hasHeldInvite]);
 
   return (
     <ActionsCtx.Provider value={actions}>
       <StateCtx.Provider value={state}>
         {children}
         {/*
-          The audio element lives HERE, not in the overlay, so audio survives the
-          overlay re-rendering or being collapsed.
+          Every call's <audio> lives HERE, appended imperatively, so audio survives the
+          overlay re-rendering or being collapsed — and so React reconciliation can never
+          detach one. One element per call: a shared element cannot carry two remote
+          streams, and muting it for a held call would silence the live one.
         */}
-        <audio ref={audioRef} autoPlay />
+        <div ref={audioHostRef} className="hidden" aria-hidden />
         {/*
           Mount gated on call state ONLY, never on the route — gating on anything
           route-derived would unmount a live call on navigation.
         */}
-        {phase !== 'idle'
+        {calls.length > 0
           ? createPortal(<CallOverlay />, document.body)
           : null}
       </StateCtx.Provider>
