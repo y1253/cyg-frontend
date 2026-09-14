@@ -368,12 +368,30 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
    * gesture, and by the time SignalWire rings this browser back the click is seconds
    * old. Skipping it produces a call that connects with no sound and no obvious cause.
    */
+  /**
+   * Ignores a second press while the first call is still being placed.
+   *
+   * A ref, not `startCallMutation.isPending`: two click events can both run before React
+   * re-renders with the new mutation state, and each would place its own call. Two calls
+   * ring two browsers, bill twice, and leave the overlay pairing an INVITE with whichever
+   * event arrived last — so add call, transfer and hold then act on a dead leg.
+   *
+   * `onSettled` clears it on failure too, so retrying after an error is never swallowed.
+   */
+  const startingCallRef = useRef(false);
+  const startCall = startCallMutation.mutate;
   const handleCall = useCallback(
     (number: string) => {
+      if (startingCallRef.current) return;
+      startingCallRef.current = true;
       unlockAudio();
-      startCallMutation.mutate(number);
+      startCall(number, {
+        onSettled: () => {
+          startingCallRef.current = false;
+        },
+      });
     },
-    [startCallMutation],
+    [startCall],
   );
 
   /**
