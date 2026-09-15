@@ -33,7 +33,20 @@ export interface WhatsAppAccount {
   verifiedName: string | null;
   /** Attached with the server's own token rather than through Embedded Signup. */
   usesFirmToken: boolean;
+  /** SIGNUP = Meta popup, FIRM = "Use firm number", GENERATED = made from the support number. */
+  origin: 'SIGNUP' | 'FIRM' | 'GENERATED';
+  /** Only CONNECTED sends or receives; the others exist while a generated number verifies. */
+  setupStatus: WhatsAppSetupStatus;
+  /** Why setup failed, in words an admin can act on. */
+  setupError: string | null;
   connectedAt: string;
+}
+
+export type WhatsAppSetupStatus = 'PENDING_CODE' | 'VERIFYING' | 'CONNECTED' | 'FAILED';
+
+/** Setup still running — the account is polled until it settles. */
+export function isWhatsAppSettingUp(account: WhatsAppAccount | null | undefined): boolean {
+  return account?.setupStatus === 'PENDING_CODE' || account?.setupStatus === 'VERIFYING';
 }
 
 export interface WhatsAppConnectResult {
@@ -47,6 +60,8 @@ export interface WhatsAppClientConfig {
   configId: string | null;
   graphVersion: string;
   firmNumberAvailable: boolean;
+  /** WHATSAPP_TOKEN + WHATSAPP_BUSINESS_ACCOUNT_ID are set, so numbers can be generated. */
+  generateAvailable: boolean;
 }
 
 export interface WhatsAppItem {
@@ -95,11 +110,36 @@ export type WhatsAppStateAction = 'read' | 'unread' | 'complete' | 'uncomplete';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * A failed request, carrying the server's machine-readable `code` when it sent one — how
+ * the card tells "no support number yet" (open the buy popup) from any other failure.
+ */
+export class WhatsAppRequestError extends Error {
+  // Assigned in the body: parameter properties are not erasable syntax, which this
+  // project's tsconfig (`erasableSyntaxOnly`) forbids.
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = 'WhatsAppRequestError';
+    this.code = code;
+  }
+}
+
+/** Server `code` for a company with no support number. Mirrors the server constant. */
+export const NO_SUPPORT_NUMBER = 'NO_SUPPORT_NUMBER';
+
 /** Nest's error body, so the server's message reaches the user verbatim. */
 async function failure(res: Response, fallback: string): Promise<Error> {
-  const body = (await res.json().catch(() => ({}))) as { message?: string | string[] };
+  const body = (await res.json().catch(() => ({}))) as {
+    message?: string | string[];
+    code?: unknown;
+  };
   const message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
-  return new Error(message ?? fallback);
+  return new WhatsAppRequestError(
+    message ?? fallback,
+    typeof body.code === 'string' ? body.code : null,
+  );
 }
 
 const ITEM_PREFIX = 'wa:';
@@ -216,6 +256,22 @@ export async function connectFirmWhatsApp(
   );
   if (!res.ok) throw await failure(res, 'Failed to attach the firm number');
   return res.json() as Promise<WhatsAppConnectResult>;
+}
+
+/**
+ * Make the company's WhatsApp number from its support number. Resolves as soon as Meta has
+ * been asked for the code (`setupStatus: 'PENDING_CODE'`); poll the account for the rest.
+ */
+export async function generateWhatsApp(
+  token: string,
+  companyId: number,
+): Promise<WhatsAppAccount> {
+  const res = await fetchWithAuth(token, `${API}/whatsapp/companies/${companyId}/generate`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+  });
+  if (!res.ok) throw await failure(res, 'Failed to generate a WhatsApp account');
+  return res.json() as Promise<WhatsAppAccount>;
 }
 
 export async function disconnectWhatsApp(token: string, companyId: number): Promise<void> {

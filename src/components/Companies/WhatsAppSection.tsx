@@ -1,73 +1,81 @@
-import { useEffect, useState } from 'react';
-import { MessageCircle, Unplug } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, MessageCircle, RotateCcw, Unplug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useWhatsAppAccount } from '@/hooks/useWhatsAppAccount';
 import { useWhatsAppConfig } from '@/hooks/useWhatsAppConfig';
-import { useConnectWhatsApp } from '@/hooks/useConnectWhatsApp';
 import { useConnectFirmWhatsApp } from '@/hooks/useConnectFirmWhatsApp';
 import { useDisconnectWhatsApp } from '@/hooks/useDisconnectWhatsApp';
-import { launchWhatsAppSignup, loadFacebookSdk, SignupCancelled } from '@/lib/facebookSdk';
+import { useGenerateWhatsApp } from '@/hooks/useGenerateWhatsApp';
+import { usePhoneNumber } from '@/hooks/usePhoneNumber';
+import { NO_SUPPORT_NUMBER, WhatsAppRequestError, isWhatsAppSettingUp } from '@/api/whatsapp';
+import { ConnectNumberDialog } from './ConnectNumberDialog';
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Error';
 }
 
 /**
- * Connect a company's WhatsApp Business number.
+ * A company's WhatsApp number.
  *
- * "Connect WhatsApp" runs Meta's Embedded Signup — the OAuth popup — and hands the code to
- * the server, which exchanges it for the business token and stores it encrypted. Written
- * to be droppable onto the public registration page later; only the POST's auth differs.
+ * "Generate WhatsApp account" makes one from the company's SignalWire support number: the
+ * server adds it to the firm's WhatsApp Business Account and reads Meta's verification
+ * text off that number itself, so there is no Meta popup and nobody types a code. With no
+ * support number yet, the click opens the same buy-a-number popup the Support Number card
+ * uses, and generation continues as soon as a number is bought.
  *
- * "Use firm number" attaches the number configured on the server (WHATSAPP_TOKEN +
- * WHATSAPP_PHONE_NUMBER_ID) with no popup — what works before Embedded Signup is set up.
+ * "Use firm number" (admin only) still attaches the firm's own number from the server
+ * config. The Embedded Signup popup is no longer offered here; its server route and
+ * `lib/facebookSdk.ts` stay for the client registration page.
  */
 export function WhatsAppSection({
   companyId,
+  companyCountry,
   canUseFirmNumber,
 }: {
   companyId: number;
+  /** Seeds the buy-a-number popup's country. */
+  companyCountry: string | null;
   /** Admin only: it hands the company the firm's shared token. */
   canUseFirmNumber: boolean;
 }) {
   const { data: account, isLoading } = useWhatsAppAccount(companyId);
   const { data: config } = useWhatsAppConfig();
-  const connect = useConnectWhatsApp(companyId);
+  const { data: supportNumber } = usePhoneNumber(companyId);
+  const generate = useGenerateWhatsApp(companyId);
   const connectFirm = useConnectFirmWhatsApp(companyId);
   const disconnect = useDisconnectWhatsApp(companyId);
 
-  const [signingUp, setSigningUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [buyOpen, setBuyOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
 
-  const signupReady = !!config?.appId && !!config?.configId;
-
-  // Preload, so FB.login can run synchronously inside the click (popup blockers).
-  useEffect(() => {
-    if (!signupReady || account) return;
-    void loadFacebookSdk(config!.appId!, config!.graphVersion).catch(() => undefined);
-  }, [signupReady, account, config]);
-
-  const handleConnect = () => {
-    if (!config?.appId || !config.configId) return;
+  const runGenerate = () => {
     setError(null);
     setWarning(null);
-    setSigningUp(true);
-    launchWhatsAppSignup({
-      appId: config.appId,
-      configId: config.configId,
-      graphVersion: config.graphVersion,
-    })
-      .then((result) => connect.mutateAsync(result))
-      .then((res) => setWarning(res.warning))
-      .catch((err: unknown) => {
-        if (!(err instanceof SignupCancelled)) setError(errorText(err));
-      })
-      .finally(() => setSigningUp(false));
+    generate.mutate(undefined, {
+      onError: (err) => {
+        // The server is the authority on "no number" — the cached lookup can be stale.
+        if (err instanceof WhatsAppRequestError && err.code === NO_SUPPORT_NUMBER) {
+          setBuyOpen(true);
+        } else {
+          setError(errorText(err));
+        }
+      },
+    });
+  };
+
+  const handleGenerate = () => {
+    // `null` is the answered "no number"; `undefined` is still loading, so let the server say.
+    if (supportNumber === null) {
+      setError(null);
+      setBuyOpen(true);
+      return;
+    }
+    runGenerate();
   };
 
   const handleFirmNumber = () => {
@@ -79,7 +87,9 @@ export function WhatsAppSection({
     });
   };
 
-  const busy = signingUp || connect.isPending || connectFirm.isPending;
+  const busy = generate.isPending || connectFirm.isPending;
+  const settingUp = isWhatsAppSettingUp(account);
+  const failed = account?.setupStatus === 'FAILED';
 
   return (
     <Card>
@@ -92,6 +102,43 @@ export function WhatsAppSection({
       <CardContent>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : account && settingUp ? (
+          <div className="flex items-start gap-3">
+            <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-emerald-600" />
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">
+                Setting up WhatsApp on {account.displayPhoneNumber}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {account.setupStatus === 'VERIFYING'
+                  ? 'Verifying the number with WhatsApp…'
+                  : "Waiting for Meta's verification text to reach the support number. This usually takes under a minute."}
+              </span>
+            </div>
+          </div>
+        ) : account && failed ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">{account.displayPhoneNumber}</span>
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                {account.setupError ?? 'WhatsApp setup failed.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setDisconnectOpen(true)}>
+                Remove
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={busy}
+                onClick={runGenerate}
+              >
+                <RotateCcw size={14} className="mr-1.5" />
+                {generate.isPending ? 'Retrying…' : 'Try again'}
+              </Button>
+            </div>
+          </div>
         ) : account ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-col gap-1">
@@ -105,9 +152,14 @@ export function WhatsAppSection({
                     {account.verifiedName}
                   </Badge>
                 )}
-                {account.usesFirmToken && (
+                {account.origin === 'FIRM' && (
                   <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
                     Firm number
+                  </Badge>
+                )}
+                {account.origin === 'GENERATED' && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                    Support number
                   </Badge>
                 )}
                 <span className="text-xs text-muted-foreground">
@@ -131,19 +183,19 @@ export function WhatsAppSection({
               )}
               <span
                 title={
-                  signupReady
-                    ? undefined
-                    : 'WHATSAPP_CONFIG_ID is not set on the server, so the Meta signup popup cannot open.'
+                  config && !config.generateAvailable
+                    ? 'WHATSAPP_TOKEN and WHATSAPP_BUSINESS_ACCOUNT_ID must be set on the server.'
+                    : undefined
                 }
               >
                 <Button
                   size="sm"
                   className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  disabled={busy || !signupReady}
-                  onClick={handleConnect}
+                  disabled={busy || !config?.generateAvailable}
+                  onClick={handleGenerate}
                 >
                   <MessageCircle size={14} className="mr-1.5" />
-                  {signingUp || connect.isPending ? 'Connecting…' : 'Connect WhatsApp'}
+                  {generate.isPending ? 'Generating…' : 'Generate WhatsApp account'}
                 </Button>
               </span>
             </div>
@@ -162,15 +214,25 @@ export function WhatsAppSection({
         )}
       </CardContent>
 
+      <ConnectNumberDialog
+        open={buyOpen}
+        onOpenChange={setBuyOpen}
+        companyId={companyId}
+        companyCountry={companyCountry}
+        onAttached={runGenerate}
+      />
+
       <Dialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Disconnect WhatsApp?</DialogTitle>
+            <DialogTitle>{failed ? 'Remove this WhatsApp setup?' : 'Disconnect WhatsApp?'}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             New WhatsApp messages to <strong>{account?.displayPhoneNumber}</strong> will stop
             arriving here, and replies can no longer be sent. The conversation history stays
             in the Communications tab, and you can reconnect at any time.
+            {account?.origin === 'GENERATED' &&
+              ' The number is also removed from WhatsApp, but it stays this company’s support number for calls and texts.'}
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDisconnectOpen(false)}>
@@ -185,7 +247,7 @@ export function WhatsAppSection({
                 })
               }
             >
-              {disconnect.isPending ? 'Disconnecting…' : 'Disconnect'}
+              {disconnect.isPending ? 'Removing…' : failed ? 'Remove' : 'Disconnect'}
             </Button>
           </div>
         </DialogContent>

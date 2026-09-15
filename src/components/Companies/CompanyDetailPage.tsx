@@ -3036,6 +3036,7 @@ export function CompanyDetailPage() {
             {isAdmin && !isArchived && (
               <WhatsAppSection
                 companyId={companyId}
+                companyCountry={company.country}
                 canUseFirmNumber={isSuperAdmin(user)}
               />
             )}
