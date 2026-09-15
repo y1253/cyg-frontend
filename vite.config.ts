@@ -45,6 +45,19 @@ export default defineConfig({
         // runtimeCaching rule below instead — fetched once, on first use, then
         // served from cache forever.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The call notification's Answer / Decline buttons need a `notificationclick`
+        // handler INSIDE the worker, and `generateSW` writes the worker itself. This is
+        // the option workbox provides for exactly that; see public/notification-sw.js
+        // for why this is preferred over switching to `injectManifest`.
+        // ⚠️ The ?v= is load-bearing. registerSW.js registers with the default
+        // updateViaCache: 'imports', so sw.js itself is always revalidated but an
+        // IMPORTED script is served from the HTTP cache — an edit to
+        // notification-sw.js would otherwise never reach a browser that already has
+        // it. Bump this whenever that file changes.
+        importScripts: ['/notification-sw.js?v=1'],
+        // Imported above, so precaching it too would add a second copy to the manifest
+        // and churn the worker's hash on every unrelated build.
+        globIgnores: ['notification-sw.js'],
         runtimeCaching: [
           {
             // The face-detection model and its WASM runtime. Immutable for a given

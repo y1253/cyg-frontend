@@ -30,6 +30,7 @@ function call(over: Partial<CallView> = {}): CallView {
     held: false,
     heldAuto: false,
     muted: false,
+    audioBlocked: false,
     seconds: 0,
     isActive: false,
     conference: null,

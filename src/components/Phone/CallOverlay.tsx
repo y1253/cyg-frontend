@@ -16,6 +16,7 @@ import {
   ArrowLeftRight,
   UserMinus,
   Users,
+  Volume2,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -98,6 +99,7 @@ export function CallOverlay() {
     seconds,
     calls,
     activeCallId,
+    audioBlocked,
   } = useSoftphone();
   const {
     answer,
@@ -116,6 +118,7 @@ export function CallOverlay() {
     answerWaiting,
     declineWaiting,
     endAndAnswer,
+    retryAudio,
   } = useSoftphoneActions();
   const navigate = useNavigate();
   const [transferOpen, setTransferOpen] = useState(false);
@@ -284,6 +287,23 @@ export function CallOverlay() {
           reject every press, and the pad's only failure wording is about tone support,
           which would be a lie. `padOpen` is untouched, so it reappears on resume.
         */}
+        {/* ── The browser refused to play this call's audio ──────────────────────
+            Autoplay policy needs the document to have been interacted with, and
+            answering from a desktop notification does not count — the click lands on
+            the service worker. So the call is LIVE and the client can hear the agent,
+            while the agent hears silence. This button is a real gesture, which is the
+            one thing that reliably lifts the block. */}
+        {audioBlocked && (
+          <button
+            type="button"
+            onClick={retryAudio}
+            className="flex shrink-0 items-center gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2.5 text-left text-xs font-medium text-amber-800 hover:bg-amber-100"
+          >
+            <Volume2 size={14} className="shrink-0" />
+            <span>Can't hear the caller? Tap to turn the sound on.</span>
+          </button>
+        )}
+
         {waitingBanner}
         {strip}
 

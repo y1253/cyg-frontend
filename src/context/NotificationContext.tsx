@@ -16,6 +16,7 @@ import {
   notificationPermission,
   requestNotificationPermission,
   showDesktopNotification,
+  showCallNotification,
 } from '@/lib/desktopNotification';
 import { playMessageChime, unlockAudio } from '@/lib/notificationSound';
 import { Toaster, type AppToast } from '@/components/ui/toast';
@@ -135,6 +136,27 @@ interface NotificationValue {
 }
 
 const NotificationCtx = createContext<NotificationValue | null>(null);
+
+/**
+ * `notifyCall` on its OWN context, deliberately.
+ *
+ * `SoftphoneProvider` is the only consumer, and taking it off `NotificationCtx` would
+ * re-render the entire softphone — and with it the call overlay — every time this
+ * provider's value changes, which is on every internal message, every toast and every
+ * `pendingOpen`. This value is a single `useCallback` with no dependencies, so it is
+ * stable for the life of the app and costs nothing.
+ *
+ * Same State/Actions split `SoftphoneContext` and `ComposerContext` already use.
+ */
+type CallNotifier = (input: {
+  callSid: string;
+  companyId: number;
+  title: string;
+  body: string;
+  silent: boolean;
+}) => void;
+
+const CallNotifyCtx = createContext<CallNotifier | null>(null);
 
 /**
  * Owns everything about new-message alerting: the audio context, the user's
@@ -283,6 +305,38 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       notify(input);
     },
     [notify],
+  );
+
+  /**
+   * A call is ringing — raise the OS notification with Answer and Decline.
+   *
+   * ── WHY THIS IS NOT `notify()` ────────────────────────────────────────────────
+   * Three differences, each deliberate:
+   *  - NO in-app toast. The call overlay is already on screen saying the same thing,
+   *    with a working Answer button; a toast beside it is noise.
+   *  - NO chime. `startRinging()` owns the sound for a call, and it has a whole ring
+   *    cadence rather than a one-shot.
+   *  - `silent` is decided by the CALLER, from `audioReady()`. A tab the agent has
+   *    never clicked in has no AudioContext, so `startRinging()` returns false and the
+   *    call is completely silent — in that case the OS sound is the only sound there
+   *    is, and suppressing it would leave the ring unannounced.
+   *
+   * What it keeps is the two rules that matter: the `desktop` pref, and not interrupting
+   * someone who is already looking at the app.
+   */
+  const notifyCall = useCallback(
+    (input: {
+      callSid: string;
+      companyId: number;
+      title: string;
+      body: string;
+      silent: boolean;
+    }) => {
+      if (!prefsRef.current.desktop) return;
+      if (document.hasFocus() && !prefsRef.current.whileActive) return;
+      void showCallNotification(input).catch(() => undefined);
+    },
+    [],
   );
 
   const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null);
@@ -498,13 +552,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   return (
     <NotificationCtx.Provider value={value}>
-      {children}
+      <CallNotifyCtx.Provider value={notifyCall}>{children}</CallNotifyCtx.Provider>
       {/* Rendered by the provider itself rather than mounted separately in
           AppLayout: the toast list is private state and nothing else needs it. */}
       <Toaster toasts={toasts} onDismiss={dismissToast} />
     </NotificationCtx.Provider>
   );
 }
+
+/**
+ * Raise the OS notification for a ringing call.
+ *
+ * Returns a no-op outside the provider rather than throwing: a missing call alert must
+ * never be the thing that unmounts the softphone.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useCallNotifier(): CallNotifier {
+  return useContext(CallNotifyCtx) ?? noopCallNotifier;
+}
+
+const noopCallNotifier: CallNotifier = () => undefined;
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function useNotifications(): NotificationValue {

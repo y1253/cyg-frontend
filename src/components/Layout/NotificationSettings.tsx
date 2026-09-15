@@ -19,19 +19,27 @@ export function NotificationSettings() {
   return (
     <div className="flex flex-col gap-3 p-3">
       <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium">New message alerts</span>
+        <span className="text-sm font-medium">Alerts</span>
         <span className="text-xs text-muted-foreground">
-          Alerts you whenever a message arrives, even while you're using the app.
+          Sounds and desktop alerts for new messages and incoming calls.
         </span>
       </div>
 
-      <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
-        <Checkbox
-          checked={prefs.sound}
-          onCheckedChange={(checked) => setSound(checked === true)}
-        />
-        Notification sound
-      </label>
+      <div className="flex flex-col gap-1">
+        <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
+          <Checkbox
+            checked={prefs.sound}
+            onCheckedChange={(checked) => setSound(checked === true)}
+          />
+          Notification sound
+        </label>
+        {/* This checkbox gates the MESSAGE chime only. `syncTones` starts the call
+            ringtone without consulting it, so an agent who unticks this still gets rung —
+            which is right, and the label was the thing that lied. */}
+        <span className="pl-6 text-xs text-muted-foreground">
+          Incoming calls always ring.
+        </span>
+      </div>
 
       {!unsupported && (
         <div className="flex flex-col gap-1">
@@ -43,9 +51,13 @@ export function NotificationSettings() {
             />
             Desktop notifications
           </label>
-          {blocked && (
+          {blocked ? (
             <span className="pl-6 text-xs text-muted-foreground">
               Blocked in your browser settings.
+            </span>
+          ) : (
+            <span className="pl-6 text-xs text-muted-foreground">
+              Reaches you on another tab. Calls get Answer and Decline buttons.
             </span>
           )}
         </div>

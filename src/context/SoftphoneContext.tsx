@@ -51,6 +51,14 @@ import {
 } from '@/api/internalCalls';
 import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
 import {
+  SW_MESSAGE_SOURCE,
+  callNotificationTag,
+  closeNotification,
+} from '@/lib/desktopNotification';
+import { useCallNotifier } from '@/context/NotificationContext';
+import { formatE164 } from '@/lib/phone';
+import {
+  audioReady,
   startCallWaitingTone,
   startRinging,
   stopCallWaitingTone,
@@ -235,6 +243,8 @@ export interface CallView {
    */
   heldAuto: boolean;
   muted: boolean;
+  /** The browser refused to play this call's audio — see `CallSlot.audioBlocked`. */
+  audioBlocked: boolean;
   seconds: number;
   isActive: boolean;
   conference: ConferenceStatus | null;
@@ -271,6 +281,11 @@ interface SoftphoneState {
    * Hold is orthogonal to the call machine, exactly like muted.
    */
   held: boolean;
+  /**
+   * The browser refused to play the ACTIVE call's audio — see `CallSlot.audioBlocked`.
+   * The overlay turns this into a button, because only a real gesture can lift it.
+   */
+  audioBlocked: boolean;
   /** Seconds since the call was answered. */
   seconds: number;
   /**
@@ -397,6 +412,13 @@ interface SoftphoneActions {
   declineWaiting: (callId: string) => void;
   /** Hang up on the current caller and take the waiting one instead. */
   endAndAnswer: (callId: string) => void;
+  /**
+   * Re-attempt playback of the active call's remote audio, from a user gesture.
+   *
+   * The only reliable way out of an autoplay refusal — which is what happens when a call
+   * is answered from a desktop notification in a tab nobody has clicked in.
+   */
+  retryAudio: () => void;
 }
 
 const StateCtx = createContext<SoftphoneState | null>(null);
@@ -523,6 +545,17 @@ interface CallSlot {
    * agent who just picked the call up.
    */
   answering: boolean;
+  /**
+   * The browser refused to play this call's remote audio.
+   *
+   * Autoplay policy keys on the document having been interacted with. Answering from a
+   * DESKTOP NOTIFICATION does not count — the click lands on the service worker, and the
+   * `message` event it posts back is not a user gesture — so in a tab that has never
+   * been clicked in, `accept()` succeeds and the caller can hear the agent while the
+   * AGENT HEARS NOTHING. That used to be swallowed by a bare `.catch`; now it raises a
+   * button in the overlay that re-plays from a real gesture.
+   */
+  audioBlocked: boolean;
   /** Epoch ms at Established; null while ringing. `seconds` is derived from it. */
   answeredAt: number | null;
   /** Epoch ms this slot was last the active one. Decides who is promoted on hang-up. */
@@ -555,6 +588,7 @@ const MAX_HELD_INVITES = 8;
 
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
+  const notifyCall = useCallNotifier();
 
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
   const [calls, setCalls] = useState<CallView[]>([]);
@@ -575,6 +609,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   /** INVITEs waiting for an event, and events waiting for an INVITE. Both are LISTS now. */
   const invitesRef = useRef<HeldInvite[]>([]);
   const eventsRef = useRef<IncomingCallInfo[]>([]);
+
+  /**
+   * `publish`, reachable from callbacks defined ABOVE it.
+   *
+   * Only `attachRemoteAudio` needs this: it is declared before `publish` (publish reads
+   * the slot list, which this populates) but has to re-render when the browser refuses
+   * to play a call's audio.
+   */
+  const publishRef = useRef<() => void>(() => undefined);
 
   /** Read from callbacks without making them depend on it. */
   const tokenRef = useRef(token);
@@ -652,6 +695,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         held: s.held,
         heldAuto: s.heldAuto,
         muted: s.muted,
+        audioBlocked: s.audioBlocked,
         // DERIVED, not ticked: a held call's timer keeps running, and a throttled
         // background tab can no longer under-count.
         seconds: s.answeredAt ? Math.floor((now - s.answeredAt) / 1000) : 0,
@@ -665,6 +709,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     syncTones();
   }, [slotList, syncTones]);
 
+  useEffect(() => {
+    publishRef.current = publish;
+  }, [publish]);
+
   /** Route a slot's remote audio into its own element. Synchronous, as it always was. */
   const attachRemoteAudio = useCallback((slot: CallSlot) => {
     const pc = (
@@ -676,7 +724,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const remote = new MediaStream();
     pc.getReceivers().forEach((r) => r.track && remote.addTrack(r.track));
     slot.audio.srcObject = remote;
-    void slot.audio.play().catch(() => undefined);
+    void slot.audio
+      .play()
+      .then(() => {
+        if (!slot.audioBlocked) return;
+        slot.audioBlocked = false;
+        publishRef.current();
+      })
+      .catch(() => {
+        // Not swallowed any more: this is the difference between "the call is quiet"
+        // and "the agent cannot hear the client and has no idea why".
+        slot.audioBlocked = true;
+        publishRef.current();
+      });
   }, []);
 
   /**
@@ -717,6 +777,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       teardownHold(slot, audioSenderOf(slot.invitation));
       slot.holdOp = null;
       slot.muted = false;
+      slot.audioBlocked = false;
       slot.answeredAt = null;
       slot.audio.srcObject = null;
     },
@@ -829,6 +890,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     (id: string, reason: string) => {
       const slot = slotsRef.current.get(id);
       if (!slot) return;
+      // Declined, hung up, rang out, or CANCELled because another tab or another agent
+      // answered — every one of those funnels through here. It carries
+      // `requireInteraction`, so an unclosed one outlives the call indefinitely.
+      void closeNotification(callNotificationTag(slot.info.callSid));
       clearTimeout(slot.transferTimer);
       releaseSlotMedia(slot);
       slot.audio.remove();
@@ -880,6 +945,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         holdOp: null,
         muted: false,
         answering: false,
+        audioBlocked: false,
         answeredAt: null,
         lastActiveAt: Date.now(),
         conference: null,
@@ -938,8 +1004,34 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       });
 
       publish();
+
+      // ── The alert that reaches a BACKGROUNDED tab ────────────────────────────
+      // Inbound only — nobody needs telling about a call they placed.
+      //
+      // Here rather than in `publish()`: `pair` runs exactly ONCE per call (tryPair
+      // removes the event and releases the invite before calling it), while `publish`
+      // runs every second.
+      //
+      // AFTER `publish()`, because publish → syncTones is what starts the ringtone, so
+      // by now `audioReady()` reflects whether this tab will make any sound at all. A
+      // tab the agent has never clicked in has no AudioContext, rings silently, and
+      // needs the OS to make the noise instead — which is `silent: false`.
+      if (info.direction !== 'outbound') {
+        const party =
+          info.fromName || formatE164(info.from) || 'Unknown caller';
+        notifyCall({
+          callSid: info.callSid,
+          companyId: info.companyId,
+          title: party,
+          body: info.transferFrom
+            ? `Incoming call · ${info.companyName}
+Transferred by ${info.transferFrom.name}`
+            : `Incoming call · ${info.companyName}`,
+          silent: audioReady(),
+        });
+      }
     },
-    [attachRemoteAudio, endSlot, publish, releaseInvite, releaseSlotMedia],
+    [attachRemoteAudio, endSlot, notifyCall, publish, releaseInvite, releaseSlotMedia],
   );
 
   /**
@@ -1438,6 +1530,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     (callId: string) => {
       const slot = slotsRef.current.get(callId);
       if (!slot) return;
+      // The ring is over for this call however it was answered — from the overlay, from
+      // the in-tab banner, or from the notification itself. `endSlot` does not run on an
+      // answer, so without this the notification would sit there for the whole call.
+      void closeNotification(callNotificationTag(slot.info.callSid));
       // BEFORE anything that can publish — see `CallSlot.answering`.
       slot.answering = true;
       // Also the first reliable user gesture, which is what lets audio play at all.
@@ -1476,6 +1572,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         endSlot(slot.id, 'hung up');
       },
       switchTo,
+      retryAudio: () => {
+        const slot = activeSlot();
+        if (!slot) return;
+        // This IS the gesture, so unlock the context on the way through: a tab that
+        // never had one is exactly the tab this button exists for.
+        unlockAudio();
+        attachRemoteAudio(slot);
+      },
       answerWaiting: (callId: string) => answerSlot(callId),
       endAndAnswer: (callId: string) => {
         // Marked BEFORE the hang-up below, because `endSlot` promotes this slot to active
@@ -1807,6 +1911,54 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  /**
+   * Answer / Decline pressed on the desktop notification.
+   *
+   * The service worker cannot touch the call itself — it has no SIP session — so it
+   * focuses this tab and posts the action back. This effect is what turns that into a
+   * call action, and it lives inside the provider because it needs `slotsRef` and
+   * `activeIdRef`, which nothing outside can see.
+   *
+   * Two guards carry the whole safety of the round trip:
+   *  - the `source` check, because workbox and the PWA plugin post their own messages
+   *    on this very channel;
+   *  - matching the sid AND `phase === 'ringing'`, so a click on a stale notification —
+   *    for a call already answered, or one that rang out — resolves to nothing and does
+   *    nothing. It can never act on a DIFFERENT call.
+   */
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const onMessage = (event: MessageEvent) => {
+      const message = event.data as
+        | { source?: string; action?: string; callSid?: string }
+        | undefined;
+      if (message?.source !== SW_MESSAGE_SOURCE) return;
+
+      const slot = slotList().find(
+        (s) => s.info.callSid === message.callSid && s.phase === 'ringing',
+      );
+      if (!slot) return;
+
+      if (message.action === 'answer') {
+        answerSlot(slot.id);
+        return;
+      }
+      if (message.action !== 'decline') return;
+
+      // ⚠️ The overlay's two Declines are NOT the same action, and this mirrors it
+      // rather than picking one. On the ACTIVE ringing call, Decline is a local SIP
+      // reject that leaves the caller ringing everybody else's browser; on a WAITING
+      // call it is a server-side redirect that sends them to voicemail for good.
+      // Collapsing them would silently change what the button means.
+      if (slot.id === activeIdRef.current) actions.hangup();
+      else actions.declineWaiting(slot.id);
+    };
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [actions, answerSlot, slotList]);
+
   const state = useMemo<SoftphoneState>(() => {
     const active = calls.find((c) => c.id === activeCallId) ?? null;
     const waiting =
@@ -1827,6 +1979,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         !!(activeCallId && slotsRef.current.get(activeCallId)?.takeBackInvite),
       muted: active?.muted ?? false,
       held: active?.held ?? false,
+      audioBlocked: active?.audioBlocked ?? false,
       seconds: active?.seconds ?? 0,
       hasHeldInvite,
       calls,
