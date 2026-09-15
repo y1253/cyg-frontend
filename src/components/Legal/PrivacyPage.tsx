@@ -14,7 +14,7 @@ export function PrivacyPage() {
         </Link>
 
         <h1 className="text-3xl font-bold text-[#0B1C2C] mb-2">Privacy Policy</h1>
-        <p className="text-sm text-gray-500 mb-10">Last updated: September 9, 2026</p>
+        <p className="text-sm text-gray-500 mb-10">Last updated: September 14, 2026</p>
 
         <div className="prose prose-slate max-w-none space-y-8 text-[15px] leading-relaxed text-gray-700">
 
@@ -56,9 +56,13 @@ export function PrivacyPage() {
                 browser session.
               </li>
               <li>
-                <strong>WhatsApp session data:</strong> If you connect WhatsApp, session credentials
-                (equivalent to being logged into WhatsApp Web) are stored server-side to retrieve
-                your sent messages. No message content is persisted.
+                <strong>WhatsApp messages:</strong> A client company may have a WhatsApp Business
+                number connected through Meta's WhatsApp Business Platform. When someone messages
+                that number, we receive and store the message — its text, any photos, documents or
+                voice messages, the sender's WhatsApp number and profile name, and its delivery
+                status — so that staff can read and reply to it. Replies sent by staff, including
+                recorded voice messages, are stored the same way. The access token Meta issues for
+                the connection is stored encrypted.
               </li>
               <li>
                 <strong>Client company data:</strong> Business names, contact details, billing
@@ -73,8 +77,9 @@ export function PrivacyPage() {
             <ul className="list-disc pl-6 space-y-2">
               <li>To authenticate you and control access to the platform.</li>
               <li>
-                To display your sent Gmail emails and WhatsApp messages alongside the relevant
-                client company records, so your team has a unified communication history.
+                To display your sent Gmail emails, and to receive, display and reply to WhatsApp
+                messages, alongside the relevant client company records, so your team has a
+                unified communication history.
               </li>
               <li>To manage tasks, schedules, and todos associated with client companies.</li>
               <li>For internal auditing and administrative purposes.</li>
@@ -139,6 +144,11 @@ export function PrivacyPage() {
                 your sent emails.
               </li>
               <li>
+                WhatsApp access tokens are stored encrypted in the database. WhatsApp messages and
+                the files sent with them are stored on the same private server, so they remain
+                available after Meta deletes its own copy of the media.
+              </li>
+              <li>
                 All data in transit is protected by TLS/HTTPS in production.
               </li>
               <li>
@@ -162,6 +172,12 @@ export function PrivacyPage() {
               We use it only to carry out the work the client has engaged us for and to
               communicate with them about it. We do not use client contact information for
               marketing, and we do not sell it.
+            </p>
+            <p className="mt-3">
+              WhatsApp conversations are carried by Meta Platforms through its WhatsApp Business
+              Platform, which processes them under its own terms. We share a client's WhatsApp
+              number and the content of the conversation with Meta only so that the messages can
+              be delivered.
             </p>
           </section>
 
@@ -214,6 +230,11 @@ export function PrivacyPage() {
               accounts have their personal data retained for audit purposes but lose login access.
               OAuth tokens are deleted immediately when you disconnect an integration or when your
               account is removed.
+            </p>
+            <p className="mt-3">
+              Disconnecting a WhatsApp number deletes its stored access token. WhatsApp messages
+              already received remain part of the client company's records, and are deleted when
+              the client company is permanently deleted or on request (see Your Rights below).
             </p>
           </section>
 

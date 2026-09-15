@@ -14,7 +14,7 @@ export function TermsPage() {
         </Link>
 
         <h1 className="text-3xl font-bold text-[#0B1C2C] mb-2">Terms of Service</h1>
-        <p className="text-sm text-gray-500 mb-10">Last updated: September 9, 2026</p>
+        <p className="text-sm text-gray-500 mb-10">Last updated: September 14, 2026</p>
 
         <div className="prose prose-slate max-w-none space-y-8 text-[15px] leading-relaxed text-gray-700">
 
@@ -35,8 +35,9 @@ export function TermsPage() {
             <p>
               The Service is a private bookkeeping and client management platform that allows
               authorized staff to manage client companies, tasks, schedules, and communications.
-              It includes optional integrations with Google Gmail and WhatsApp to display sent
-              communications in context.
+              It includes optional integrations with Google Gmail and WhatsApp to display
+              communications in context, and to receive and reply to WhatsApp messages from
+              client companies.
             </p>
           </section>
 
@@ -78,9 +79,11 @@ export function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold text-[#0B1C2C] mb-3">5. Gmail and WhatsApp Integrations</h2>
             <p>
-              When you connect your Google or WhatsApp account to the Service, you authorize CYG
-              Finance to read your sent messages on your behalf for the purpose of displaying
-              communication history within the platform.
+              When you connect your Google account to the Service, you authorize CYG Finance to
+              read your sent messages on your behalf for the purpose of displaying communication
+              history within the platform. When a WhatsApp Business number is connected to a client
+              company, you authorize CYG Finance to receive, store and send WhatsApp messages on
+              that number through Meta's WhatsApp Business Platform.
             </p>
             <ul className="list-disc pl-6 mt-3 space-y-2">
               <li>
@@ -88,12 +91,16 @@ export function TermsPage() {
                 send emails on your behalf.
               </li>
               <li>
-                WhatsApp access mirrors a WhatsApp Web session. We do not send messages on
-                your behalf.
+                WhatsApp is connected through Meta's WhatsApp Business Platform, not a WhatsApp
+                Web session. Messages sent to a connected number — including photos, documents
+                and voice messages — are stored in the Service, and authorized staff can reply
+                from it. Replies follow WhatsApp's rules, including its 24-hour customer service
+                window.
               </li>
               <li>
                 You may disconnect either integration at any time from within the app. Doing so
-                immediately revokes our access and deletes stored session credentials.
+                immediately revokes our access and deletes the stored credentials; WhatsApp
+                messages already received remain part of the client company's records.
               </li>
               <li>
                 You are responsible for ensuring that connecting your personal or work accounts
