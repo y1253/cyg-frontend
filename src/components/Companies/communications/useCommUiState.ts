@@ -49,6 +49,7 @@ export function isValidSelection(value: unknown): value is Selection {
     case 'chat':
       return str('spaceId') && str('msgId') && str('msgTime');
     case 'sms':
+    case 'whatsapp':
       return str('peer') && str('msgId') && str('msgTime');
     case 'call':
       return str('sid') && str('itemId');

@@ -507,6 +507,15 @@ export type UnreadFeedItem =
     })
   | (UnreadFeedItemBase & {
       scope: 'company';
+      kind: 'whatsapp';
+      /** Digits only — a WhatsApp id. */
+      peer: string;
+      /** `wa:{id}`. */
+      msgId: string;
+      msgTime: string;
+    })
+  | (UnreadFeedItemBase & {
+      scope: 'company';
       kind: 'call';
       /** `sid` is SignalWire's key; `itemId` is the READ-STATE key. Not interchangeable. */
       sid: string;

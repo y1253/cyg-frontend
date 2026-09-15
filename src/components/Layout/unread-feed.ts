@@ -84,6 +84,13 @@ export function selectionFromFeedItem(item: UnreadFeedItem): Selection | null {
         msgId: item.msgId,
         msgTime: item.msgTime,
       };
+    case 'whatsapp':
+      return {
+        kind: 'whatsapp',
+        peer: item.peer,
+        msgId: item.msgId,
+        msgTime: item.msgTime,
+      };
     case 'call':
       return { kind: 'call', sid: item.sid, itemId: item.itemId };
     default: {

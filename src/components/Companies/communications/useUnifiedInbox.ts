@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
 import type { PhoneItem } from '@/api/phone';
+import type { WhatsAppItem } from '@/api/whatsapp';
 import type { useGmailEmails } from '@/hooks/useGmailEmails';
 import type { useGmailChats } from '@/hooks/useGmailChats';
 import type { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
+import type { useWhatsAppTimeline } from '@/hooks/useWhatsAppTimeline';
 import { dedupeById } from '../message-utils';
 import { clampSources } from './inbox-clamp';
 import {
@@ -17,6 +19,7 @@ import {
 type EmailQuery = ReturnType<typeof useGmailEmails>;
 type ChatQuery = ReturnType<typeof useGmailChats>;
 type PhoneQuery = ReturnType<typeof usePhoneTimeline>;
+type WhatsAppQuery = ReturnType<typeof useWhatsAppTimeline>;
 
 /**
  * One independently-paged stream feeding the merged inbox.
@@ -57,6 +60,8 @@ export function useUnifiedInbox({
   chatQuery,
   phoneQuery,
   phoneEnabled,
+  whatsappQuery,
+  whatsappEnabled,
   isInboxLike,
   isFilteredFolder,
   selectedLabel,
@@ -70,6 +75,12 @@ export function useUnifiedInbox({
   phoneQuery: PhoneQuery;
   /** False when the company has no support number — hides the source completely. */
   phoneEnabled: boolean;
+  whatsappQuery: WhatsAppQuery;
+  /**
+   * False while an inbox search is active: WhatsApp has no server-side search, so an
+   * unsearched source would pad every result list with unrelated messages.
+   */
+  whatsappEnabled: boolean;
   isInboxLike: boolean;
   /** UNREAD / UNCOMPLETED — the clamp is relaxed and auto-fill runs. */
   isFilteredFolder: boolean;
@@ -96,6 +107,7 @@ export function useUnifiedInbox({
   const emailPages = emailQuery.data?.pages;
   const chatPages = chatQuery.data?.pages;
   const phonePages = phoneQuery.data?.pages;
+  const whatsappPages = whatsappQuery.data?.pages;
 
   const emailItems: EmailSummary[] = useMemo(
     () => dedupeById((emailPages ?? []).flatMap((p) => p.messages)),
@@ -109,6 +121,10 @@ export function useUnifiedInbox({
     () => dedupeById((phonePages ?? []).flatMap((p) => p.items)),
     [phonePages],
   );
+  const whatsappItems: WhatsAppItem[] = useMemo(
+    () => dedupeById((whatsappPages ?? []).flatMap((p) => p.items)),
+    [whatsappPages],
+  );
 
   const emailHasNext = emailQuery.hasNextPage;
   const emailFetchingNext = emailQuery.isFetchingNextPage;
@@ -116,6 +132,8 @@ export function useUnifiedInbox({
   const chatFetchingNext = chatQuery.isFetchingNextPage;
   const phoneHasNext = phoneEnabled && phoneQuery.hasNextPage;
   const phoneFetchingNext = phoneQuery.isFetchingNextPage;
+  const whatsappHasNext = whatsappEnabled && whatsappQuery.hasNextPage;
+  const whatsappFetchingNext = whatsappQuery.isFetchingNextPage;
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -153,6 +171,17 @@ export function useUnifiedInbox({
         fetchNext: () => void phoneQuery.fetchNextPage(),
         enabled: phoneEnabled,
       },
+      // LAST, so the existing sources keep their tie-break order unchanged.
+      {
+        kind: 'whatsapp',
+        items: whatsappEnabled
+          ? whatsappItems.map((data) => ({ kind: 'whatsapp', data }) as UnifiedItem)
+          : [],
+        hasNext: whatsappHasNext,
+        fetchingNext: whatsappFetchingNext,
+        fetchNext: () => void whatsappQuery.fetchNextPage(),
+        enabled: whatsappEnabled,
+      },
     ],
     // The item arrays are memoised above, so these are stable identities that
     // change exactly when the CONTENT changes — no longer `.length`, which could
@@ -161,10 +190,10 @@ export function useUnifiedInbox({
     // No eslint-disable here any more, and that is the proof the change was real:
     // the list this hook needs is now the list exhaustive-deps agrees with.
     [
-      emailItems, chatItems, phoneItems,
-      emailHasNext, chatHasNext, phoneHasNext,
-      emailFetchingNext, chatFetchingNext, phoneFetchingNext,
-      phoneEnabled, emailQuery, chatQuery, phoneQuery,
+      emailItems, chatItems, phoneItems, whatsappItems,
+      emailHasNext, chatHasNext, phoneHasNext, whatsappHasNext,
+      emailFetchingNext, chatFetchingNext, phoneFetchingNext, whatsappFetchingNext,
+      phoneEnabled, whatsappEnabled, emailQuery, chatQuery, phoneQuery, whatsappQuery,
     ],
   );
 
@@ -343,6 +372,7 @@ export function useUnifiedInbox({
     emailItems,
     chatItems,
     phoneItems,
+    whatsappItems,
     visibleItems,
     loadMoreRef,
     emailHasNext,

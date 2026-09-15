@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { markChatRead, markEmailRead, type UnreadFeedItem } from '@/api/gmail';
 import { markPhoneItem } from '@/api/phone';
+import { markWhatsAppItem, whatsappMessageIdOf } from '@/api/whatsapp';
 import { setInternalMessageState } from '@/api/internalMessages';
 import { setInternalCallState } from '@/api/internalCalls';
 import {
@@ -63,6 +64,12 @@ export function useMarkFeedItemRead() {
           });
           void qc.invalidateQueries({ queryKey: ['phone-counts', item.companyId] });
           break;
+        case 'whatsapp':
+          void qc.invalidateQueries({
+            queryKey: ['whatsapp-timeline', item.companyId],
+          });
+          void qc.invalidateQueries({ queryKey: ['whatsapp-counts', item.companyId] });
+          break;
       }
     },
   });
@@ -84,6 +91,13 @@ function send(token: string, item: UnreadFeedItem): Promise<void> {
       return markPhoneItem(token, item.companyId, item.itemId, 'read');
     case 'sms':
       return markPhoneItem(token, item.companyId, item.msgId, 'read');
+    case 'whatsapp':
+      return markWhatsAppItem(
+        token,
+        item.companyId,
+        whatsappMessageIdOf(item.msgId),
+        'read',
+      );
     default: {
       const exhaustive: never = item;
       return exhaustive;

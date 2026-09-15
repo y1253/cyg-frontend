@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, Forward, Paperclip,
+  CheckCircle2, Forward, Mic, Paperclip,
   PhoneIncoming, PhoneOutgoing, PhoneMissed, Voicemail,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +7,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
 import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import type { CallItem, SmsItem } from '@/api/phone';
+import {
+  formatVoiceDuration,
+  whatsappPeerLabel,
+  whatsappPreviewText,
+  type WhatsAppItem,
+} from '@/api/whatsapp';
 import { formatE164 } from '@/lib/phone';
 import { AttachmentChip } from '../AttachmentPreview';
 import { displayName, formatEmailDate, senderInitial } from '../message-utils';
@@ -279,6 +285,13 @@ function RowTitle({ item, isDraft }: { item: UnifiedItem; isDraft?: boolean }) {
           {peerLabel(item.data)}
         </>
       );
+    case 'whatsapp':
+      return (
+        <>
+          <KIND_STYLES.whatsapp.Icon size={11} className="text-emerald-600 shrink-0" />
+          {whatsappPeerLabel(item.data)}
+        </>
+      );
   }
 }
 
@@ -341,7 +354,59 @@ function RowBody({
           callBlockedReason={callBlockedReason}
         />
       );
+    case 'whatsapp':
+      return (
+        <WhatsAppRowBody
+          msg={item.data}
+          isRead={isRead}
+          onCall={onCall}
+          callBlockedReason={callBlockedReason}
+        />
+      );
   }
+}
+
+function WhatsAppRowBody({
+  msg,
+  isRead,
+  onCall,
+  callBlockedReason,
+}: {
+  msg: WhatsAppItem;
+  isRead: boolean;
+  onCall?: (number: string) => void;
+  callBlockedReason: string | null;
+}) {
+  const isAudio = msg.type === 'audio';
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span
+        className={[
+          'text-xs truncate flex items-center gap-1 min-w-0',
+          !isRead ? 'font-medium text-foreground/80' : 'text-muted-foreground',
+        ].join(' ')}
+      >
+        {msg.direction === 'outbound' && (
+          <span className="shrink-0 text-muted-foreground/70">You:</span>
+        )}
+        {isAudio ? (
+          <Mic size={11} className="shrink-0 text-emerald-600" />
+        ) : (
+          msg.hasMedia && <Paperclip size={11} className="shrink-0" />
+        )}
+        <span className="truncate">
+          {whatsappPreviewText(msg)}
+          {isAudio && msg.durationSec != null && ` · ${formatVoiceDuration(msg.durationSec)}`}
+        </span>
+      </span>
+      {/* A WhatsApp id is a phone number, so the company line can call it back. */}
+      <CallBackButton
+        number={`+${msg.peer}`}
+        onCall={onCall}
+        blockedReason={callBlockedReason}
+      />
+    </div>
+  );
 }
 
 function EmailRowBody({

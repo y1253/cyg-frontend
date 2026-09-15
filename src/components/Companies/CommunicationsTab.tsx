@@ -22,6 +22,10 @@ import { usePhoneNumber } from '@/hooks/usePhoneNumber';
 import { usePhoneTimeline } from '@/hooks/usePhoneTimeline';
 import { usePhoneCounts } from '@/hooks/usePhoneCounts';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
+import { useWhatsAppAccount } from '@/hooks/useWhatsAppAccount';
+import { useWhatsAppTimeline } from '@/hooks/useWhatsAppTimeline';
+import { useWhatsAppCounts } from '@/hooks/useWhatsAppCounts';
+import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
 import { useStartCall } from '@/hooks/useStartCall';
 import { useRingingCall } from '@/hooks/useRingingCall';
 import { useActiveCall } from '@/hooks/useActiveCall';
@@ -37,6 +41,7 @@ import { ChatThreadView } from './communications/ChatThreadView';
 import { ConnectAccountPanel } from './communications/ConnectAccountPanel';
 import { EmailThreadView } from './communications/EmailThreadView';
 import { SmsThreadView } from './communications/SmsThreadView';
+import { WhatsAppThreadView } from './communications/WhatsAppThreadView';
 import { CallDetailView } from './communications/CallDetailView';
 import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
 import { RingingCallBanner } from './communications/RingingCallBanner';
@@ -279,19 +284,38 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const phoneQuery = usePhoneTimeline(companyId, !!supportNumber, active);
   const { data: phoneCountData } = usePhoneCounts(companyId, !!supportNumber, active);
 
-  // Badges count every channel, so the phone contribution is added to the mailbox's.
-  const unreadCount = (unreadData?.count ?? 0) + (phoneCountData?.unread ?? 0);
+  // WhatsApp is NOT gated on a connection: its rows are persisted on our side, so a
+  // company that disconnected still shows its history, and each request is one indexed
+  // query on our own database rather than a paid provider fan-out.
+  const { data: whatsappAccount, isError: whatsappAccountError } =
+    useWhatsAppAccount(companyId);
+  const whatsappQuery = useWhatsAppTimeline(companyId, active);
+  const { data: whatsappCountData } = useWhatsAppCounts(companyId, active);
+  const hasWhatsApp =
+    !!whatsappAccount || (whatsappQuery.data?.pages?.[0]?.items.length ?? 0) > 0;
+
+  // Badges count every channel, so the phone and WhatsApp contributions are added to the
+  // mailbox's.
+  const unreadCount =
+    (unreadData?.count ?? 0) +
+    (phoneCountData?.unread ?? 0) +
+    (whatsappCountData?.unread ?? 0);
   const uncompletedCount =
-    (uncompletedData?.count ?? 0) + (phoneCountData?.uncompleted ?? 0);
+    (uncompletedData?.count ?? 0) +
+    (phoneCountData?.uncompleted ?? 0) +
+    (whatsappCountData?.uncompleted ?? 0);
 
   const {
-    emailItems, chatItems, phoneItems, visibleItems, loadMoreRef,
+    emailItems, chatItems, phoneItems, whatsappItems, visibleItems, loadMoreRef,
     emailHasNext, emailFetchingNext, anyFetchingNext, allExhausted,
   } = useUnifiedInbox({
     emailQuery,
     chatQuery,
     phoneQuery,
     phoneEnabled: !!supportNumber,
+    whatsappQuery,
+    // WhatsApp has no server-side search; an unsearched source would pad every result.
+    whatsappEnabled: !activeSearch,
     isInboxLike,
     isFilteredFolder,
     selectedLabel,
@@ -326,6 +350,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const markPhoneUnread = useMarkPhoneItem(companyId, 'unread');
   const markPhoneComplete = useMarkPhoneItem(companyId, 'complete');
   const markPhoneUncomplete = useMarkPhoneItem(companyId, 'uncomplete');
+  const markWhatsAppRead = useMarkWhatsAppItem(companyId, 'read');
+  const markWhatsAppUnread = useMarkWhatsAppItem(companyId, 'unread');
+  const markWhatsAppComplete = useMarkWhatsAppItem(companyId, 'complete');
+  const markWhatsAppUncomplete = useMarkWhatsAppItem(companyId, 'uncomplete');
   const startCallMutation = useStartCall(companyId);
 
   // ── A call ringing THIS company, answerable from here ─────────────────────
@@ -753,6 +781,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       complete: (id) => markPhoneComplete.mutate(id),
       uncomplete: (id) => markPhoneUncomplete.mutate(id),
     },
+    whatsapp: {
+      read: (id) => markWhatsAppRead.mutate(id),
+      unread: (id) => markWhatsAppUnread.mutate(id),
+      complete: (id) => markWhatsAppComplete.mutate(id),
+      uncomplete: (id) => markWhatsAppUncomplete.mutate(id),
+    },
   };
 
   /**
@@ -826,6 +860,15 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           kind: 'sms',
           peer: item.data.counterparty,
           msgId: item.data.id,
+          msgTime: item.data.at,
+        });
+        break;
+      case 'whatsapp':
+        setSelected({
+          kind: 'whatsapp',
+          peer: item.data.peer,
+          msgId: item.data.id,
+          // Anchor: messages after this are dimmed.
           msgTime: item.data.at,
         });
         break;
@@ -908,7 +951,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // Nothing connected AND no number: there is genuinely nothing to show, so the
   // full-page panel is still right. With a support number the tab renders calls and
   // texts instead, and the mailbox prompt becomes a banner above the list.
-  if (!account && !supportNumber) {
+  // WhatsApp counts as "something to show" only once known: while its account query is
+  // in flight `hasWhatsApp` is false, and a failed lookup must not wall off the tab.
+  const whatsappSettled = whatsappAccount !== undefined || whatsappAccountError;
+  if (!account && !supportNumber && !hasWhatsApp && whatsappSettled) {
     return (
       <>
         {ringingBanner}
@@ -1018,6 +1064,30 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     );
   }
 
+  if (selected?.kind === 'whatsapp') {
+    const row = whatsappItems.find((i) => i.id === selected.msgId);
+    return (
+      <>
+        {ringingBanner}
+        <WhatsAppThreadView
+          companyId={companyId}
+          token={token}
+          peer={selected.peer}
+          anchorMsgId={selected.msgId}
+          anchorTime={selected.msgTime}
+          isCompleted={row?.isCompleted ?? false}
+          active={active}
+          onClose={closeDetail}
+          onCall={supportNumber ? handleCall : undefined}
+          callBlockedReason={callBlocked}
+          onRequestComplete={setCompleteTarget}
+          onUncomplete={uncomplete}
+        />
+        {completeConfirm}
+      </>
+    );
+  }
+
   if (selected?.kind === 'call') {
     const row = phoneItems.find((i) => i.id === selected.itemId);
     return (
@@ -1108,7 +1178,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     isInboxLike,
     emailLoading: emailQuery.isLoading,
     chatLoading: chatQuery.isLoading,
-    phoneLoading: phoneQuery.isLoading,
+    // WhatsApp rides the phone flag: both are late-arriving sources the list must merge
+    // behind rather than be wiped by.
+    phoneLoading: phoneQuery.isLoading || whatsappQuery.isLoading,
     loadedRowCount,
   });
 
@@ -1146,7 +1218,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         // Separate from the spinner: while phone has not returned its first page it
         // reports hasNextPage:false, so the sentinel would claim "You're all caught up"
         // with a whole source still in flight.
-        phoneLoading={isInboxLike && !!supportNumber && phoneQuery.isLoading}
+        phoneLoading={
+          isInboxLike &&
+          ((!!supportNumber && phoneQuery.isLoading) ||
+            (!activeSearch && whatsappQuery.isLoading))
+        }
         visibleItems={visibleItems}
         emailItems={emailItems}
         emailHasNext={emailHasNext}

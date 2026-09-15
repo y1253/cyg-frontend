@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { matchesKindFilter, KIND_FILTER_LABELS } from './types';
 import type { UnifiedItem } from './types';
 import type { CallItem, SmsItem } from '@/api/phone';
+import type { WhatsAppItem } from '@/api/whatsapp';
 
 /**
  * `'voicemail'` is a PSEUDO-KIND: the rows it selects are still `kind: 'call'`.
@@ -52,7 +53,39 @@ const smsItem = (): UnifiedItem => ({
   } as SmsItem,
 });
 
+const whatsappItem = (): UnifiedItem => ({
+  kind: 'whatsapp',
+  data: {
+    id: 'wa:1',
+    messageId: 1,
+    kind: 'whatsapp',
+    direction: 'inbound',
+    peer: '15145550001',
+    peerName: null,
+    type: 'audio',
+    body: null,
+    isVoice: true,
+    durationSec: 9,
+    hasMedia: true,
+    mediaStatus: 'ready',
+    mimeType: 'audio/ogg',
+    filename: null,
+    size: 1000,
+    status: null,
+    errorCode: null,
+    at: '2026-09-01T10:00:00.000Z',
+    isRead: false,
+    isCompleted: false,
+  } as WhatsAppItem,
+});
+
 describe('matchesKindFilter', () => {
+  it('matches WhatsApp by kind, and a WhatsApp voice note is not a voicemail', () => {
+    expect(matchesKindFilter(whatsappItem(), 'whatsapp')).toBe(true);
+    expect(matchesKindFilter(whatsappItem(), 'sms')).toBe(false);
+    expect(matchesKindFilter(whatsappItem(), 'voicemail')).toBe(false);
+  });
+
   it('keeps everything under "all"', () => {
     expect(matchesKindFilter(callItem(), 'all')).toBe(true);
     expect(matchesKindFilter(smsItem(), 'all')).toBe(true);
@@ -90,7 +123,7 @@ describe('matchesKindFilter', () => {
   it('offers a label for every filter it can be given', () => {
     // The Select renders Object.entries(KIND_FILTER_LABELS), so a filter with no label
     // is a value the user can never pick back off again.
-    for (const key of ['all', 'email', 'chat', 'call', 'sms', 'voicemail']) {
+    for (const key of ['all', 'email', 'chat', 'call', 'sms', 'whatsapp', 'voicemail']) {
       expect(KIND_FILTER_LABELS[key]).toBeTruthy();
     }
   });

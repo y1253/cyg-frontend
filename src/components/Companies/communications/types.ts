@@ -1,9 +1,10 @@
 import {
   Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle, FileText,
-  MessageSquare, Phone, MessageSquareText, Contact, type LucideIcon,
+  MessageSquare, Phone, MessageSquareText, MessageCircle, Contact, type LucideIcon,
 } from 'lucide-react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
 import type { CallItem, SmsItem } from '@/api/phone';
+import type { WhatsAppItem } from '@/api/whatsapp';
 
 export const FOLDERS = [
   { id: 'INBOX', label: 'Inbox', icon: Inbox },
@@ -51,9 +52,12 @@ export const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];
  * pick whichever of the two happened to be older and hide rows for no reason.
  *
  * `ItemKind` is what a row renders as and what the kind filter offers.
+ *
+ * WhatsApp is its own source (and its own kind): it is paged by a separate endpoint over
+ * our own database, with a cursor unrelated to the phone timeline's.
  */
-export type SourceKind = 'email' | 'chat' | 'phone';
-export type ItemKind = 'email' | 'chat' | 'call' | 'sms';
+export type SourceKind = 'email' | 'chat' | 'phone' | 'whatsapp';
+export type ItemKind = 'email' | 'chat' | 'call' | 'sms' | 'whatsapp';
 
 /** Also the Select's `items` — base-ui shows the raw value in the trigger without it. */
 export const KIND_FILTER_LABELS: Record<string, string> = {
@@ -62,6 +66,7 @@ export const KIND_FILTER_LABELS: Record<string, string> = {
   chat: 'Chat',
   call: 'Calls',
   sms: 'Texts',
+  whatsapp: 'WhatsApp',
   voicemail: 'Voicemail',
 };
 
@@ -87,7 +92,8 @@ export type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
   | { kind: 'chat'; data: ChatInboxMessage }
   | { kind: 'call'; data: CallItem }
-  | { kind: 'sms'; data: SmsItem };
+  | { kind: 'sms'; data: SmsItem }
+  | { kind: 'whatsapp'; data: WhatsAppItem };
 
 /**
  * Per-kind chrome: the palette and label that identify a channel at a glance.
@@ -156,6 +162,17 @@ export const KIND_STYLES: Record<ItemKind, KindStyle> = {
     hoverUnread: 'bg-white hover:bg-amber-50/60',
     hoverRead: 'bg-muted/10 hover:bg-amber-50/40',
   },
+  // Emerald rather than calls' green-500, so the two stay distinguishable side by side.
+  whatsapp: {
+    label: 'WhatsApp',
+    Icon: MessageCircle,
+    accent: 'bg-emerald-600',
+    dot: 'bg-emerald-600 border-emerald-600',
+    avatar: 'bg-emerald-100 text-emerald-700',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    hoverUnread: 'bg-white hover:bg-emerald-50/60',
+    hoverRead: 'bg-muted/10 hover:bg-emerald-50/40',
+  },
 };
 
 // Minimal shape needed to natively quote a chat message in a reply.
@@ -187,6 +204,7 @@ export type Selection =
   | { kind: 'email'; msgId: string; threadId: string | null }
   | { kind: 'chat'; spaceId: string; msgId: string; msgTime: string }
   | { kind: 'sms'; peer: string; msgId: string; msgTime: string }
+  | { kind: 'whatsapp'; peer: string; msgId: string; msgTime: string }
   | { kind: 'call'; sid: string; itemId: string };
 
 /**
@@ -208,6 +226,7 @@ export function getItemTimestamp(item: UnifiedItem): number {
       return new Date(item.data.createTime).getTime() || 0;
     case 'call':
     case 'sms':
+    case 'whatsapp':
       return new Date(item.data.at).getTime() || 0;
     default: {
       const exhaustive: never = item;

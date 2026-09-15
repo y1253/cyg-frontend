@@ -48,7 +48,7 @@ import { useUsers } from '@/hooks/useUsers';
 import { useAssignCompany } from '@/hooks/useAssignCompany';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
-import { canManage } from '@/lib/roles';
+import { canManage, isSuperAdmin } from '@/lib/roles';
 import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
@@ -61,6 +61,7 @@ import { usePermanentDeleteCompany, useRestoreCompany } from '@/hooks/useDeleted
 import { useGmailAccount } from '@/hooks/useGmailAccount';
 import { usePhoneNumber } from '@/hooks/usePhoneNumber';
 import { PhoneNumberSection } from './PhoneNumberSection';
+import { WhatsAppSection } from './WhatsAppSection';
 import { PhoneSettingsSection } from './PhoneSettingsSection';
 import { SignatureSettingsSection } from './SignatureSettingsSection';
 import { useGmailUncompletedCount } from '@/hooks/useGmailUncompletedCount';
@@ -3015,6 +3016,15 @@ export function CompanyDetailPage() {
               <PhoneNumberSection
                 companyId={companyId}
                 companyCountry={company.country}
+              />
+            )}
+
+            {/* Management tier connects through Meta's popup; attaching the firm's own
+                number is ADMIN only, since it hands the company the firm's token. */}
+            {isAdmin && !isArchived && (
+              <WhatsAppSection
+                companyId={companyId}
+                canUseFirmNumber={isSuperAdmin(user)}
               />
             )}
 

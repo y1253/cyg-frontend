@@ -68,6 +68,16 @@ const ITEMS: UnreadFeedItem[] = [
     threadId: 12,
   },
   { ...base, id: 'intcall:c9', scope: 'internal', kind: 'call', sid: 'c9' },
+  // Appended rather than inserted, so the ITEMS[n] indexes the tests below use hold.
+  {
+    ...base,
+    id: 'wa:7',
+    scope: 'company',
+    kind: 'whatsapp',
+    peer: '15145550000',
+    msgId: 'wa:7',
+    msgTime: '2026-09-10T11:00:00.000Z',
+  },
 ];
 
 const companyItems = ITEMS.filter((i) => i.scope === 'company');
@@ -94,7 +104,18 @@ describe('deep link — feed item to Selection', () => {
       'company:call',
       'internal:message',
       'internal:call',
+      'company:whatsapp',
     ]);
+  });
+
+  it('opens a WhatsApp row as a WhatsApp thread keyed by the peer', () => {
+    expect(selectionFromFeedItem(ITEMS[7])).toEqual({
+      kind: 'whatsapp',
+      peer: '15145550000',
+      msgId: 'wa:7',
+      msgTime: '2026-09-10T11:00:00.000Z',
+    });
+    expect(feedRowChrome(ITEMS[7]).label).toBe('WhatsApp');
   });
 
   it('returns null for the internal workspace, which has its own open model', () => {
