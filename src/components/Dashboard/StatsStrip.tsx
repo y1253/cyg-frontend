@@ -23,7 +23,7 @@ export function StatsStrip({
   important: number;
 }) {
   return (
-    <div className="flex items-center gap-2.5 text-[12px] tabular-nums">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] tabular-nums">
       <Stat value={count} label="companies" />
       <Separator />
       <Stat value={total} label="open tasks" />

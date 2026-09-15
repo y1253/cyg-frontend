@@ -289,7 +289,7 @@ export function Step10AccountsReceivable({ data, onChange }: Props) {
           <div key={rule.idPrefix} className="flex flex-col gap-3">
             <p className="text-sm font-medium text-foreground">{rule.question}</p>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => onChange({ [rule.enabledKey]: true } as Partial<FormData>)}

@@ -43,7 +43,7 @@ export function Step12General({ data, onChange }: Props) {
         <p className="text-sm font-medium text-foreground">
           Should we come down to your location to go over the books with you?
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ locationVisitEnabled: true })}
@@ -75,7 +75,7 @@ export function Step12General({ data, onChange }: Props) {
         {data.locationVisitEnabled === true && (
           <div className="flex flex-col gap-2 pl-1">
             <p className="text-sm text-muted-foreground">How often?</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => onChange({ locationVisitFrequency: "monthly" })}
@@ -110,7 +110,7 @@ export function Step12General({ data, onChange }: Props) {
         CANADIAN_DOC_RULES.map((rule) => (
           <div key={rule.enabledKey} className="flex flex-col gap-3">
             <p className="text-sm font-medium text-foreground">{rule.question}</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => onChange({ [rule.enabledKey]: true } as Partial<FormData>)}

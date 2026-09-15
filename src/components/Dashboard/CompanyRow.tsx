@@ -32,7 +32,12 @@ export function CompanyRow({
       type="button"
       onClick={onClick}
       className={[
-        'group w-full text-left flex items-center gap-5 px-4 py-3 rounded-lg border transition-colors',
+        // Below `sm` the row is two lines — name and chevron up top, meta and badges
+        // beneath — because a company name, a country, an assignee and up to three
+        // badges cannot share 390px without either truncating to nothing or pushing
+        // the page into a horizontal scroll. From `sm` it is the single row it was.
+        'group w-full rounded-lg border px-4 py-3 text-left transition-colors',
+        'flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-5',
         internal
           ? 'border-teal-300 bg-teal-50/60 hover:bg-teal-50'
           : quiet
@@ -40,17 +45,22 @@ export function CompanyRow({
             : 'bg-background hover:bg-muted/50',
       ].join(' ')}
     >
-      {/* Name + meta */}
-      <div className="flex-1 flex items-baseline gap-3 min-w-0">
+      {/* Name + meta. The chevron rides this line on a phone so the name has a right
+          edge to truncate against rather than running under it. */}
+      <div className="flex min-w-0 flex-1 items-baseline gap-3">
         <p
           className={[
-            'font-medium text-[13px] truncate shrink-0 max-w-[280px]',
+            'min-w-0 flex-1 truncate text-[13px] font-medium sm:max-w-[280px] sm:flex-none sm:shrink-0',
             internal ? 'text-teal-800' : quiet ? 'text-muted-foreground' : '',
           ].join(' ')}
         >
           {company.businessName}
         </p>
-        <p className="text-[11px] text-muted-foreground truncate hidden sm:block">
+        <ChevronRight
+          size={14}
+          className="shrink-0 text-muted-foreground/25 sm:hidden"
+        />
+        <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
           {internal ? (
             <span className="text-teal-600 font-medium">Internal · Messages & Links</span>
           ) : (
@@ -67,8 +77,24 @@ export function CompanyRow({
         </p>
       </div>
 
-      {/* Status badges */}
-      <div className="flex items-center gap-2 shrink-0">
+      {/* Status badges. On a phone this row also carries the meta the name line gave
+          up, and it wraps rather than overflowing. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap sm:shrink-0">
+        <p className="truncate text-[11px] text-muted-foreground sm:hidden">
+          {internal ? (
+            <span className="font-medium text-teal-600">Internal · Messages &amp; Links</span>
+          ) : (
+            <>
+              {company.country ?? '—'}
+              {' · '}
+              {company.assignedUser ? (
+                company.assignedUser.name
+              ) : (
+                <span className="font-medium text-orange-500">Unassigned</span>
+              )}
+            </>
+          )}
+        </p>
         {!internal && company.urgentTodos > 0 && (
           <CountBadge tone="purple">{company.urgentTodos} 25d overdue</CountBadge>
         )}
@@ -81,7 +107,7 @@ export function CompanyRow({
           </CountBadge>
         )}
         {!internal && (
-          <span className="text-[11px] text-muted-foreground w-16 text-right tabular-nums">
+          <span className="text-[11px] tabular-nums text-muted-foreground sm:w-16 sm:text-right">
             {company.totalTodos === 0 ? 'no tasks' : `${company.totalTodos} tasks`}
           </span>
         )}
@@ -89,7 +115,7 @@ export function CompanyRow({
 
       <ChevronRight
         size={14}
-        className="text-muted-foreground/25 group-hover:text-muted-foreground/60 transition-colors shrink-0"
+        className="hidden shrink-0 text-muted-foreground/25 transition-colors group-hover:text-muted-foreground/60 sm:block"
       />
     </button>
   );

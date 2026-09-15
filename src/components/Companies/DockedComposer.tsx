@@ -47,6 +47,7 @@ import { useUserDirectory } from '@/hooks/useUserDirectory';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
 import { slotRight } from './composer-layout';
 import { cn } from '@/lib/utils';
+import { useIsPhone } from '@/hooks/useMediaQuery';
 import type {
   ComposerActions,
   Draft,
@@ -129,7 +130,21 @@ export function DockedComposer({
   // animation whose *name* changes with `attention` — a repeat of the same name
   // would not replay, and the className can't carry it because these classes are
   // rewritten on every hide/show.
-  const style: CSSProperties = {
+  // Below `md` this stops being a window and becomes a full-screen sheet: a 390px
+  // viewport has nothing to dock against, and dragging a window around a screen the
+  // window already fills is not a gesture anyone wants. Read in JS rather than as a
+  // `md:` class because the geometry below is an INLINE style, which no class can beat.
+  const phone = useIsPhone();
+
+  const style: CSSProperties = phone
+    ? {
+        zIndex,
+        outline: '2px solid transparent',
+        animation: draft.attention
+          ? `${draft.attention % 2 ? 'composer-flash-a' : 'composer-flash-b'} 700ms ease-out`
+          : undefined,
+      }
+    : {
     ...(draft.pos
       ? { left: draft.pos.x, top: draft.pos.y, right: 'auto', bottom: 'auto' }
       : { left: 'auto', top: 'auto', right: slotRight(slot), bottom: 0 }),
@@ -143,7 +158,7 @@ export function DockedComposer({
   // A hand-set size is inline; the Tailwind width/height classes remain the
   // default for a window the user has never resized. Minimized ignores it: the
   // collapsed strip is a fixed width, and the size is remembered, not applied.
-  const sized = !minimized ? draft.size : null;
+  const sized = !phone && !minimized ? draft.size : null;
   if (sized) style.width = sized.w;
 
   const drag = useDraggable({
@@ -259,9 +274,17 @@ export function DockedComposer({
         style={style}
         onPointerDownCapture={() => raise(id)}
         className={cn(
-          'pointer-events-auto absolute flex flex-col rounded-t-lg border bg-background shadow-2xl',
-          'max-w-[calc(100vw-3rem)]',
-          minimized ? 'w-[17rem]' : 'w-[30rem]',
+          'pointer-events-auto flex flex-col border bg-background shadow-2xl',
+          phone
+            ? // A sheet: the whole viewport, minus nothing. `dvh` because a URL bar
+              // would otherwise leave the Send button under the browser chrome.
+              minimized
+              ? 'fixed inset-x-0 bottom-0 rounded-t-lg'
+              : 'fixed inset-0 h-dvh w-full rounded-none'
+            : cn(
+                'absolute rounded-t-lg max-w-[calc(100vw-3rem)]',
+                minimized ? 'w-[17rem]' : 'w-[30rem]',
+              ),
           // Dropped from layout, never unmounted — this is what makes walking to
           // another company and back give the draft back untouched.
           hidden && 'hidden',
@@ -271,7 +294,7 @@ export function DockedComposer({
             bottom-right of the screen, so that is the only corner facing into the
             page. A <button> so the drag hook's `closest('button')` guard skips it
             and the title bar underneath never starts a move at the same time. */}
-        {!minimized && (
+        {!minimized && !phone && (
           <button
             type="button"
             {...resize}
@@ -286,16 +309,23 @@ export function DockedComposer({
         )}
 
         <div
-          {...drag}
-          onDoubleClick={() => {
-            setPos(id, null);
-            setSize(id, null);
-          }}
-          title="Drag to move · double-click to dock"
+          {...(phone ? {} : drag)}
+          onDoubleClick={
+            phone
+              ? undefined
+              : () => {
+                  setPos(id, null);
+                  setSize(id, null);
+                }
+          }
+          title={phone ? undefined : 'Drag to move · double-click to dock'}
           className={cn(
-            'flex cursor-move touch-none select-none items-center gap-2 rounded-t-lg bg-slate-800 py-2 pr-3 text-white',
+            'flex select-none items-center gap-2 bg-slate-800 py-2 pr-3 text-white',
+            phone
+              ? cn('shrink-0 pl-3', minimized && 'rounded-t-lg')
+              : 'cursor-move touch-none rounded-t-lg',
             // Room for the resize grip, which overlays this corner.
-            minimized ? 'pl-3' : 'pl-7',
+            phone ? '' : minimized ? 'pl-3' : 'pl-7',
           )}
         >
           <button
@@ -338,11 +368,16 @@ export function DockedComposer({
           ref={bodyRef}
           {...drop.handlers}
           style={sized ? { height: sized.h } : undefined}
-          className={
-            minimized
-              ? 'hidden'
-              : 'relative flex h-[min(32rem,calc(100vh-9rem))] flex-col gap-3 p-3'
-          }
+          className={cn(
+            minimized && 'hidden',
+            !minimized &&
+              (phone
+                ? // The sheet's body takes whatever the title bar leaves. A fixed
+                  // height would either clip the Send row or leave dead space above
+                  // the keyboard.
+                  'relative flex min-h-0 flex-1 flex-col gap-3 p-3'
+                : 'relative flex h-[min(32rem,calc(100vh-9rem))] flex-col gap-3 p-3'),
+          )}
         >
           {body}
           {drop.isOver && <FileDropOverlay />}

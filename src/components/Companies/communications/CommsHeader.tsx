@@ -59,8 +59,8 @@ export function CommsHeader({
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {account && (
             <>
               <Mail size={16} className="text-teal-600" />
@@ -78,7 +78,9 @@ export function CommsHeader({
             </>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        {/* Wraps rather than overflowing: with a mailbox AND a number this row can hold
+            four buttons, which is more than 390px has. */}
+        <div className="flex flex-wrap items-center gap-2">
           {/* Compose needs a mailbox; texting needs a number. A company can have
               either, both, or (before this tab is set up) neither. */}
           {account && (

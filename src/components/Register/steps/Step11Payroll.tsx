@@ -242,7 +242,7 @@ export function Step11Payroll({ data, onChange }: Props) {
       {/* Section 1 — Payroll Management */}
       <div className="flex flex-col gap-3">
         <p className="text-sm font-medium text-foreground">Should we prepare payroll checks?</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ payrollEnabled: true })}
@@ -280,7 +280,7 @@ export function Step11Payroll({ data, onChange }: Props) {
       {isCanada && (
         <div className="flex flex-col gap-3">
           <p className="text-sm font-medium text-foreground">Should we handle payroll tax filing?</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => onChange({ payrollTaxEnabled: true })}
@@ -313,7 +313,7 @@ export function Step11Payroll({ data, onChange }: Props) {
             <div className="flex flex-col gap-4 pl-1">
               <div className="flex flex-col gap-1.5">
                 <p className="text-sm font-medium text-foreground">Which type? <span className="text-xs font-normal text-muted-foreground">(select one or both)</span></p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => onChange({ payrollTaxCadEnabled: !data.payrollTaxCadEnabled })}
@@ -380,7 +380,7 @@ export function Step11Payroll({ data, onChange }: Props) {
       {isCanada && (
         <div className="flex flex-col gap-3">
           <p className="text-sm font-medium text-foreground">Should we handle payroll year-end filing?</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => onChange({ payrollYearEndEnabled: true })}

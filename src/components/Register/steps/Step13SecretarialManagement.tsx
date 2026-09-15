@@ -436,7 +436,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
             transactions. If the account is at risk of going negative, we will contact you.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ cashFlowEnabled: true, cashFlowAccounts: initCashFlowAccounts() })}
@@ -527,7 +527,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
             If not fully paid, we will notify you starting 5 days before the due date.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ creditCardEnabled: true, creditCardAccounts: initCreditCardAccounts() })}
@@ -696,7 +696,7 @@ export function Step13SecretarialManagement({ data, onChange }: Props) {
             By default we send once a month a report of missing receipt transactions.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ receiptTrackingEnabled: true })}

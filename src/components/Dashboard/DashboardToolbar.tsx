@@ -38,24 +38,27 @@ export function DashboardToolbar({
   totalCount: number;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="max-w-xs w-full">
+    // Below `sm` the search takes its own full-width row and the two selects split the
+    // next one; from `sm` up this collapses back to the single row it has always been.
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="w-full sm:max-w-xs">
         <SearchInput
           value={search}
           onChange={onSearchChange}
           placeholder="Search companies or assignees…"
-          className="h-8 text-[12px]"
+          className="h-11 text-sm sm:h-8 sm:text-[12px]"
           iconSize={13}
           clearable={false}
         />
       </div>
+      <div className="flex items-center gap-2">
       {isAdmin && (
         <Select
           items={STATUS_LABELS}
           value={statusFilter}
           onValueChange={v => onStatusFilterChange((v ?? 'all') as StatusFilter)}
         >
-          <SelectTrigger className="w-28 h-8 text-[12px]">
+          <SelectTrigger className="h-11 flex-1 text-sm sm:h-8 sm:w-28 sm:flex-none sm:text-[12px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -73,7 +76,7 @@ export function DashboardToolbar({
             onAssigneeFilterChange(!v || v === 'all' ? 'all' : Number(v))
           }
         >
-          <SelectTrigger className="w-36 h-8 text-[12px]">
+          <SelectTrigger className="h-11 flex-1 text-sm sm:h-8 sm:w-36 sm:flex-none sm:text-[12px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -87,10 +90,11 @@ export function DashboardToolbar({
         </Select>
       )}
       {showCount && (
-        <span className="text-[11px] text-muted-foreground">
-          {filteredCount} of {totalCount}
-        </span>
-      )}
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {filteredCount} of {totalCount}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

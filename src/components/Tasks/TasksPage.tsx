@@ -64,10 +64,10 @@ export function TasksPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-semibold">Tasks</h2>
+          <h2 className="text-xl font-semibold sm:text-2xl">Tasks</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Manage task templates and assign them to companies.
           </p>
@@ -215,7 +215,10 @@ function TaskRow({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3">
+    // Wraps below `sm`: the order-number field, the title block and five action buttons
+    // are ~520px of content, so the actions take their own line rather than squeezing
+    // the title to nothing.
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-background px-4 py-3">
       <div className="flex flex-col items-center gap-0.5 shrink-0">
         <input
           type="number"
@@ -232,8 +235,8 @@ function TaskRow({
           <span className="text-[10px] text-red-500 text-center leading-tight max-w-[60px]">{orderNumError}</span>
         )}
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="min-w-0 flex-1 basis-40">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <p className="font-medium text-sm">{task.title}</p>
           <span className="text-xs text-muted-foreground">{formatTaskCycle(task)}</span>
           <span className="text-xs text-muted-foreground">
@@ -245,7 +248,7 @@ function TaskRow({
         )}
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1 sm:w-auto sm:flex-nowrap">
         <button
           type="button"
           onClick={onToggleImportant}

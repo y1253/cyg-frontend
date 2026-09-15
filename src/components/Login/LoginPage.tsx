@@ -128,7 +128,9 @@ export function LoginPage() {
 
       <div
         style={{
-          minHeight: '100vh',
+          // dvh: on a phone a URL bar makes 100vh taller than the visible area, which
+          // leaves the sign-in button below the fold on first paint.
+          minHeight: '100dvh',
           display: 'flex',
           fontFamily: "'DM Sans', sans-serif",
           background: NAVY_MID,

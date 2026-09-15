@@ -12,7 +12,7 @@ export function Step2Country({ data, onChange }: Props) {
       <p className="text-sm font-medium text-foreground">
         Where is your business located?
       </p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <button
           type="button"
           onClick={() => onChange({ country: 'USA' })}

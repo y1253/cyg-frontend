@@ -107,10 +107,10 @@ export function CompanySettingsPage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto pb-24">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-4xl p-4 pb-24 sm:p-6 sm:pb-24">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-semibold">Company Settings</h2>
+          <h2 className="text-xl font-semibold sm:text-2xl">Company Settings</h2>
           <p className="text-muted-foreground text-sm mt-0.5">
             Defaults every company inherits. Any company can override them individually
             from its own Details tab.

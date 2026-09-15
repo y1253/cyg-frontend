@@ -23,7 +23,10 @@ export function FolderTabs({
   uncompletedCount: number;
 }) {
   return (
-    <div className="flex items-center gap-1 border-b">
+    // Scrolls sideways rather than wrapping: a wrapped folder row changes height as
+    // badges appear, which shifts the whole inbox down mid-read. Same treatment as the
+    // company tab strip, with the same hidden scrollbar.
+    <div className="flex items-center gap-1 overflow-x-auto overscroll-x-contain border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {FOLDERS.filter(
         // Sent / Spam / Trash are mailbox folders. With no mailbox they would render
         // as tabs that are permanently empty and can never fill.
@@ -36,7 +39,7 @@ export function FolderTabs({
             key={id}
             onClick={() => onSelectFolder(id)}
             className={[
-              'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-3 text-sm transition-colors sm:py-2',
               selectedLabel === id
                 ? 'text-teal-700 border-b-2 border-teal-600 font-medium -mb-px'
                 : 'text-muted-foreground hover:text-foreground',

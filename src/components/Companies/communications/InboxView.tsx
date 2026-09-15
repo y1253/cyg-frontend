@@ -307,12 +307,12 @@ export function InboxView({
       {/* Search + filter toolbar. Search works in every folder; the kind filter and
           multi-select are inbox-only (chats and completion state live there). */}
       <div className="flex items-center gap-2">
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <SearchInput
             value={searchInput}
             onChange={onSearchInput}
             placeholder={searchPlaceholder}
-            className="h-9"
+            className="h-11 sm:h-9"
           />
         </div>
         <AdvancedSearchPanel

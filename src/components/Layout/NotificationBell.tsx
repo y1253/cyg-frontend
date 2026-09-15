@@ -73,7 +73,12 @@ export function NotificationBell() {
         )}
       </PopoverTrigger>
 
-      <PopoverContent align="end" className="w-[26rem] gap-0 p-0">
+      <PopoverContent
+        align="end"
+        // 26rem is 416px — wider than a 390px phone, so it would be clipped or pushed
+        // off-screen. Below `sm` it takes the viewport minus the page gutters.
+        className="w-[calc(100vw-1.5rem)] gap-0 p-0 sm:w-[26rem]"
+      >
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-sm font-medium">
             {view === 'list' ? 'Notifications' : 'Alert settings'}

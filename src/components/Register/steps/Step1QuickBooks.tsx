@@ -28,7 +28,7 @@ export function Step1QuickBooks({ data, onChange }: Props) {
         <p className="mb-3 text-sm font-medium text-foreground">
           Do you already have a QuickBooks account?
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => onChange({ hasQbAccount: true, qbPlan: null })}

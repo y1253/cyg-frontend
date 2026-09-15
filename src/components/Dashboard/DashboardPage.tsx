@@ -85,10 +85,10 @@ export function DashboardPage() {
   });
 
   return (
-    <div className="px-6 py-6 max-w-4xl mx-auto flex flex-col gap-5">
+    <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-6">
 
       {/* Page header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <h1 className="text-[15px] font-semibold tracking-tight">
             {isAdmin ? 'All Companies' : 'My Companies'}

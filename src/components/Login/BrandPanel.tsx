@@ -5,10 +5,14 @@ import { NAVY_DEEP, TEAL, TEXT_PRIMARY } from './loginTheme';
 export function BrandPanel() {
   return (
     <div
+      // ⚠️ `display` is NOT in this style object, and must not go back into it.
+      // An inline style beats a class, so `display: 'flex'` here made the `hidden`
+      // below inert — the brand panel rendered on every phone, taking 44% of a 390px
+      // screen and pushing the login form into a horizontal scroll. The class owns
+      // display; the inline style owns everything the design brief fixed in pixels.
       style={{
         width: '44%',
         background: NAVY_DEEP,
-        display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '56px 60px',

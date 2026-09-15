@@ -66,7 +66,7 @@ export function Step5LegalInfo({ data, onChange }: Props) {
         The following information is required for Canadian businesses. Please fill in all fields.
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="neq">
             NEQ <span className="text-destructive">*</span>
@@ -92,7 +92,7 @@ export function Step5LegalInfo({ data, onChange }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="craBn">
             CRA Business Number <span className="text-destructive">*</span>

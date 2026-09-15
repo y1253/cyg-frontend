@@ -40,7 +40,7 @@ export function ArchivedPage() {
   const { data: companies = [], isLoading } = useDeletedCompanies();
 
   return (
-    <div className="px-6 py-6 max-w-4xl mx-auto flex flex-col gap-5">
+    <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-6">
       <div>
         <h1 className="text-[15px] font-semibold tracking-tight">Archived Companies</h1>
         <p className="text-[11px] text-muted-foreground mt-0.5">

@@ -90,7 +90,7 @@ export function InboxRow({
   return (
     <div
       className={[
-        'relative flex items-start gap-3 px-4 py-3.5 transition-colors cursor-pointer',
+        'relative flex cursor-pointer items-start gap-2.5 px-3 py-3.5 transition-colors sm:gap-3 sm:px-4',
         item.kind === 'email' ? 'group' : '',
         selectionMode && selected
           ? 'bg-teal-50/70 hover:bg-teal-50'

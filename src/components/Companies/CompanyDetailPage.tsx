@@ -1116,13 +1116,16 @@ function TabBar({
   ];
 
   return (
-    <div className="flex border-b">
+    // Six tabs at `px-5` need ~620px, which no phone has. The STRIP scrolls sideways —
+    // never the page — and `[scrollbar-width:none]` keeps a desktop scrollbar from
+    // appearing under a row that fits perfectly well there.
+    <div className="flex overflow-x-auto overscroll-x-contain border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {tabs.map(({ key, label }) => (
         <button
           key={key}
           type="button"
           onClick={() => onChange(key)}
-          className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`shrink-0 whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors sm:px-5 sm:py-2.5 ${
             active === key
               ? 'border-primary text-primary'
               : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -2485,7 +2488,7 @@ export function CompanyDetailPage() {
   if (isInternal) {
     return (
       <div className="flex flex-col h-full">
-        <div className="px-6 pt-6 pb-0">
+        <div className="px-4 pt-4 pb-0 sm:px-6 sm:pt-6">
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-bold text-teal-800">{company.businessName}</h1>
             <Badge className="bg-teal-100 text-teal-800 hover:bg-teal-100">Internal</Badge>
@@ -2501,7 +2504,7 @@ export function CompanyDetailPage() {
             isInternal
           />
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {/* Communications stays mounted while Links is showing so an open thread, an
               open call and a half-typed reply survive the tab switch (same contract as
               a client company's Communications tab). */}
@@ -2520,7 +2523,7 @@ export function CompanyDetailPage() {
     <div className="flex flex-col h-full">
       {/* Archive banner */}
       {isArchived && (
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3">
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 sm:px-6 flex items-center gap-3">
           <Archive size={15} className="text-amber-600 shrink-0" />
           <p className="text-sm text-amber-800 flex-1">
             This company was archived on{' '}
@@ -2556,7 +2559,7 @@ export function CompanyDetailPage() {
       )}
 
       {/* Page header */}
-      <div className={headerCollapsed ? 'px-6 pt-3 pb-0' : 'px-6 pt-6 pb-0'}>
+      <div className={headerCollapsed ? 'px-4 pt-3 pb-0 sm:px-6' : 'px-4 pt-4 pb-0 sm:px-6 sm:pt-6'}>
         <div className={`flex items-center gap-3 ${headerCollapsed ? 'mb-0.5' : 'mb-1'}`}>
           <button
             type="button"
@@ -2566,25 +2569,34 @@ export function CompanyDetailPage() {
           >
             {headerCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
-          <h1 className="text-2xl font-bold">{company.businessName}</h1>
-          <Badge variant={company.status ? 'default' : 'secondary'}>
+          {/* `min-w-0` + `truncate`: a long business name would otherwise widen the flex
+              row past the viewport and take the whole page into a sideways scroll. */}
+          <h1 className="min-w-0 flex-1 truncate text-lg font-bold sm:text-2xl">
+            {company.businessName}
+          </h1>
+          <Badge
+            variant={company.status ? 'default' : 'secondary'}
+            className="shrink-0"
+          >
             {company.status ? 'Active' : 'Inactive'}
           </Badge>
           {isAdmin && !isArchived && (
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="shrink-0 gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={() => setShowDeleteConfirm(true)}
             >
               <Trash2 size={14} />
-              Delete Company
+              {/* The icon alone carries it on a phone; the label is what makes the
+                  button too wide to sit beside a name and a status badge. */}
+              <span className="hidden sm:inline">Delete Company</span>
             </Button>
           )}
         </div>
         {!headerCollapsed && (
           <>
-            <p className="text-sm text-muted-foreground mb-4">
+            <p className="mb-4 text-xs text-muted-foreground sm:text-sm">
               {company.country ?? '—'} · Registered {formatDate(company.createdAt)} ·{' '}
               {company.assignedUser
                 ? <>Assigned to <span className="font-medium text-foreground">{company.assignedUser.name}</span></>
@@ -2602,7 +2614,7 @@ export function CompanyDetailPage() {
             </p>
 
             {/* Stats */}
-            <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-4 sm:gap-3 lg:grid-cols-4">
               <div className="rounded-lg border bg-background px-4 py-3 text-center">
                 <p className="text-2xl font-bold">{openTodos.length}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Open Tasks</p>
@@ -2654,7 +2666,7 @@ export function CompanyDetailPage() {
       </div>
 
       {/* Tab content */}
-      <div ref={contentRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+      <div ref={contentRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
 
         {/* ── Details tab ── */}
         {tab === 'details' && (
@@ -2681,7 +2693,7 @@ export function CompanyDetailPage() {
               )}
               <CardContent>
                 {editSection === 'info' ? (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="flex flex-col gap-1">
                       <Label className="text-xs">Business Name</Label>
                       <Input className="h-8 text-sm" value={infoForm.businessName}
@@ -2785,7 +2797,7 @@ export function CompanyDetailPage() {
               )}
               <CardContent>
                 {editSection === 'contact' ? (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {[
                       { key: 'personalName', label: 'Name' },
                       { key: 'privateEmail', label: 'Email' },
@@ -2830,7 +2842,7 @@ export function CompanyDetailPage() {
                 )}
                 <CardContent>
                   {editSection === 'legal' ? (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {[
                         { key: 'neq',         label: 'NEQ' },
                         { key: 'revenueQcId', label: 'Revenue QC ID' },
@@ -2881,7 +2893,7 @@ export function CompanyDetailPage() {
               )}
               <CardContent>
                 {editSection === 'accountant' ? (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {[
                       { key: 'accountantName',  label: 'Name' },
                       { key: 'accountantEmail', label: 'Email' },
@@ -2920,7 +2932,7 @@ export function CompanyDetailPage() {
                 />
                 <CardContent>
                   {editSection === 'billing' ? (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="flex flex-col gap-1">
                         <Label className="text-xs">Billing Email</Label>
                         <Input className="h-8 text-sm" type="email"

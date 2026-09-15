@@ -74,10 +74,10 @@ export function UsersPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-semibold">Users</h2>
+          <h2 className="text-xl font-semibold sm:text-2xl">Users</h2>
           <p className="text-muted-foreground text-sm mt-0.5">
             Manage team members and their roles.
           </p>
@@ -87,7 +87,7 @@ export function UsersPage() {
 
       {/* Search + role filter */}
       {!isLoading && users.length > 0 && (
-        <div className="flex gap-2 mb-4">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">
             <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
             <Input
