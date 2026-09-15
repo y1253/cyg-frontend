@@ -74,7 +74,16 @@ export function CallDetailView({
   const recordings = data?.recordings;
   const markUnread = useMarkPhoneItem(companyId, 'unread');
 
-  const outcome = call?.outcome ?? 'answered';
+  /**
+   * ⚠️ NULL when we do not know, never a default.
+   *
+   * This used to be `call?.outcome ?? 'answered'`, and `call` is null whenever this view
+   * is opened without its inbox row in hand — from the notification feed, or after a
+   * refresh straight into the URL. It then showed a green **Answered** badge for a call
+   * it knew nothing about. A missed call wrongly marked answered is the one thing this
+   * screen must never say, so with no data it says nothing.
+   */
+  const outcome = call?.outcome ?? null;
   // A voicemail is a missed call that left something behind, so it is checked FIRST --
   // every one of them also satisfies `outcome === 'missed'`.
   const isVoicemail = call?.hasVoicemail ?? false;
@@ -150,9 +159,13 @@ export function CallDetailView({
           <div
             className={[
               'flex size-12 shrink-0 items-center justify-center rounded-full',
-              outcome === 'missed' || outcome === 'failed'
-                ? 'bg-red-100 text-red-600'
-                : 'bg-green-100 text-green-700',
+              // Neutral while the outcome is unknown: green here reads as "answered"
+              // just as loudly as the badge does.
+              outcome === null
+                ? 'bg-muted text-muted-foreground'
+                : outcome === 'missed' || outcome === 'failed'
+                  ? 'bg-red-100 text-red-600'
+                  : 'bg-green-100 text-green-700',
             ].join(' ')}
           >
             <DirectionIcon size={20} />
@@ -172,9 +185,11 @@ export function CallDetailView({
               {call ? formatEmailDate(call.at) : ''}
             </p>
           </div>
-          <Badge variant="outline" className={`ml-auto ${OUTCOME_STYLE[outcome]}`}>
-            {isVoicemail ? 'Voicemail' : OUTCOME_LABEL[outcome]}
-          </Badge>
+          {outcome && (
+            <Badge variant="outline" className={`ml-auto ${OUTCOME_STYLE[outcome]}`}>
+              {isVoicemail ? 'Voicemail' : OUTCOME_LABEL[outcome]}
+            </Badge>
+          )}
         </div>
 
         {call && (
