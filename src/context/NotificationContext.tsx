@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useTabMissedCallBadge } from '@/hooks/useTabMissedCallBadge';
 import { fetchLatestPreview } from '@/api/communications';
 import { messagePreview } from '@/lib/notificationText';
 import {
@@ -491,6 +492,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     isSuppressed,
     onInternalWorkspaceId,
   });
+
+  // The red missed-call number on the browser tab icon while the tab is in the
+  // background. Mounted here for the same reason as the notifier above: this is the one
+  // app-wide, signed-in place, and it shares the same summary query.
+  useTabMissedCallBadge();
 
   const setSound = useCallback((on: boolean) => {
     setPrefs((p) => ({ ...p, sound: on }));

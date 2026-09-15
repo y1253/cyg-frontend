@@ -194,9 +194,14 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // The one tab that is not a mail folder. It renders no messages and fetches nothing
   // from a provider, so it has to be kept out of `emailLabel`'s fall-through below.
   const isContacts = selectedLabel === CONTACTS_FOLDER;
+  // Missed calls lists phone rows only. The mail, chat and WhatsApp sources are switched
+  // off while it is open: none of their rows could match, and the auto-fill that backs
+  // the badge would otherwise page through a whole mailbox looking for calls.
+  const isMissed = selectedLabel === 'MISSED';
   // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
   // they get the clamp relaxed + a target-driven auto-load so the list backs the badge.
-  const isFilteredFolder = selectedLabel === 'UNREAD' || selectedLabel === 'UNCOMPLETED';
+  const isFilteredFolder =
+    selectedLabel === 'UNREAD' || selectedLabel === 'UNCOMPLETED' || isMissed;
   // The Gmail label to actually fetch. UNREAD fetches the unread-filtered inbox
   // directly (Gmail ANDs the labels) so every unread row arrives in ~1 page. UNCOMPLETED
   // has no Gmail label (completed is app state), so it hits a server virtual folder that
@@ -241,7 +246,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     // `!isContacts` is load-bearing: `emailLabel` falls through to `selectedLabel` for
     // any folder that is not one of the special cases, so without this the Contacts tab
     // would ask Gmail/Graph for a label literally named CONTACTS on every open.
-    active && !!account && !isContacts,
+    active && !!account && !isContacts && !isMissed,
     searchParams,
     searchKey,
   );
@@ -252,7 +257,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     // substring scan over sender/space/text, so handing it one could only ever
     // produce garbage matches — search chats by free text alone.
     isInboxLike && !isStructuredSearch(filters) ? activeSearch : undefined,
-    active && chatSupported && !filters.excludeChats,
+    active && chatSupported && !filters.excludeChats && !isMissed,
   );
 
   const { data: unreadData } = useGmailUnreadCount(companyId, account);
@@ -281,6 +286,10 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     supportNumberRow !== undefined
       ? (supportNumberRow?.phoneNumber ?? null)
       : (company?.supportNumber ?? null);
+  // A restored Missed calls folder on a company that has no number (released since, or
+  // a stale blob) would sit on a tab the strip no longer shows. `null` is the answered
+  // "no number"; `undefined` is still loading and must not bounce the user.
+  if (isMissed && supportNumberRow === null) setSelectedLabel('INBOX');
   const phoneQuery = usePhoneTimeline(companyId, !!supportNumber, active);
   const { data: phoneCountData } = usePhoneCounts(companyId, !!supportNumber, active);
 
@@ -304,6 +313,8 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     (uncompletedData?.count ?? 0) +
     (phoneCountData?.uncompleted ?? 0) +
     (whatsappCountData?.uncompleted ?? 0);
+  // Missed calls exist on the phone channel alone, so there is nothing to add to it.
+  const missedCount = phoneCountData?.missedUnread ?? 0;
 
   const {
     emailItems, chatItems, phoneItems, whatsappItems, visibleItems, loadMoreRef,
@@ -315,7 +326,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     phoneEnabled: !!supportNumber,
     whatsappQuery,
     // WhatsApp has no server-side search; an unsearched source would pad every result.
-    whatsappEnabled: !activeSearch,
+    whatsappEnabled: !activeSearch && !isMissed,
     isInboxLike,
     isFilteredFolder,
     selectedLabel,
@@ -326,7 +337,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         ? unreadCount
         : selectedLabel === 'UNCOMPLETED'
           ? uncompletedCount
-          : undefined,
+          : isMissed
+            ? missedCount
+            : undefined,
     // One key instead of one dep per kind: the observer only needs to know that the
     // list unmounted and came back, not which view was open.
     detailOpenKey: selected ? `${selected.kind}:${JSON.stringify(selected)}` : null,
@@ -1148,6 +1161,8 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onSelectFolder={handleSelectFolder}
           unreadCount={unreadCount}
           uncompletedCount={uncompletedCount}
+          missedCount={missedCount}
+          hasPhone={!!supportNumber}
           supportNumber={supportNumber}
           onCall={handleCall}
           callBlockedReason={callBlocked}
@@ -1236,6 +1251,8 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         chatItemCount={chatItems.length}
         unreadCount={unreadCount}
         uncompletedCount={uncompletedCount}
+        missedCount={missedCount}
+        hasPhone={!!supportNumber}
         newEmailBanner={newEmailBanner}
         onDismissNewEmailBanner={() => setNewEmailBanner(false)}
         stateError={stateError}

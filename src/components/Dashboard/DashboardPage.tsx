@@ -18,7 +18,8 @@ export function DashboardPage() {
 
   const { data: allCompanies = [], isLoading } = useCompanies();
   // Resolves after the company list — badges fill in once it lands.
-  const { uncompleted: uncompletedCounts } = useInboxSummary();
+  const { uncompleted: uncompletedCounts, missedCalls: missedCallCounts } =
+    useInboxSummary();
 
   // The internal "Cyg Finance" workspace is pinned to the top and excluded from
   // search, filters and the stats strip — it is not a client company. The server
@@ -125,6 +126,7 @@ export function DashboardPage() {
           company={internalCompany}
           internal
           uncompleted={uncompletedCounts?.[internalCompany.id]}
+          missedCalls={missedCallCounts?.[internalCompany.id]}
           onClick={() => navigate(`/companies/${internalCompany.id}`)}
         />
       )}
@@ -143,6 +145,7 @@ export function DashboardPage() {
               key={company.id}
               company={company}
               uncompleted={uncompletedCounts?.[company.id]}
+              missedCalls={missedCallCounts?.[company.id]}
               onClick={() => navigate(`/companies/${company.id}`)}
             />
           ))}

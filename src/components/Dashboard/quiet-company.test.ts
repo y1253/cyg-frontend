@@ -36,6 +36,15 @@ describe('isQuietCompany', () => {
     expect(isQuietCompany(quiet(), 1, false)).toBe(false);
   });
 
+  it('is not quiet while a missed call is waiting — its red badge is a call to action', () => {
+    expect(isQuietCompany(quiet(), 0, false, 2)).toBe(false);
+  });
+
+  it('stays quiet with zero or unknown missed calls', () => {
+    expect(isQuietCompany(quiet(), 0, false, 0)).toBe(true);
+    expect(isQuietCompany(quiet(), 0, false, undefined)).toBe(true);
+  });
+
   describe('any single tag keeps the row at full weight', () => {
     it('unassigned', () => {
       expect(isQuietCompany(quiet({ assignedUser: null }), 0, false)).toBe(

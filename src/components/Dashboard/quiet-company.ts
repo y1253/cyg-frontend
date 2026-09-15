@@ -22,12 +22,15 @@ export function isQuietCompany(
   company: CompanySummary,
   uncompleted: number | undefined,
   internal: boolean,
+  /** Unread missed calls. A red badge is a call to action, so any at all is not quiet. */
+  missedCalls: number | undefined = undefined,
 ): boolean {
   // The internal workspace has its own teal treatment and no todos apply to it.
   if (internal) return false;
 
   return (
     (uncompleted === undefined || uncompleted === 0) &&
+    (missedCalls === undefined || missedCalls === 0) &&
     company.totalTodos === 0 &&
     company.urgentTodos === 0 &&
     company.importantTodos === 0 &&

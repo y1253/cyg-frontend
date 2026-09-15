@@ -1,6 +1,7 @@
 import {
   Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle, FileText,
-  MessageSquare, Phone, MessageSquareText, MessageCircle, Contact, type LucideIcon,
+  MessageSquare, Phone, MessageSquareText, MessageCircle, Contact, PhoneMissed,
+  type LucideIcon,
 } from 'lucide-react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
 import type { CallItem, SmsItem } from '@/api/phone';
@@ -10,6 +11,9 @@ export const FOLDERS = [
   { id: 'INBOX', label: 'Inbox', icon: Inbox },
   { id: 'UNCOMPLETED', label: 'Uncompleted', icon: Circle },
   { id: 'UNREAD', label: 'Unread', icon: Mail },
+  // Unread missed calls and voicemails. A filtered view over the same merged inbox as
+  // UNREAD, narrowed to one kind of row — see `isUnreadMissedCall`.
+  { id: 'MISSED', label: 'Missed calls', icon: PhoneMissed },
   { id: 'DRAFTS', label: 'Drafts', icon: FileText },
   { id: 'SENT', label: 'Sent', icon: SendHorizonal },
   { id: 'SPAM', label: 'Spam', icon: AlertOctagon },
@@ -34,14 +38,19 @@ export const ALL_LABELS: string[] = FOLDERS.map((f) => f.id);
 /** Folders that need a connected mailbox. Phone-only companies never see them. */
 export const MAILBOX_ONLY_FOLDERS = ['DRAFTS', 'SENT', 'SPAM', 'TRASH'];
 
+/** Folders that need a support number. A company without one could never fill them. */
+export const PHONE_ONLY_FOLDERS = ['MISSED'];
+
 // Tabs backed by the unified INBOX view (emails + chats + calls + texts).
 // DRAFTS is deliberately NOT one of them: it is an email-only folder like SENT, so it
 // renders straight off emailItems with no merge against chats and calls, no kind
 // filter, and no watermark clamp. Adding it here would time-sort unsent drafts in
 // among incoming calls and texts.
 // UNCOMPLETED and UNREAD fetch the same INBOX data and apply a forced
-// completion/read filter on top.
-export const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD'];
+// completion/read filter on top. MISSED does too, narrowed to unread missed calls — and
+// CommunicationsTab switches the mail, chat and WhatsApp sources off while it is open,
+// since none of their rows could ever match.
+export const INBOX_TABS = ['INBOX', 'UNCOMPLETED', 'UNREAD', 'MISSED'];
 
 /**
  * PAGINATION units vs RENDER units — they are deliberately not the same.
@@ -86,6 +95,25 @@ export function matchesKindFilter(item: UnifiedItem, filter: KindFilter): boolea
   if (filter === 'voicemail')
     return item.kind === 'call' && item.data.hasVoicemail;
   return item.kind === filter;
+}
+
+/**
+ * An UNREAD MISSED CALL — what the Missed calls folder lists.
+ *
+ * Voicemails match with no clause of their own: the server only sets `hasVoicemail` on an
+ * inbound call whose outcome is `missed`. Outbound rows never match — a call we placed
+ * that nobody answered is not a caller waiting on us.
+ *
+ * ⚠️ Mirrors `isUnreadMissedCall` in server `phone/phone-timeline.util.ts`, which is what
+ * the folder's BADGE counts with. If the two disagree, the list and its number disagree.
+ */
+export function isUnreadMissedCall(item: UnifiedItem): boolean {
+  return (
+    item.kind === 'call' &&
+    item.data.direction === 'inbound' &&
+    item.data.outcome === 'missed' &&
+    !item.data.isRead
+  );
 }
 
 export type UnifiedItem =

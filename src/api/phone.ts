@@ -409,18 +409,25 @@ export async function fetchCallRecordings(
   return res.json() as Promise<CallRecordingsResult>;
 }
 
-/** Unread / uncompleted phone counts for this company's folder badges. */
+export interface PhoneCounts {
+  unread: number;
+  uncompleted: number;
+  /** Unread inbound missed calls, voicemails included — the Missed calls folder badge. */
+  missedUnread: number;
+}
+
+/** Unread / uncompleted / missed phone counts for this company's folder badges. */
 export async function fetchPhoneCounts(
   token: string,
   companyId: number,
-): Promise<{ unread: number; uncompleted: number }> {
+): Promise<PhoneCounts> {
   const res = await fetchWithAuth(
     token,
     `${API}/phone/companies/${companyId}/counts`,
     { headers: JSON_HEADERS },
   );
-  if (!res.ok) return { unread: 0, uncompleted: 0 };
-  return res.json() as Promise<{ unread: number; uncompleted: number }>;
+  if (!res.ok) return { unread: 0, uncompleted: 0, missedUnread: 0 };
+  return res.json() as Promise<PhoneCounts>;
 }
 
 /**

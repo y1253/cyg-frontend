@@ -63,6 +63,13 @@ export function useMarkFeedItemRead() {
             queryKey: ['phone-timeline', item.companyId],
           });
           void qc.invalidateQueries({ queryKey: ['phone-counts', item.companyId] });
+          // A call read from the bell may have been a missed one: refresh the dashboard
+          // and tab badges. Unlike the feed rows this IS fresh straight away — the phone
+          // mark routes recount the company into the server cache before responding —
+          // and the row itself stays hidden through the dismiss store above.
+          if (item.kind === 'call') {
+            void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
+          }
           break;
         case 'whatsapp':
           void qc.invalidateQueries({

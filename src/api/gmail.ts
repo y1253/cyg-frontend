@@ -541,6 +541,13 @@ export type UnreadFeedItem =
 export interface InboxSummary {
   /** Companies with nothing connected are ABSENT — absent means unknown, not zero. */
   uncompleted: Record<string, number>;
+  /**
+   * Unread missed calls (voicemails included) per company — GLOBAL, like `uncompleted`,
+   * and absent means unknown in the same way.
+   */
+  missedCalls: Record<string, number>;
+  /** The same, summed over the caller's OWN companies — the browser tab badge. */
+  missedCallsOwn: number;
   unread: UnreadFeedItem[];
   /** A cap was hit, so the badge reads "50+" rather than a precise total. */
   truncated: boolean;

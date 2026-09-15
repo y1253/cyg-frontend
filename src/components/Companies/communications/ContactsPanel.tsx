@@ -29,6 +29,8 @@ export function ContactsPanel({
   onSelectFolder,
   unreadCount,
   uncompletedCount,
+  missedCount,
+  hasPhone,
   supportNumber,
   onCall,
   onText,
@@ -40,6 +42,8 @@ export function ContactsPanel({
   onSelectFolder: (id: string) => void;
   unreadCount: number;
   uncompletedCount: number;
+  missedCount: number;
+  hasPhone: boolean;
   /** Null when this company has no line, which hides Call and Text. */
   supportNumber: string | null;
   onCall: (e164: string) => void;
@@ -89,6 +93,8 @@ export function ContactsPanel({
         onSelectFolder={onSelectFolder}
         unreadCount={unreadCount}
         uncompletedCount={uncompletedCount}
+        missedCount={missedCount}
+        hasPhone={hasPhone}
       />
 
       <div className="flex items-center gap-2">

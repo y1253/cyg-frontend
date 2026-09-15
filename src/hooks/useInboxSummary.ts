@@ -47,6 +47,10 @@ export function useInboxSummary() {
     ...query,
     /** GLOBAL — every company. Absent key means unknown, NOT zero. */
     uncompleted: query.data?.uncompleted,
+    /** GLOBAL unread missed calls per company. Absent key means unknown, NOT zero. */
+    missedCalls: query.data?.missedCalls,
+    /** ASSIGNMENT-SCOPED total of the same — the red number on the browser tab. */
+    missedCallsOwn: query.data?.missedCallsOwn ?? 0,
     /** ASSIGNMENT-SCOPED — only companies this user is responsible for. */
     unread,
     /** The bell's badge. One source with the list, so they can never disagree. */

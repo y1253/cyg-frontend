@@ -92,12 +92,16 @@ export async function fetchInternalCalls(
 
 export async function fetchInternalCallCounts(
   token: string,
-): Promise<{ unread: number; uncompleted: number }> {
+): Promise<{ unread: number; uncompleted: number; missedUnread: number }> {
   const res = await fetchWithAuth(token, `${API}/internal-calls/counts`, {
     method: 'GET',
   });
   await throwOnError(res, 'Failed to load your call counts');
-  return res.json() as Promise<{ unread: number; uncompleted: number }>;
+  return res.json() as Promise<{
+    unread: number;
+    uncompleted: number;
+    missedUnread: number;
+  }>;
 }
 
 /**
