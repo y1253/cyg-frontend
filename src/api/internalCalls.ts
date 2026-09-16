@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './client';
+import { markDialedHere } from '@/lib/dialIntent';
 import type {
   CallSummary,
   ConferenceStatus,
@@ -128,6 +129,10 @@ export async function startInternalCall(
   token: string,
   calleeId: number,
 ): Promise<{ callSid: string; peer: { id: number; name: string } }> {
+  // BEFORE the request — this is the path that was losing its own calls. See
+  // `dialIntent.ts`; leg 1 here carries no SIP marker at all, so being the tab that
+  // dialled is the only thing distinguishing us from every other browser on the account.
+  markDialedHere();
   const res = await fetchWithAuth(token, `${API}/internal-calls`, {
     method: 'POST',
     headers: JSON_HEADERS,

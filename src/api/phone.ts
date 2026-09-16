@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './client';
+import { markDialedHere } from '@/lib/dialIntent';
 
 const API = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -169,14 +170,25 @@ export async function fetchPendingCalls(
     const res = await fetchWithAuth(token, `${API}/phone/pending-calls`, {
       headers: JSON_HEADERS,
     });
-    if (!res.ok) return [];
+    // Every failure below still returns [] — a poll that cannot answer must never break
+    // the INVITE path — but it now SAYS so. Until this line, a 401, a 404, an empty body
+    // and a genuine "no event yet" were indistinguishable in the console, which made a
+    // caller who never learned about their own call impossible to tell apart from one
+    // whose event simply had not been written yet.
+    if (!res.ok) {
+      console.warn('[softphone] pending-calls failed', res.status);
+      return [];
+    }
     const text = await res.text();
     if (!text) return [];
     const parsed: unknown = JSON.parse(text);
-    return Array.isArray(parsed)
-      ? (parsed as (IncomingCallPayload & { type: string })[])
-      : [];
-  } catch {
+    if (!Array.isArray(parsed)) {
+      console.warn('[softphone] pending-calls returned a non-array');
+      return [];
+    }
+    return parsed as (IncomingCallPayload & { type: string })[];
+  } catch (err) {
+    console.warn('[softphone] pending-calls threw', err);
     return [];
   }
 }
@@ -371,6 +383,9 @@ export async function startCall(
   companyId: number,
   to: string,
 ): Promise<{ callSid: string; to: string; companyName: string }> {
+  // BEFORE the request, not after it resolves: SignalWire forks our leg the moment the
+  // POST is accepted, so the INVITE can beat the response back. See `dialIntent.ts`.
+  markDialedHere();
   const res = await fetchWithAuth(
     token,
     `${API}/phone/companies/${companyId}/calls`,

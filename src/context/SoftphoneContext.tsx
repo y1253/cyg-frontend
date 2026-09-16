@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { dialedHere } from '@/lib/dialIntent';
+import { invitePairsWith, type InviteMarkers } from './invite-pairing';
 import {
   Invitation,
   Registerer,
@@ -91,10 +93,6 @@ function audioSenderOf(session: Session | null): RTCRtpSender | undefined {
  * separate names on purpose — see `ringAndDial` on the server: reusing `X-Cyg-Call` for
  * company calls would make an older cached client build refuse every inbound call.
  */
-interface InviteMarkers {
-  call: string | null;
-  leg: string | null;
-}
 
 /**
  * Both markers on an INVITE.
@@ -115,30 +113,6 @@ function markersOf(invitation: Invitation): InviteMarkers {
   return { call: read('X-Cyg-Call'), leg: read('X-Cyg-Leg') };
 }
 
-/**
- * Does this INVITE belong to this event?
- *
- * ── WHY THIS IS NOT JUST AN EQUALITY TEST ANY MORE ─────────────────────────────
- * With call waiting the browser can be holding SEVERAL INVITEs and SEVERAL events at
- * once, and it used to pair whatever it had with whatever it had — which across two
- * concurrent calls means labelling caller B with company A.
- *
- * ⚠️ The leg marker is ADVISORY, never required. `<Sip>` URI parameters arriving as SIP
- * headers is still unverified against the live SignalWire account, so an absent marker
- * falls through to order-based matching — exactly what this file did before. If headers
- * are never delivered, nothing regresses; if they are, every pairing is exact. The log
- * line in `pair` says which happened, from real traffic, with no deploy.
- */
-function invitePairsWith(markers: InviteMarkers, info: IncomingCallInfo): boolean {
-  // An INTERNAL callee's event names the token its own leg must carry. Unchanged rule.
-  if (info.token != null) return markers.call === info.token;
-  // Every other event is a company call, or an internal CALLER's own leg. Neither
-  // carries a token, so an INVITE that carries one is somebody else's leg.
-  if (markers.call != null) return false;
-  // A company leg's marker is the call's own sid.
-  if (markers.leg != null) return markers.leg === info.callSid;
-  return true;
-}
 
 /** Where the SIP registration currently stands. Surfaced so it is never a mystery. */
 export type SoftphoneStatus =
@@ -958,7 +932,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       // agent answers it, which is what stops a second ring hijacking a live conversation.
       if (activeIdRef.current === null) activeIdRef.current = id;
 
-      log('paired call', path, info.companyName, info.from, id);
+      // `callSid` is here so a client log can be lined up against the server's own
+      // `internal call X -> Y sid=...`; without it the two cannot be correlated.
+      log('paired call', path, info.callSid, info.companyName, info.from, id);
 
       if (info.direction === 'outbound') {
         // The user already clicked "Call"; making them then click "Answer" to reach the
@@ -1048,11 +1024,24 @@ Transferred by ${info.transferFrom.name}`
       (e) => now - e.at <= EVENT_STALE_MS,
     );
 
+    const fromThisTab = dialedHere(now);
+
     for (const held of [...invitesRef.current]) {
       const info = eventsRef.current.find((e) =>
-        invitePairsWith(held.markers, e),
+        invitePairsWith(held.markers, e, fromThisTab),
       );
-      if (!info) continue;
+      if (!info) {
+        // Nothing was logged here before, so a failed pair was invisible until the
+        // 33s release line — which carries no sid and no reason.
+        log(
+          'no pair for INVITE',
+          held.markers.leg ?? held.markers.call ?? 'unmarked',
+          `held=${invitesRef.current.length}`,
+          `events=${eventsRef.current.length}`,
+          `dialedHere=${fromThisTab}`,
+        );
+        continue;
+      }
       const exact = held.markers.call !== null || held.markers.leg !== null;
       pair(held, info, exact ? 'marker' : 'order');
     }

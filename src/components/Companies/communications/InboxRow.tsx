@@ -549,11 +549,20 @@ function SmsRowBody({
 }
 
 /**
- * "Call this number", on every call and text row.
+ * "Call this number", on every call, text and WhatsApp row.
  *
  * `stopPropagation` so it dials instead of opening the row — a click that silently
  * placed a phone call when the user meant to read the message would be the worst
  * possible misfire on this screen.
+ *
+ * ── WHY IT IS NEUTRAL AND NOT GREEN ───────────────────────────────────────────
+ * It used to wear `KIND_STYLES.call`'s green, which put two near-identical greens on one
+ * line of a WHATSAPP row — emerald channel badge beside a green action pill — and read as
+ * the row being mislabelled "Call". Picking some third hue only moves the collision: all
+ * five channel colours are spoken for (teal/blue email, purple chat, green call, amber
+ * text, emerald WhatsApp). Neutral cannot collide with any of them, and it is also the
+ * truer signal — this is an ACTION available on a row, not the row's channel. It fixes the
+ * same latent clash on a call row, where green-on-green meant two different things.
  */
 function CallBackButton({
   number,
@@ -581,7 +590,7 @@ function CallBackButton({
           e.stopPropagation();
           onCall(number);
         }}
-        className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 hover:bg-green-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-50"
+        className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-muted/60 disabled:hover:text-muted-foreground"
       >
         <KIND_STYLES.call.Icon size={10} />
         Call
