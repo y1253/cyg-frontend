@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, CheckCircle2, MailOpen, MessageSquareText, Phone, Printer, Send,
+  ArrowLeft, CheckCircle2, MailOpen, MessageSquareText, Phone, Printer, Reply, Send, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { formatE164 } from '@/lib/phone';
 import { formatEmailDate, openPrintWindow, escapeHtml } from '../message-utils';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
+import { buildSmsReplyBody, smsQuoteCost, smsReplyBudget } from './sms-reply';
 
 /**
  * A GSM-7 message fits 160 characters, 153 once it is split across segments; any
@@ -43,9 +44,13 @@ function segmentsFor(text: string): { segments: number; unicode: boolean } {
  * CLIENT-side — the server returns the whole conversation and everything newer than
  * the anchor is dimmed, so a later message is visible but visibly later.
  *
- * `ChatBubble` is not reused: it is built around `ChatMessage`'s sender names, quoted
- * messages and attachments, none of which an SMS has. A small bubble of its own is
- * less code than the props it would take to neuter that one.
+ * `ChatBubble` is still not reused, though half the original reason has expired now that
+ * a text can quote a message. What remains is enough: it is built around `ChatMessage`'s
+ * sender names and attachments, and around a STRUCTURAL quote resolved against the loaded
+ * thread. An SMS quote is neither of those — it is plain text prepended to the body,
+ * because SMS has no native quoting and nothing about a text is stored on our side (see
+ * `sms-reply.ts`). A small bubble of its own is still less code than the props it would
+ * take to neuter that one.
  */
 export function SmsThreadView({
   companyId,
@@ -116,14 +121,37 @@ export function SmsThreadView({
     return () => obs.disconnect();
   }, [messages.length]);
 
-  const { segments, unicode } = segmentsFor(draft);
+  /**
+   * The message this reply quotes.
+   *
+   * `undefined` means "not chosen yet", which resolves to the ANCHOR — the message the
+   * user opened, and the one the thread is frozen at. `null` means they cleared it, which
+   * is how a plain non-reply is sent from inside a conversation. The two cannot be one
+   * value: without the distinction, clearing the quote would immediately fall back to the
+   * anchor again and the X would do nothing.
+   */
+  const [quotePick, setQuotePick] = useState<SmsItem | null | undefined>(undefined);
+  const anchorMessage = messages.find((m) => m.id === anchorMsgId) ?? null;
+  const quoted = quotePick === undefined ? anchorMessage : quotePick;
+
+  // Assembled here rather than on the server so the counter below is the truth: the
+  // quote is part of the message the customer receives, and it is billed as such.
+  const outgoing = buildSmsReplyBody(quoted?.body, draft);
+  const { segments, unicode } = segmentsFor(outgoing);
 
   const handleSend = () => {
-    const body = draft.trim();
-    if (!body) return;
+    const body = outgoing.trim();
+    if (!draft.trim()) return;
     sendMutation.mutate(
       { to: peer, body },
-      { onSuccess: () => setDraft('') },
+      {
+        onSuccess: () => {
+          setDraft('');
+          // Back to quoting the anchor, not to nothing: the next message is still a
+          // reply in the same conversation.
+          setQuotePick(undefined);
+        },
+      },
     );
   };
 
@@ -231,6 +259,7 @@ export function SmsThreadView({
                 message={m}
                 dimmed={isFuture(m)}
                 anchorRef={m.id === anchorMsgId ? anchorRef : undefined}
+                onReply={() => setQuotePick(m)}
               />
             ))}
           </div>
@@ -254,6 +283,30 @@ export function SmsThreadView({
           Reply to {peerName || formatE164(peer)}
           {supportNumber && ` from ${formatE164(supportNumber)}`}
         </p>
+        {/* The quoted message, removable. SMS has no native quoting, so this text really
+            is prepended to the body the customer receives — which is why its cost shows
+            in the counter below. Clearing it sends a plain message. */}
+        {quoted && (
+          <div className="flex items-start gap-2 rounded-md border-l-2 border-amber-400 bg-amber-50/60 px-2.5 py-1.5 text-xs">
+            <div className="min-w-0 flex-1">
+              <span className="font-medium text-amber-900">
+                Replying to {quoted.direction === 'outbound' ? 'your message' : 'their message'}
+              </span>
+              <p className="line-clamp-2 text-muted-foreground">
+                {quoted.body || '(no text)'}
+              </p>
+            </div>
+            <button
+              type="button"
+              title="Remove quote"
+              aria-label="Remove quote"
+              onClick={() => setQuotePick(null)}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-amber-100 hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
         {/* A plain textarea, NOT RichTextEditor: SMS carries no formatting, and the
             markdown/HTML conversion the chat composer does would be sent literally. */}
         <Textarea
@@ -261,11 +314,14 @@ export function SmsThreadView({
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Write a text message…"
           rows={3}
-          maxLength={1600}
+          // The quote eats into the same 1600 the server enforces, so the budget shrinks
+          // rather than letting someone write a message that cannot be sent whole.
+          maxLength={smsReplyBudget(quoted?.body)}
         />
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">
-            {draft.length} characters
+            {outgoing.length} characters
+            {quoted && ` (${smsQuoteCost(quoted.body)} of them quoted)`}
             {segments > 0 && ` · ${segments} segment${segments === 1 ? '' : 's'}`}
             {unicode && ' · unicode (shorter segments)'}
           </span>
@@ -296,10 +352,13 @@ function SmsBubble({
   message: m,
   dimmed,
   anchorRef,
+  onReply,
 }: {
   message: SmsItem;
   dimmed: boolean;
   anchorRef?: React.Ref<HTMLDivElement>;
+  /** Quote this message in the composer. */
+  onReply: () => void;
 }) {
   const own = m.direction === 'outbound';
   return (
@@ -311,13 +370,31 @@ function SmsBubble({
         dimmed ? 'opacity-50' : '',
       ].join(' ')}
     >
+      {/* The bubble and its hover action share a row — `ChatBubble`'s shape. Reversed for
+          our own messages so the button stays on the inside edge rather than the margin. */}
       <div
         className={[
-          'max-w-[75%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
-          own ? 'bg-teal-600 text-white' : 'bg-muted text-foreground',
+          'group/msg flex max-w-[75%] items-center gap-1.5',
+          own ? 'flex-row-reverse' : '',
         ].join(' ')}
       >
-        {m.body || (m.numMedia > 0 ? `(${m.numMedia} attachment${m.numMedia === 1 ? '' : 's'})` : '(no text)')}
+        <div
+          className={[
+            'min-w-0 rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+            own ? 'bg-teal-600 text-white' : 'bg-muted text-foreground',
+          ].join(' ')}
+        >
+          {m.body || (m.numMedia > 0 ? `(${m.numMedia} attachment${m.numMedia === 1 ? '' : 's'})` : '(no text)')}
+        </div>
+        <button
+          type="button"
+          title="Reply to this message"
+          aria-label="Reply to this message"
+          onClick={onReply}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+        >
+          <Reply size={13} />
+        </button>
       </div>
       <span className="text-[10px] text-muted-foreground">
         {formatEmailDate(m.at)}

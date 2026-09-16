@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, Check, CheckCheck, CheckCircle2, Clock, MailOpen, MessageCircle,
-  Mic, Phone, Printer, Send,
+  Mic, Phone, Printer, Reply, Send, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -119,10 +119,42 @@ export function WhatsAppThreadView({
     return () => obs.disconnect();
   }, [messages.length]);
 
+  /**
+   * The message this reply quotes — `undefined` = not chosen, so it falls back to the
+   * ANCHOR the thread is frozen at; `null` = explicitly cleared, i.e. a plain message.
+   * Collapsing the two would make the X on the chip do nothing.
+   */
+  const [quotePick, setQuotePick] = useState<WhatsAppItem | null | undefined>(
+    undefined,
+  );
+  const anchorMessage = messages.find((m) => m.id === anchorMsgId) ?? null;
+  const quoted = quotePick === undefined ? anchorMessage : quotePick;
+
+  // The server resolves a quote to OUR id when the original is in the same page; this
+  // turns that id back into the message so a bubble can show it. Built once per render
+  // rather than once per bubble — and deliberately NOT memoized: `messages` is
+  // `data?.messages ?? []`, a fresh array every render, so a `useMemo` on it would never
+  // hit while blocking the React Compiler from optimizing the component at all.
+  const byMessageId = new Map(messages.map((m) => [m.messageId, m]));
+  const quotedOf = (m: WhatsAppItem) =>
+    m.replyToMessageId === null
+      ? null
+      : (byMessageId.get(m.replyToMessageId) ?? null);
+
   const handleSend = () => {
     const body = draft.trim();
     if (!body) return;
-    sendText.mutate({ to: peer, body }, { onSuccess: () => setDraft('') });
+    sendText.mutate(
+      // Unlike SMS this is a NATIVE quote: the id goes on the wire and Meta renders the
+      // quoted bubble in the customer's own WhatsApp. Nothing is prepended to the text.
+      { to: peer, body, replyToMessageId: quoted?.messageId },
+      {
+        onSuccess: () => {
+          setDraft('');
+          setQuotePick(undefined);
+        },
+      },
+    );
   };
 
   const handlePrint = () => {
@@ -222,6 +254,8 @@ export function WhatsAppThreadView({
             {messages.map((m) => (
               <WhatsAppBubble
                 key={m.id}
+                onReply={() => setQuotePick(m)}
+                quotedOf={quotedOf}
                 message={m}
                 token={token}
                 dimmed={isFuture(m)}
@@ -316,6 +350,31 @@ export function WhatsAppThreadView({
           </div>
         ) : (
           <>
+            {/* The quoted message, removable. Unlike the SMS chip this costs the body
+                nothing — Meta carries the quote structurally and renders it in the
+                customer's app. Clearing it sends a plain message. */}
+            {quoted && (
+              <div className="mb-2 flex items-start gap-2 rounded-md border-l-2 border-emerald-400 bg-emerald-50/60 px-2.5 py-1.5 text-xs">
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-emerald-900">
+                    Replying to{' '}
+                    {quoted.direction === 'outbound' ? 'your message' : title}
+                  </span>
+                  <p className="line-clamp-2 text-muted-foreground">
+                    {quoted.body || whatsappBubblePreview(quoted)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  title="Remove quote"
+                  aria-label="Remove quote"
+                  onClick={() => setQuotePick(null)}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-emerald-100 hover:text-foreground"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
             {/* Plain text: WhatsApp formatting is its own *markup*, which a rich editor
                 would send literally. */}
             <Textarea
@@ -474,18 +533,33 @@ function BubbleContent({ message: m, token }: { message: WhatsAppItem; token: st
 }
 
 /** One message. Ours on the right, theirs on the left. */
+/** A one-line stand-in for a message with no text of its own. Local: exporting it from a
+ *  component file breaks fast refresh. */
+function whatsappBubblePreview(m: WhatsAppItem): string {
+  if (m.isVoice) return 'Voice message';
+  if (m.hasMedia) return m.filename ?? 'Attachment';
+  return '(no text)';
+}
+
 function WhatsAppBubble({
   message: m,
   token,
   dimmed,
   anchorRef,
+  onReply,
+  quotedOf,
 }: {
   message: WhatsAppItem;
   token: string | null;
   dimmed: boolean;
   anchorRef?: React.Ref<HTMLDivElement>;
+  /** Quote this message in the composer. */
+  onReply: () => void;
+  /** Resolve `replyToMessageId` against the loaded thread. */
+  quotedOf: (m: WhatsAppItem) => WhatsAppItem | null;
 }) {
   const own = m.direction === 'outbound';
+  const quoted = quotedOf(m);
   return (
     <div
       ref={anchorRef}
@@ -495,13 +569,50 @@ function WhatsAppBubble({
         dimmed ? 'opacity-50' : '',
       ].join(' ')}
     >
+      {/* The bubble and its hover action share a row — `ChatBubble`'s shape. Reversed for
+          our own messages so the button sits on the inside edge, not the margin. */}
       <div
         className={[
-          'max-w-[75%] rounded-2xl px-3 py-2 text-sm',
-          own ? 'bg-emerald-100 text-emerald-950' : 'bg-muted text-foreground',
+          'group/msg flex max-w-[75%] items-center gap-1.5',
+          own ? 'flex-row-reverse' : '',
         ].join(' ')}
       >
-        <BubbleContent message={m} token={token} />
+        <div
+          className={[
+            'min-w-0 rounded-2xl px-3 py-2 text-sm',
+            own ? 'bg-emerald-100 text-emerald-950' : 'bg-muted text-foreground',
+          ].join(' ')}
+        >
+          {/* The quoted original, above the reply — what WhatsApp itself draws. A quote
+              whose target is outside the loaded page degrades to a label rather than
+              costing a lookup per bubble, the same trade `ChatBubble` makes. */}
+          {m.replyToMessageId !== null && (
+            <div
+              className={[
+                'mb-1.5 border-l-2 pl-2 text-xs',
+                own ? 'border-emerald-500/60' : 'border-muted-foreground/40',
+              ].join(' ')}
+            >
+              {quoted ? (
+                <span className="line-clamp-2 opacity-70">
+                  {quoted.body || whatsappBubblePreview(quoted)}
+                </span>
+              ) : (
+                <span className="italic opacity-60">Quoted a message</span>
+              )}
+            </div>
+          )}
+          <BubbleContent message={m} token={token} />
+        </div>
+        <button
+          type="button"
+          title="Reply to this message"
+          aria-label="Reply to this message"
+          onClick={onReply}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+        >
+          <Reply size={13} />
+        </button>
       </div>
       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
         {formatEmailDate(m.at)}

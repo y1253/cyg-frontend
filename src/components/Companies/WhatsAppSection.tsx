@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useWhatsAppAccount } from '@/hooks/useWhatsAppAccount';
 import { useWhatsAppConfig } from '@/hooks/useWhatsAppConfig';
-import { useConnectFirmWhatsApp } from '@/hooks/useConnectFirmWhatsApp';
 import { useDisconnectWhatsApp } from '@/hooks/useDisconnectWhatsApp';
 import { useGenerateWhatsApp } from '@/hooks/useGenerateWhatsApp';
 import { usePhoneNumber } from '@/hooks/usePhoneNumber';
@@ -26,36 +25,35 @@ function errorText(error: unknown): string {
  * support number yet, the click opens the same buy-a-number popup the Support Number card
  * uses, and generation continues as soon as a number is bought.
  *
- * "Use firm number" (admin only) still attaches the firm's own number from the server
- * config. The Embedded Signup popup is no longer offered here; its server route and
- * `lib/facebookSdk.ts` stay for the client registration page.
+ * Generating is now the ONLY way to attach a number here. "Use firm number" is gone — it
+ * pointed several companies at one shared line, which generating replaced. The Embedded
+ * Signup popup is not offered here either; its server route and `lib/facebookSdk.ts` stay
+ * for the client registration page.
+ *
+ * ⚠️ A row whose `accessToken` is NULL still means "use the firm token from env", and every
+ * GENERATED account relies on that. Removing the firm BUTTON does not retire that
+ * convention — see `tokenFor` and the `if (row.accessToken)` guard in `disconnect`.
  */
 export function WhatsAppSection({
   companyId,
   companyCountry,
-  canUseFirmNumber,
 }: {
   companyId: number;
   /** Seeds the buy-a-number popup's country. */
   companyCountry: string | null;
-  /** Admin only: it hands the company the firm's shared token. */
-  canUseFirmNumber: boolean;
 }) {
   const { data: account, isLoading } = useWhatsAppAccount(companyId);
   const { data: config } = useWhatsAppConfig();
   const { data: supportNumber } = usePhoneNumber(companyId);
   const generate = useGenerateWhatsApp(companyId);
-  const connectFirm = useConnectFirmWhatsApp(companyId);
   const disconnect = useDisconnectWhatsApp(companyId);
 
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [buyOpen, setBuyOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
 
   const runGenerate = () => {
     setError(null);
-    setWarning(null);
     generate.mutate(undefined, {
       onError: (err) => {
         // The server is the authority on "no number" — the cached lookup can be stale.
@@ -78,16 +76,9 @@ export function WhatsAppSection({
     runGenerate();
   };
 
-  const handleFirmNumber = () => {
-    setError(null);
-    setWarning(null);
-    connectFirm.mutate(undefined, {
-      onSuccess: (res) => setWarning(res.warning),
-      onError: (err) => setError(errorText(err)),
-    });
-  };
-
-  const busy = generate.isPending || connectFirm.isPending;
+  // ⚠️ Was `generate.isPending || connectFirm.isPending`. It gates the Generate button, so
+  // dropping the firm half without replacing it would have left `busy` undefined.
+  const busy = generate.isPending;
   const settingUp = isWhatsAppSettingUp(account);
   const failed = account?.setupStatus === 'FAILED';
 
@@ -176,11 +167,6 @@ export function WhatsAppSection({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">No WhatsApp number connected.</p>
             <div className="flex flex-wrap gap-2">
-              {canUseFirmNumber && config?.firmNumberAvailable && (
-                <Button size="sm" variant="outline" disabled={busy} onClick={handleFirmNumber}>
-                  {connectFirm.isPending ? 'Attaching…' : 'Use firm number'}
-                </Button>
-              )}
               <span
                 title={
                   config && !config.generateAvailable
@@ -202,11 +188,6 @@ export function WhatsAppSection({
           </div>
         )}
 
-        {warning && (
-          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-            {warning}
-          </p>
-        )}
         {(error || disconnect.isError) && (
           <p className="mt-2 text-xs text-destructive">
             {error ?? errorText(disconnect.error)}

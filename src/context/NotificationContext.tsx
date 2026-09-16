@@ -69,19 +69,29 @@ interface Prefs {
   whileActive: boolean;
 }
 
+/**
+ * What the user ASKED FOR, verbatim — never reconciled against the live permission.
+ *
+ * ⚠️ `desktop` used to be stored as `parsed.desktop === true && granted`, and the effect
+ * below then wrote that coerced object straight back. So ONE page load without permission
+ * rewrote the preference to false permanently, and it never came back when permission
+ * did. Chrome revokes notification permission on its own (Safety Check does it for sites
+ * you have not visited lately) and a single stray "Continue blocking" is enough — after
+ * which the user got toasts forever, no OS notification, and a checkbox that had silently
+ * unticked itself.
+ *
+ * Intent is stored; whether it can be ACTED on is decided at the point of use, against the
+ * live permission. That is also what lets desktop notifications resume by themselves the
+ * moment permission is granted again.
+ */
 function readPrefs(): Prefs {
-  // `desktop` is reconciled against the live permission right here: the stored flag
-  // can outlive the permission that made it meaningful (revoked in site settings, or
-  // the same account on a different machine), and a true flag with no permission
-  // would silently drop every notification.
-  const granted = notificationPermission() === 'granted';
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { sound: true, desktop: false, whileActive: true };
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       sound: parsed.sound !== false,
-      desktop: parsed.desktop === true && granted,
+      desktop: parsed.desktop === true,
       // Absent in blobs written before this pref existed — those users get the new
       // behavior, which is the point of the change.
       whileActive: parsed.whileActive !== false,
@@ -288,16 +298,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         if (chimed) lastChimeRef.current = now;
       }
 
-      if (prefsRef.current.desktop) {
+      // Intent AND permission. The stored flag is what the user asked for and survives a
+      // permission blip; this is the live check that decides whether it can be acted on,
+      // which is also what makes desktop alerts resume on their own once Chrome hands the
+      // permission back. See `readPrefs`.
+      if (prefsRef.current.desktop && notificationPermission() === 'granted') {
         // `void` + `.catch`, the same guard `notifyCall` uses: a bare `void` on a
         // rejecting promise is an unhandled rejection.
         void showDesktopNotification({
           title: input.title,
           body: input.body,
           tag: input.tag,
-          // Only silence the OS sound if we actually made one — if Web Audio was
-          // unavailable, let the system tone stand in for the chime.
-          silent: chimed,
+          // ⚠️ NEVER silent, and `chimed` is deliberately ignored here.
+          //
+          // This used to be `silent: chimed`, muting the OS notification whenever our own
+          // Web Audio chime played. The polarity was backwards in practice: `chimed` means
+          // "we scheduled Web Audio", NOT "the user heard something" — and a backgrounded
+          // tab is exactly where Chrome throttles audio, where "Mute site" applies, and
+          // where output may be on another device. So the one case that needs a sound was
+          // the case being silenced, and unticking "Notification sound" made it LOUDER.
+          //
+          // Both sounds is the explicit choice. The cost is a possible double-ding while
+          // the app is focused with "alert me while I'm using the app" on; the alternative
+          // traded a guaranteed sound for a chime a background tab often never plays.
+          silent: false,
           onClick: input.onClick,
           route: input.route,
         }).catch(() => undefined);

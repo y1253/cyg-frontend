@@ -59,7 +59,6 @@ export interface WhatsAppClientConfig {
   appId: string | null;
   configId: string | null;
   graphVersion: string;
-  firmNumberAvailable: boolean;
   /** WHATSAPP_TOKEN + WHATSAPP_BUSINESS_ACCOUNT_ID are set, so numbers can be generated. */
   generateAvailable: boolean;
 }
@@ -84,6 +83,12 @@ export interface WhatsAppItem {
   size: number | null;
   status: WhatsAppDeliveryStatus | null;
   errorCode: string | null;
+  /**
+   * The message this one natively replies to, as OUR id. Null when it is not a reply, and
+   * also when the quoted message falls outside the loaded page — the bubble renders that
+   * as an unresolved quote rather than chasing it.
+   */
+  replyToMessageId: number | null;
   /** ISO. The merge key against every other channel. */
   at: string;
   isRead: boolean;
@@ -244,19 +249,6 @@ export async function connectWhatsApp(
   return res.json() as Promise<WhatsAppConnectResult>;
 }
 
-/** Attach the firm's own number from the server config. Admin only. */
-export async function connectFirmWhatsApp(
-  token: string,
-  companyId: number,
-): Promise<WhatsAppConnectResult> {
-  const res = await fetchWithAuth(
-    token,
-    `${API}/whatsapp/companies/${companyId}/connect-firm-number`,
-    { method: 'POST', headers: JSON_HEADERS },
-  );
-  if (!res.ok) throw await failure(res, 'Failed to attach the firm number');
-  return res.json() as Promise<WhatsAppConnectResult>;
-}
 
 /**
  * Make the company's WhatsApp number from its support number. Resolves as soon as Meta has
@@ -384,11 +376,13 @@ export async function sendWhatsAppText(
   companyId: number,
   to: string,
   body: string,
+  /** Reply natively to this message — OUR id; Meta's wamid never leaves the server. */
+  replyToMessageId?: number,
 ): Promise<WhatsAppItem> {
   const res = await fetchWithAuth(token, `${API}/whatsapp/companies/${companyId}/messages`, {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ to, body }),
+    body: JSON.stringify({ to, body, replyToMessageId }),
   });
   if (!res.ok) throw await failure(res, 'Failed to send the message');
   return res.json() as Promise<WhatsAppItem>;

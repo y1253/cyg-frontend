@@ -15,6 +15,8 @@ export function NotificationSettings() {
 
   const blocked = permission === 'denied';
   const unsupported = permission === 'unsupported';
+  // Wanted, but the browser is not currently granting it.
+  const needsPermission = prefs.desktop && permission !== 'granted' && !blocked;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -54,6 +56,15 @@ export function NotificationSettings() {
           {blocked ? (
             <span className="pl-6 text-xs text-muted-foreground">
               Blocked in your browser settings.
+            </span>
+          ) : needsPermission ? (
+            // The checkbox now shows INTENT, which survives a permission blip — so it can
+            // legitimately be ticked while the browser is not granting anything. Saying so
+            // is the point: the old code quietly rewrote the preference to off instead,
+            // and the user had no way to tell why nothing arrived.
+            <span className="pl-6 text-xs text-amber-700">
+              Your browser hasn't granted permission yet — untick and tick this to ask
+              again. Alerts resume on their own once it's granted.
             </span>
           ) : (
             <span className="pl-6 text-xs text-muted-foreground">
