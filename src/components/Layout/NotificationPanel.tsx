@@ -1,4 +1,4 @@
-import { BellOff, Check, Loader2 } from 'lucide-react';
+import { BellOff, Check, Loader2, type LucideIcon } from 'lucide-react';
 import type { UnreadFeedItem } from '@/api/gmail';
 import { feedRowChrome, relativeTime } from './unread-feed';
 
@@ -19,6 +19,10 @@ export function NotificationPanel({
   failed,
   onOpen,
   onMarkRead,
+  emptyIcon = BellOff,
+  emptyTitle = "You're all caught up",
+  emptyBody = 'New messages for your companies show up here.',
+  note,
 }: {
   items: UnreadFeedItem[];
   isLoading: boolean;
@@ -26,12 +30,31 @@ export function NotificationPanel({
   failed: { companyId: number; companyName: string }[];
   onOpen: (item: UnreadFeedItem) => void;
   onMarkRead: (item: UnreadFeedItem) => void;
+  /**
+   * The empty state, overridable so a filtered view of this same feed does not claim
+   * the whole inbox is clear. Defaulted to the bell's own wording, so the bell renders
+   * byte-identically to before these existed.
+   */
+  emptyIcon?: LucideIcon;
+  emptyTitle?: string;
+  emptyBody?: string;
+  /**
+   * An extra footer line, and the empty state's replacement when there is nothing to
+   * list. A filtered view can know its number exceeds the rows it has — saying so is
+   * the same rule the `failed` line follows: never imply an inbox you cannot prove.
+   */
+  note?: string;
 }) {
   return (
     <div className="flex max-h-[70vh] flex-col">
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 ? (
-          <EmptyState isLoading={isLoading} />
+          <EmptyState
+            isLoading={isLoading}
+            Icon={emptyIcon}
+            title={emptyTitle}
+            body={note ?? emptyBody}
+          />
         ) : (
           <ul className="divide-y">
             {items.map((item) => (
@@ -48,12 +71,29 @@ export function NotificationPanel({
         )}
       </div>
 
-      <Footer count={items.length} truncated={truncated} failed={failed} />
+      <Footer
+        count={items.length}
+        truncated={truncated}
+        failed={failed}
+        // Already shown as the empty state's body in that case — repeating it under an
+        // empty panel would say the same sentence twice.
+        note={items.length > 0 ? note : undefined}
+      />
     </div>
   );
 }
 
-function EmptyState({ isLoading }: { isLoading: boolean }) {
+function EmptyState({
+  isLoading,
+  Icon,
+  title,
+  body,
+}: {
+  isLoading: boolean;
+  Icon: LucideIcon;
+  title: string;
+  body: string;
+}) {
   // A spinner only when there is nothing to show. Replacing a painted list with one on
   // every background refetch would make the panel flicker once a minute.
   if (isLoading) {
@@ -66,11 +106,9 @@ function EmptyState({ isLoading }: { isLoading: boolean }) {
   }
   return (
     <div className="flex flex-col items-center gap-2 p-8 text-center">
-      <BellOff size={20} className="text-muted-foreground" />
-      <span className="text-sm font-medium">You're all caught up</span>
-      <span className="text-xs text-muted-foreground">
-        New messages for your companies show up here.
-      </span>
+      <Icon size={20} className="text-muted-foreground" />
+      <span className="text-sm font-medium">{title}</span>
+      <span className="text-xs text-muted-foreground">{body}</span>
     </div>
   );
 }
@@ -141,21 +179,26 @@ function Footer({
   count,
   truncated,
   failed,
+  note,
 }: {
   count: number;
   truncated: boolean;
   failed: { companyId: number; companyName: string }[];
+  note?: string;
 }) {
   // A failed sweep must never read as a clean inbox. The count can undercount; saying so
   // is the honest version of the server's "absent means unknown, not zero" rule.
   const names = failed.slice(0, 2).map((f) => f.companyName);
   const extra = failed.length - names.length;
 
-  if (!truncated && failed.length === 0) return null;
+  if (!truncated && failed.length === 0 && !note) return null;
 
   return (
     <div className="shrink-0 border-t px-3 py-2 text-[11px] text-muted-foreground">
-      {truncated && <div>Showing the {count} most recent.</div>}
+      {note && <div>{note}</div>}
+      {/* A caller-supplied note already says how many of how many, so the generic
+          line would only contradict it with a smaller number. */}
+      {truncated && !note && <div>Showing the {count} most recent.</div>}
       {failed.length > 0 && (
         <div>
           Couldn't check {names.join(', ')}

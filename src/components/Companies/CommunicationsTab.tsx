@@ -44,6 +44,7 @@ import { SmsThreadView } from './communications/SmsThreadView';
 import { WhatsAppThreadView } from './communications/WhatsAppThreadView';
 import { CallDetailView } from './communications/CallDetailView';
 import { ComposeSmsDialog } from './communications/ComposeSmsDialog';
+import { ComposeWhatsAppDialog } from './communications/ComposeWhatsAppDialog';
 import { RingingCallBanner } from './communications/RingingCallBanner';
 import { ActiveCallBanner } from './communications/ActiveCallBanner';
 import { callBlockedReason, shouldShowActiveBanner } from './communications/call-busy';
@@ -114,6 +115,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // and to stay dismissed for the session rather than reappearing on every render.
   const [connectDismissed, setConnectDismissed] = useState(false);
   const [composeSmsOpen, setComposeSmsOpen] = useState(false);
+  const [composeWhatsAppOpen, setComposeWhatsAppOpen] = useState(false);
   const [dialOpen, setDialOpen] = useState(false);
   // The message awaiting "mark complete" confirmation (carries kind so the right
   // endpoint is hit). null = no confirm dialog open.
@@ -525,6 +527,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         }
         onNewCall={supportNumber ? () => setDialOpen(true) : undefined}
         onComposeSms={supportNumber ? () => setComposeSmsOpen(true) : undefined}
+        onComposeWhatsApp={
+          whatsappAccount ? () => setComposeWhatsAppOpen(true) : undefined
+        }
         callBlockedReason={callBlocked}
       />
       {supportNumber && (
@@ -549,6 +554,18 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
             // Drop straight into the conversation just started, the way sending an
             // email opens nothing but sending a chat leaves you in the thread.
             setSelected({ kind: 'sms', peer, msgId: '', msgTime: at });
+          }}
+        />
+      )}
+      {whatsappAccount && (
+        <ComposeWhatsAppDialog
+          open={composeWhatsAppOpen}
+          onOpenChange={setComposeWhatsAppOpen}
+          companyId={companyId}
+          displayNumber={whatsappAccount.displayPhoneNumber}
+          onSent={(peer, at) => {
+            setComposeWhatsAppOpen(false);
+            setSelected({ kind: 'whatsapp', peer, msgId: '', msgTime: at });
           }}
         />
       )}
@@ -619,6 +636,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
                 title: 'New email',
                 body: preview ? messagePreview(preview) : 'New message',
                 tag: `cyg-company-${companyId}`,
+                route: {
+                  kind: 'company',
+                  companyId,
+                  tab: 'communications',
+                },
               });
             })();
           }

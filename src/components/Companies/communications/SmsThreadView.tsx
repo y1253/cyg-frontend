@@ -13,6 +13,7 @@ import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { formatE164 } from '@/lib/phone';
 import { formatEmailDate, openPrintWindow, escapeHtml } from '../message-utils';
 import type { CompleteTarget, ItemKind } from './types';
+import { makeIsFuture } from './thread-dim';
 
 /**
  * A GSM-7 message fits 160 characters, 153 once it is split across segments; any
@@ -93,8 +94,9 @@ export function SmsThreadView({
   const [anchorVisible, setAnchorVisible] = useState(true);
 
   const messages: SmsItem[] = data?.messages ?? [];
-  const anchorMs = new Date(anchorTime).getTime();
-  const isFuture = (m: SmsItem) => new Date(m.at).getTime() > anchorMs;
+  // Your own replies stay bright until the customer writes again — see `thread-dim.ts`
+  // for why, and for what `ChatThreadView` does instead where a quote exists.
+  const isFuture = makeIsFuture(messages, anchorTime);
 
   // Jump to the clicked message once the thread paints. Depends on the loaded count
   // so it re-runs when the messages actually arrive, not merely on mount.

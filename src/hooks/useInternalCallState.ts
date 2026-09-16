@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { useNotifications } from '@/context/NotificationContext';
 import { setInternalCallState } from '@/api/internalCalls';
 import {
   dismissUnreadFeedItem,
@@ -35,7 +34,6 @@ const PATCH: Record<
 export function useInternalCallState() {
   const { token } = useAuth();
   const qc = useQueryClient();
-  const { suppressSource } = useNotifications();
 
   return useMutation({
     mutationFn: ({
@@ -46,10 +44,11 @@ export function useInternalCallState() {
       action: InternalCallStateAction;
     }) => setInternalCallState(token!, sid, action),
     onMutate: ({ sid, action }) => {
-      // Marking unread raises the very count the notifier watches, and `onSettled`
-      // force-refetches it — so without this the user's own click chimes at them.
-      // Stamped before the request, not after, because the refetch can land first.
-      if (action === 'unread') suppressSource('internal');
+      // ⚠️ No `suppressSource('internal')` here, unlike `useInternalMessageState`.
+      // That key guards the MESSAGE notifier, whose count is
+      // `InternalMessagesService.getUnreadCount` — `internalMessageRecipient` rows
+      // only. Marking a CALL unread cannot raise it, so the stamp bought nothing and
+      // silently muted genuine incoming staff messages for the whole 45s window.
 
       // `intcall:{sid}` — the id the feed carries, namespaced so a call sid can never
       // collide with a numeric internal message id.

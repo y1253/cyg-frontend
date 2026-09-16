@@ -11,6 +11,18 @@
  */
 export const SW_MESSAGE_SOURCE = 'cyg-call-action';
 
+/**
+ * Where clicking a MESSAGE notification should land, as DATA rather than a closure.
+ *
+ * A closure cannot survive the trip through a service worker — the worker is a separate
+ * JS realm, and may well be running after the page that created the notification is
+ * gone. So the destination travels inside `data`, the worker posts it back (or opens a
+ * window on it), and the page turns it into navigation. See `showDesktopNotification`.
+ */
+export type NotificationRoute =
+  | { kind: 'company'; companyId: number; tab: 'messages' | 'communications' }
+  | { kind: 'dashboard' };
+
 export function notificationsSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
@@ -38,7 +50,7 @@ export async function requestNotificationPermission(): Promise<
  * ⚠️ `getRegistration()`, never `navigator.serviceWorker.ready`. `ready` never rejects
  * and never RESOLVES when nothing is registered — which is every `npm run dev` session,
  * since `vite.config.ts` sets `devOptions: { enabled: false }`. Awaiting it there would
- * swallow the call alert entirely instead of falling back.
+ * swallow the alert entirely instead of falling back.
  *
  * `active` rather than a truthy registration for the same reason in miniature: Chrome
  * rejects `showNotification` on a worker that is still installing, which is the first
@@ -63,6 +75,30 @@ async function swRegistration(): Promise<ServiceWorkerRegistration | null> {
  */
 const fallbackNotifications = new Map<string, Notification>();
 
+/**
+ * Chrome renders at most TWO actions on a desktop notification, which is exactly what a
+ * ringing call needs. A third would silently not appear.
+ */
+interface NotificationAction {
+  action: string;
+  title: string;
+}
+
+/**
+ * `showNotification` options the DOM lib still does not type.
+ *
+ * `renotify` lives here rather than only on the call path because it is what stops a
+ * CONSTANT tag going silent: notifications sharing a tag replace each other, and without
+ * it the replacement arrives with no banner and no sound. Message tags are constant per
+ * source (`cyg-internal`, `cyg-company-{id}`), so every message after the first would
+ * otherwise be invisible.
+ */
+interface ShowNotificationInit extends NotificationOptions {
+  actions?: NotificationAction[];
+  requireInteraction?: boolean;
+  renotify?: boolean;
+}
+
 export interface DesktopNotificationOptions {
   title: string;
   body: string;
@@ -70,11 +106,65 @@ export interface DesktopNotificationOptions {
   tag: string;
   /** Pass true when we already played our own chime, so the OS doesn't double it. */
   silent: boolean;
+  /** Used only by the constructor fallback — a closure cannot reach the worker. */
   onClick?: () => void;
+  /** The serialisable twin of `onClick`, for the service-worker path. */
+  route?: NotificationRoute;
 }
 
-export function showDesktopNotification({ title, body, tag, silent, onClick }: DesktopNotificationOptions): void {
-  if (notificationPermission() !== 'granted') return;
+/**
+ * Raise a NEW-MESSAGE notification.
+ *
+ * ── WHY THE SERVICE WORKER COMES FIRST ─────────────────────────────────────────
+ * It used to be the other way round: `new Notification()` first, the worker only from
+ * inside the `catch`. That reads as sound defensive coding and is not, because the
+ * failure it has to survive is not an exception. Once a page is SERVICE-WORKER
+ * CONTROLLED — an installed PWA, Chrome on Android, several Chromium builds — the
+ * page-level constructor is the unsupported path, and where it merely returns an object
+ * that is never displayed rather than throwing, nothing is caught and nothing appears.
+ * A `catch` cannot rescue a silent no-op.
+ *
+ * Calls have gone through the worker since they were built (actions only exist there),
+ * which is exactly why they kept working while messages stopped. Both paths now agree:
+ * worker first, constructor as the fallback.
+ *
+ * ⚠️ Keep the constructor fallback. `vite.config.ts` sets `devOptions: { enabled: false }`,
+ * so there is NO worker in `npm run dev` and it is the only path there.
+ *
+ * Returns whether anything was shown, so a caller can log honestly.
+ */
+export async function showDesktopNotification({
+  title,
+  body,
+  tag,
+  silent,
+  onClick,
+  route,
+}: DesktopNotificationOptions): Promise<boolean> {
+  if (notificationPermission() !== 'granted') return false;
+
+  const registration = await swRegistration();
+  if (registration) {
+    try {
+      const options: ShowNotificationInit = {
+        body,
+        tag,
+        silent,
+        icon: '/pwa-192x192.png',
+        badge: '/pwa-64x64.png',
+        // Without this a second message from the same company silently REPLACES the
+        // first: no banner, no sound. Indistinguishable, to a user, from
+        // "notifications stopped working".
+        renotify: true,
+        data: { kind: 'message', route: route ?? null },
+      };
+      await registration.showNotification(title, options);
+      return true;
+    } catch {
+      // Fall through to the constructor rather than leaving the message unannounced.
+    }
+  }
+
   try {
     const notification = new Notification(title, {
       body,
@@ -89,42 +179,10 @@ export function showDesktopNotification({ title, body, tag, silent, onClick }: D
         notification.close();
       };
     }
+    return true;
   } catch {
-    // Constructor-throwing platforms (Android Chrome) need showNotification() via a
-    // service worker. That path cannot carry `onClick` — a closure does not survive the
-    // trip — so the worker only focuses the window and the user finds the message
-    // themselves. Strictly better than today, where this threw and nothing appeared.
-    void (async () => {
-      const registration = await swRegistration();
-      if (!registration) return;
-      try {
-        await registration.showNotification(title, {
-          body,
-          tag,
-          silent,
-          icon: '/pwa-192x192.png',
-          data: { kind: 'message' },
-        });
-      } catch {
-        /* nothing useful left to try */
-      }
-    })();
+    return false;
   }
-}
-
-/**
- * Chrome renders at most TWO actions on a desktop notification, which is exactly what a
- * ringing call needs. A third would silently not appear.
- */
-interface NotificationAction {
-  action: string;
-  title: string;
-}
-
-/** `showNotification` options the DOM lib still does not type. */
-interface CallNotificationInit extends NotificationOptions {
-  actions?: NotificationAction[];
-  requireInteraction?: boolean;
 }
 
 /** The tag a call's notification carries. One per call, so repeats collapse. */
@@ -138,7 +196,7 @@ export function callNotificationTag(callSid: string): string {
  * ── WHY THIS ONE MUST GO THROUGH THE SERVICE WORKER ────────────────────────────
  * Action buttons only exist on `registration.showNotification()`; the page-level
  * constructor has no `actions` at all. With no worker (development) this degrades to the
- * plain constructor above — an alert with no buttons, which is still the difference
+ * plain constructor below — an alert with no buttons, which is still the difference
  * between noticing a call and missing it.
  *
  * Returns whether anything was shown, so the caller can log honestly.
@@ -157,7 +215,7 @@ export async function showCallNotification(input: {
   const registration = await swRegistration();
   if (registration) {
     try {
-      const options: CallNotificationInit = {
+      const options: ShowNotificationInit = {
         body: input.body,
         tag,
         silent: input.silent,

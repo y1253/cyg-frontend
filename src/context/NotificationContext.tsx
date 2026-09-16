@@ -18,6 +18,8 @@ import {
   requestNotificationPermission,
   showDesktopNotification,
   showCallNotification,
+  SW_MESSAGE_SOURCE,
+  type NotificationRoute,
 } from '@/lib/desktopNotification';
 import { playMessageChime, unlockAudio } from '@/lib/notificationSound';
 import { Toaster, type AppToast } from '@/components/ui/toast';
@@ -110,6 +112,8 @@ interface NotificationValue {
     body: string;
     tag: string;
     onClick?: () => void;
+    /** Serialisable twin of `onClick`, for the service-worker notification path. */
+    route?: NotificationRoute;
   }) => void;
   /**
    * Mute a source for its suppression window without announcing anything.
@@ -258,6 +262,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       body: string;
       tag: string;
       onClick?: () => void;
+      /**
+       * The same destination as `onClick`, expressed as data.
+       *
+       * Both are needed and they are not redundant: the toast and the constructor
+       * fallback run the closure, while the service-worker path — now the primary one
+       * for desktop notifications — can only carry something serialisable across to a
+       * different JS realm.
+       */
+      route?: NotificationRoute;
     }) => {
       // The in-app toast fires ABOVE the focus check on purpose. `whileActive` is
       // there to stop a desktop notification interrupting someone who is already
@@ -276,7 +289,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       }
 
       if (prefsRef.current.desktop) {
-        showDesktopNotification({
+        // `void` + `.catch`, the same guard `notifyCall` uses: a bare `void` on a
+        // rejecting promise is an unhandled rejection.
+        void showDesktopNotification({
           title: input.title,
           body: input.body,
           tag: input.tag,
@@ -284,7 +299,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           // unavailable, let the system tone stand in for the chime.
           silent: chimed,
           onClick: input.onClick,
-        });
+          route: input.route,
+        }).catch(() => undefined);
       }
     },
     [pushToast],
@@ -301,6 +317,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       body: string;
       tag: string;
       onClick?: () => void;
+      route?: NotificationRoute;
     }) => {
       suppressRef.current.set(input.source, Date.now());
       notify(input);
@@ -390,6 +407,42 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     [openCompany],
   );
 
+  /**
+   * A MESSAGE notification was clicked while this tab was open.
+   *
+   * The worker cannot run the `onClick` closure — it is a different JS realm — so the
+   * destination travelled as data and comes back here to be navigated. This is what
+   * keeps a desktop notification clickable now that the worker is the primary path;
+   * before it, the worker fallback could only focus the window and leave the user to
+   * find the message themselves.
+   *
+   * The `source` guard is load-bearing for the same reason it is in `SoftphoneContext`:
+   * workbox and the PWA plugin post their own messages on this very channel. A CALL
+   * message carries no `route` and falls straight through.
+   */
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const onMessage = (event: MessageEvent) => {
+      const message = event.data as
+        | { source?: string; kind?: string; route?: NotificationRoute }
+        | undefined;
+      if (message?.source !== SW_MESSAGE_SOURCE) return;
+      if (message.kind !== 'message') return;
+
+      const route = message.route;
+      if (!route) return;
+      if (route.kind === 'dashboard') {
+        navigate('/dashboard');
+        return;
+      }
+      openCompany(route.companyId, route.tab);
+    };
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [navigate, openCompany]);
+
   // ── Internal messages: instant, via the per-user stream ────────────────────
   const internalDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -416,6 +469,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           tag: 'cyg-internal',
           onClick: workspaceId
             ? () => openCompany(workspaceId, 'messages')
+            : undefined,
+          route: workspaceId
+            ? { kind: 'company', companyId: workspaceId, tab: 'messages' }
             : undefined,
         });
       }, INTERNAL_DEBOUNCE_MS);
@@ -448,6 +504,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             body: fresh ? messagePreview(preview) : 'New message',
             tag: `cyg-company-${only.id}`,
             onClick: () => openCompany(only.id, 'communications'),
+            route: {
+              kind: 'company',
+              companyId: only.id,
+              tab: 'communications',
+            },
           });
         })();
         return;
@@ -465,6 +526,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           : `${risen.length} companies`,
         tag: 'cyg-companies',
         onClick: () => navigate('/dashboard'),
+        route: { kind: 'dashboard' },
       });
     },
     [notify, openCompany, navigate],
@@ -478,6 +540,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       tag: 'cyg-internal',
       onClick: workspaceId
         ? () => openCompany(workspaceId, 'messages')
+        : undefined,
+      route: workspaceId
+        ? { kind: 'company', companyId: workspaceId, tab: 'messages' }
         : undefined,
     });
   }, [notify, openCompany]);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, MessageSquareText, Phone, Plus, Trash2 } from 'lucide-react';
+import { Mail, MessageCircle, MessageSquareText, Phone, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,6 +39,7 @@ export function CommsHeader({
   onCompose,
   onNewCall,
   onComposeSms,
+  onComposeWhatsApp,
   callBlockedReason = null,
 }: {
   companyId: number;
@@ -51,6 +52,8 @@ export function CommsHeader({
   /** Undefined when this company has no number — the button is then not rendered. */
   onNewCall?: () => void;
   onComposeSms?: () => void;
+  /** Only when a WhatsApp number is connected — there is nothing to send from otherwise. */
+  onComposeWhatsApp?: () => void;
   /** Set while this company's line is on a call: New call is disabled and says why. */
   callBlockedReason?: string | null;
 }) {
@@ -114,6 +117,16 @@ export function CommsHeader({
               onClick={onComposeSms}
             >
               <MessageSquareText size={14} /> New text
+            </Button>
+          )}
+          {onComposeWhatsApp && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              onClick={onComposeWhatsApp}
+            >
+              <MessageCircle size={14} /> New WhatsApp
             </Button>
           )}
           {isAdmin && account && (

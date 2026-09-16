@@ -32,11 +32,12 @@ self.addEventListener('notificationclick', (event) => {
   const action = event.action || 'open';
   event.notification.close();
 
-  // A MESSAGE notification only reaches this worker on platforms where the page-level
-  // constructor throws (Android Chrome). It carries no action and no closure to run, so
-  // all it can do is bring the app forward — which is still better than the nothing that
-  // happened there before.
+  // A MESSAGE notification now comes through here on EVERY platform that has a worker —
+  // it is the primary path, not a fallback (see `showDesktopNotification`). It carries no
+  // action and no closure, but it does carry a serialisable `route`, which is posted back
+  // below so the page can navigate exactly as the in-page onclick used to.
   const isCall = data.kind === 'call';
+  const route = data.route || null;
 
   event.waitUntil(
     (async () => {
@@ -62,6 +63,8 @@ self.addEventListener('notificationclick', (event) => {
             action,
             callSid: data.callSid,
           });
+        } else if (route) {
+          target.postMessage({ source: CALL_ACTION_SOURCE, kind: 'message', route });
         }
         return;
       }
@@ -70,7 +73,13 @@ self.addEventListener('notificationclick', (event) => {
       // receive a postMessage, so this navigates and does NOT carry the action — the
       // agent lands on the company and answers from the card if the call is still up.
       // Out of scope by design (the feature assumes an open tab), but it must not throw.
-      const url = data.companyId ? `/companies/${data.companyId}` : '/dashboard';
+      //
+      // A message notification reaches here with the app fully closed, which for a call
+      // is an edge case and for a message is routine — so its company comes off the
+      // `route` rather than off `data.companyId`, which only a call carries.
+      const companyId =
+        data.companyId || (route && route.kind === 'company' ? route.companyId : null);
+      const url = companyId ? `/companies/${companyId}` : '/dashboard';
       try {
         await self.clients.openWindow(url);
       } catch {

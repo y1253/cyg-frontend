@@ -6,7 +6,7 @@
  * completely invisible — the row renders, the click navigates, and nothing opens.
  */
 
-import { Voicemail, type LucideIcon } from 'lucide-react';
+import { PhoneMissed, Voicemail, type LucideIcon } from 'lucide-react';
 import type { UnreadFeedItem } from '@/api/gmail';
 import {
   KIND_STYLES,
@@ -50,12 +50,35 @@ export function feedRowChrome(item: UnreadFeedItem): FeedRowChrome {
       avatar: style.avatar,
     };
   }
+  // ⚠️ AFTER the voicemail branch, never before it. Every voicemail is also a missed
+  // call, and "Voicemail" is the more useful of the two labels — the same precedence
+  // `InboxRow` applies. Swapping them would silently retitle every voicemail.
+  if (item.kind === 'call' && item.isMissed) {
+    return {
+      label: 'Missed call',
+      Icon: PhoneMissed,
+      dot: style.dot,
+      avatar: style.avatar,
+    };
+  }
   return {
     label: style.label,
     Icon: style.Icon,
     dot: style.dot,
     avatar: style.avatar,
   };
+}
+
+/**
+ * A missed call — voicemails included, since every voicemail is a missed call that left
+ * a message.
+ *
+ * Reads the server's `isMissed` rather than matching on `title`. `title` is a display
+ * string built by `callTitle`, and the feed carries answered-but-unread inbound calls
+ * too, so there is nothing else on the row that can tell them apart.
+ */
+export function isMissedCallRow(item: UnreadFeedItem): boolean {
+  return item.kind === 'call' && item.isMissed;
 }
 
 /**

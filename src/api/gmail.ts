@@ -521,6 +521,13 @@ export type UnreadFeedItem =
       sid: string;
       itemId: string;
       isVoicemail: boolean;
+      /**
+       * Unread + inbound + unanswered, decided server-side by `isUnreadMissedCall` —
+       * the same predicate the `missedCalls` / `missedCallsOwn` numbers are summed
+       * from. The row carries no `outcome` or `direction`, so this is the ONLY honest
+       * way to filter for a missed call here; `title` is a display string.
+       */
+      isMissed: boolean;
     })
   | (UnreadFeedItemBase & {
       scope: 'internal';
@@ -528,7 +535,13 @@ export type UnreadFeedItem =
       messageId: number;
       threadId: number;
     })
-  | (UnreadFeedItemBase & { scope: 'internal'; kind: 'call'; sid: string });
+  | (UnreadFeedItemBase & {
+      scope: 'internal';
+      kind: 'call';
+      sid: string;
+      /** The staff-call twin of the field above. */
+      isMissed: boolean;
+    });
 
 /**
  * What `GET /communications/inbox-summary` returns — both cross-company surfaces in one

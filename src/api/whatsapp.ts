@@ -327,6 +327,58 @@ export async function fetchWhatsAppCounts(
   return res.json() as Promise<{ unread: number; uncompleted: number }>;
 }
 
+/**
+ * One approved message template, flattened to what the picker needs.
+ *
+ * Mirrors `WhatsAppTemplateDto`. Only the BODY is modelled — a template with a media
+ * header needs a media id, which is a different feature.
+ */
+export interface WhatsAppTemplate {
+  name: string;
+  /** Meta's own code, e.g. `en_US`. Sent back verbatim. */
+  language: string;
+  category: string;
+  /** The approved copy, `{{1}}` placeholders intact. */
+  body: string;
+  variableCount: number;
+}
+
+/**
+ * The templates this company may send.
+ *
+ * Returns [] rather than failing when Meta refuses the listing permission — the server
+ * decides that, so an empty picker is a legitimate answer and not an error to surface.
+ */
+export async function fetchWhatsAppTemplates(
+  token: string,
+  companyId: number,
+): Promise<WhatsAppTemplate[]> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/templates`,
+  );
+  if (!res.ok) throw await failure(res, 'Failed to load templates');
+  return res.json() as Promise<WhatsAppTemplate[]>;
+}
+
+/**
+ * Send an approved template — the only way to write outside the 24-hour window, and
+ * therefore the only way to open a conversation.
+ */
+export async function sendWhatsAppTemplate(
+  token: string,
+  companyId: number,
+  input: { to: string; name: string; language: string; variables: string[] },
+): Promise<WhatsAppItem> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/messages/template`,
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(input) },
+  );
+  if (!res.ok) throw await failure(res, 'Failed to send the template');
+  return res.json() as Promise<WhatsAppItem>;
+}
+
 export async function sendWhatsAppText(
   token: string,
   companyId: number,

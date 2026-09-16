@@ -18,9 +18,13 @@ export function CompanyRow({
   // Undefined means UNKNOWN (no channel connected, or every one of them failed), which
   // is different from a count of zero, so no badge is rendered.
   uncompleted: number | undefined;
-  // Unread missed calls, voicemails included — a subset of `uncompleted`, broken out
-  // because an unanswered caller is the backlog that goes stale fastest. Undefined means
-  // unknown (no number, or its sweep failed) and, like zero, draws no badge.
+  // Unread missed calls, voicemails included. This no longer draws a badge — that moved
+  // to the header, where it stays visible from inside a company (`MissedCallsIndicator`).
+  //
+  // ⚠️ Still passed, and still needed: it is what keeps a company with unanswered callers
+  // out of the recessed "quiet" treatment below. Dropping the prop would grey out exactly
+  // the rows that want attention. Undefined means unknown (no number, or its sweep
+  // failed), which counts as quiet the same way an absent `uncompleted` does.
   missedCalls?: number;
   // The user's own internal "Cyg Finance" workspace: teal treatment, pinned to the
   // top of the dashboard, and none of the task counts apply (it holds messages and
@@ -109,13 +113,6 @@ export function CompanyRow({
         {uncompleted !== undefined && (
           <CountBadge tone={uncompleted === 0 ? 'muted' : 'red'}>
             {uncompleted} uncompleted
-          </CountBadge>
-        )}
-        {/* Only when there is something to act on: a "0 missed calls" on every row would
-            be noise, and the uncompleted badge already says the channel was read. */}
-        {missedCalls !== undefined && missedCalls > 0 && (
-          <CountBadge tone="red">
-            {missedCalls} missed call{missedCalls === 1 ? '' : 's'}
           </CountBadge>
         )}
         {!internal && (

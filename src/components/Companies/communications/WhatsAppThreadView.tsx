@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, Check, CheckCheck, CheckCircle2, Clock, MailOpen, MessageCircle,
   Mic, Phone, Printer, Send,
@@ -17,10 +17,13 @@ import {
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { useSendWhatsAppVoice } from '@/hooks/useSendWhatsAppVoice';
+import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
 import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
 import { AttachmentChip } from '../AttachmentPreview';
 import { escapeHtml, formatEmailDate, openPrintWindow } from '../message-utils';
 import { VoiceRecorder } from './VoiceRecorder';
+import { TemplatePicker } from './TemplatePicker';
+import { makeIsFuture } from './thread-dim';
 import type { CompleteTarget, ItemKind } from './types';
 
 /**
@@ -68,14 +71,26 @@ export function WhatsAppThreadView({
   const markUnread = useMarkWhatsAppItem(companyId, 'unread');
 
   const [draft, setDraft] = useState('');
+  // The closed-window branch: a template is the only thing Meta will accept there.
+  const sendTemplate = useSendWhatsAppTemplate(companyId);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [picked, setPicked] = useState<
+    { name: string; language: string; variables: string[] } | null
+  >(null);
+  // Stable, or `TemplatePicker`'s reporting effect re-runs on every render here.
+  const handlePicked = useCallback(
+    (next: { name: string; language: string; variables: string[] } | null) =>
+      setPicked(next),
+    [],
+  );
   const anchorRef = useRef<HTMLDivElement>(null);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
   const messages: WhatsAppItem[] = data?.messages ?? [];
   const peerName = data?.peerName ?? null;
   const title = peerName || formatWhatsAppNumber(peer);
-  const anchorMs = new Date(anchorTime).getTime();
-  const isFuture = (m: WhatsAppItem) => new Date(m.at).getTime() > anchorMs;
+  // Your own replies stay bright until the customer writes again — see `thread-dim.ts`.
+  const isFuture = makeIsFuture(messages, anchorTime);
 
   // The clock the 24h window is judged against, ticking so the composer closes on its own
   // when the window lapses mid-view rather than only after the next poll re-renders.
@@ -239,12 +254,66 @@ export function WhatsAppThreadView({
             admin can connect one on the Details tab.
           </p>
         ) : !isLoading && data && !windowOpen ? (
-          <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            <Clock size={14} className="mt-0.5 shrink-0" />
-            {data.windowOpenUntil
-              ? 'The 24-hour reply window is closed. WhatsApp only allows an approved template until the customer writes again (templates are not supported here yet).'
-              : 'This customer has not messaged this number yet. WhatsApp only allows an approved template as the first message.'}
-          </p>
+          // The window has shut, so a template is the only thing that will send. This
+          // used to be the end of the road ("templates are not supported here yet") —
+          // it is now the second home of the compose dialog's picker.
+          <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="flex items-start gap-2 text-xs text-amber-900">
+              <Clock size={14} className="mt-0.5 shrink-0" />
+              {data.windowOpenUntil
+                ? 'The 24-hour reply window is closed. WhatsApp only allows an approved template until the customer writes again.'
+                : 'This customer has not messaged this number yet. WhatsApp only allows an approved template as the first message.'}
+            </p>
+            {templateOpen ? (
+              <>
+                <TemplatePicker
+                  companyId={companyId}
+                  enabled
+                  onChange={handlePicked}
+                />
+                {sendTemplate.isError && (
+                  <p className="text-xs text-destructive">
+                    {(sendTemplate.error as Error)?.message ?? 'Failed to send'}
+                  </p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setTemplateOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700"
+                    disabled={!picked || sendTemplate.isPending}
+                    onClick={() =>
+                      picked &&
+                      sendTemplate.mutate(
+                        { to: peer, ...picked },
+                        { onSuccess: () => setTemplateOpen(false) },
+                      )
+                    }
+                  >
+                    <Send size={13} />
+                    {sendTemplate.isPending ? 'Sending…' : 'Send template'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 border-amber-300 text-amber-800 hover:bg-amber-100"
+                  onClick={() => setTemplateOpen(true)}
+                >
+                  <MessageCircle size={13} /> Send a template
+                </Button>
+              </div>
+            )}
+          </div>
         ) : (
           <>
             {/* Plain text: WhatsApp formatting is its own *markup*, which a rich editor

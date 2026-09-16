@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   badgeLabel,
   feedRowChrome,
+  isMissedCallRow,
   pendingOpenFromFeedItem,
   readIdForSelection,
   relativeTime,
@@ -58,6 +59,7 @@ const ITEMS: UnreadFeedItem[] = [
     sid: 'c1',
     itemId: 'swcall:c1',
     isVoicemail: false,
+    isMissed: false,
   },
   {
     ...base,
@@ -67,7 +69,14 @@ const ITEMS: UnreadFeedItem[] = [
     messageId: 12,
     threadId: 12,
   },
-  { ...base, id: 'intcall:c9', scope: 'internal', kind: 'call', sid: 'c9' },
+  {
+    ...base,
+    id: 'intcall:c9',
+    scope: 'internal',
+    kind: 'call',
+    sid: 'c9',
+    isMissed: false,
+  },
   // Appended rather than inserted, so the ITEMS[n] indexes the tests below use hold.
   {
     ...base,
@@ -172,6 +181,26 @@ describe('feedRowChrome', () => {
     expect(voicemail.Icon).not.toBe(plain.Icon);
   });
 
+  /**
+   * ⚠️ A voicemail is BOTH, and the order decides which label it gets. If the missed
+   * branch ever moves above the voicemail one, every voicemail silently becomes a plain
+   * "Missed call" and the more useful of the two labels disappears.
+   */
+  it('calls a row that is both voicemail and missed a Voicemail', () => {
+    const both = {
+      ...ITEMS[4],
+      isVoicemail: true,
+      isMissed: true,
+    } as UnreadFeedItem;
+    expect(feedRowChrome(both).label).toBe('Voicemail');
+  });
+
+  it('labels a plain missed call, and leaves an unread answered one generic', () => {
+    const missed = { ...ITEMS[4], isMissed: true } as UnreadFeedItem;
+    expect(feedRowChrome(missed).label).toBe('Missed call');
+    expect(feedRowChrome(ITEMS[4]).label).toBe('Call');
+  });
+
   it('reads internal rows from the internal style record', () => {
     expect(feedRowChrome(ITEMS[5]).label).toBe('Internal');
   });
@@ -220,5 +249,43 @@ describe('badgeLabel', () => {
 
   it('caps the display at 99+', () => {
     expect(badgeLabel(120, false)).toBe('99+');
+  });
+});
+
+describe('isMissedCallRow', () => {
+  it('matches only call rows the server flagged, in either scope', () => {
+    for (const item of ITEMS) {
+      // The fixtures are all unflagged, so nothing qualifies until isMissed is set.
+      expect(isMissedCallRow(item)).toBe(false);
+    }
+    expect(
+      isMissedCallRow({ ...ITEMS[4], isMissed: true } as UnreadFeedItem),
+    ).toBe(true);
+    expect(
+      isMissedCallRow({ ...ITEMS[6], isMissed: true } as UnreadFeedItem),
+    ).toBe(true);
+  });
+
+  it('counts a voicemail — it is a missed call that left a message', () => {
+    const voicemail = {
+      ...ITEMS[4],
+      isVoicemail: true,
+      isMissed: true,
+    } as UnreadFeedItem;
+    expect(isMissedCallRow(voicemail)).toBe(true);
+  });
+
+  /**
+   * The rule reads the server's flag rather than `title`. `title` is a display string
+   * (`callTitle`), and the feed deliberately carries answered-but-unread inbound calls,
+   * so matching on it would couple the filter to wording.
+   */
+  it('ignores a row whose title says Missed call but whose flag does not', () => {
+    const liar = {
+      ...ITEMS[4],
+      title: 'Missed call',
+      isMissed: false,
+    } as UnreadFeedItem;
+    expect(isMissedCallRow(liar)).toBe(false);
   });
 });

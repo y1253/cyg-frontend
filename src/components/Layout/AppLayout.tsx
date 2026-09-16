@@ -16,6 +16,7 @@ import { useAuth } from '@/context/AuthContext';
 import { canManage, isSuperAdmin } from '@/lib/roles';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { NotificationBell } from '@/components/Layout/NotificationBell';
+import { MissedCallsIndicator } from '@/components/Layout/MissedCallsIndicator';
 import { SoftphoneStatus } from '@/components/Phone/SoftphoneStatus';
 import { ComposerRouteWatcher } from '@/components/Layout/ComposerRouteWatcher';
 import { SoftphoneProvider } from '@/context/SoftphoneContext';
@@ -201,7 +202,7 @@ function AppShell() {
     // the footer — which `h-screen` would push under the browser chrome.
     <div className="flex h-dvh flex-col">
       {/* Top navbar */}
-      <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background pl-1 pr-2 md:px-6">
+      <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background pl-1 pr-2 md:px-6">
         <div className="flex min-w-0 items-center gap-1">
           {/* Below `md` the sidebar is off-canvas, so the header carries its handle. */}
           <button
@@ -217,6 +218,26 @@ function AppShell() {
           </span>
         </div>
 
+        {/* Centred on the header itself, not between the two groups — absolute so the
+            existing flex children keep their sizes and nothing reflows when the pill
+            appears or goes away.
+
+            ⚠️ `pointer-events-none` on the wrapper is load-bearing: this strip spans the
+            header's full height across the middle, and without it would swallow clicks
+            aimed at the title or the identity block for the whole time the count is
+            zero and nothing is drawn here.
+
+            ⚠️ `lg`, not `md`. Absolute positioning cannot push anything out of the way,
+            so the centre has to be genuinely clear — and at `md` the identity block
+            (name, role, softphone, bell, Sign out) already reaches back past it, which
+            would put the pill underneath somebody's name. Below `lg` the compact pill
+            beside the bell is the answer instead. */}
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden -translate-x-1/2 items-center lg:flex">
+          <span className="pointer-events-auto">
+            <MissedCallsIndicator variant="full" />
+          </span>
+        </div>
+
         <div className="flex shrink-0 items-center gap-1 md:gap-3">
           {/* Identity moves into the drawer on a phone — the name, the role badge and a
               full "Sign out" button cannot share 390px with the bell and still leave the
@@ -227,6 +248,11 @@ function AppShell() {
           </Badge>
           <span className="hidden md:inline-flex">
             <SoftphoneStatus />
+          </span>
+          {/* Everything below `lg`: a phone has no room to centre anything, and a
+              tablet's centre is already occupied (see above). */}
+          <span className="lg:hidden">
+            <MissedCallsIndicator variant="compact" />
           </span>
           <NotificationBell />
           <Button

@@ -54,7 +54,7 @@ export default defineConfig({
         // IMPORTED script is served from the HTTP cache — an edit to
         // notification-sw.js would otherwise never reach a browser that already has
         // it. Bump this whenever that file changes.
-        importScripts: ['/notification-sw.js?v=1'],
+        importScripts: ['/notification-sw.js?v=2'],
         // Imported above, so precaching it too would add a second copy to the manifest
         // and churn the worker's hash on every unrelated build.
         globIgnores: ['notification-sw.js'],
