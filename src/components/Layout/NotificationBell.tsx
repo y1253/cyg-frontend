@@ -9,6 +9,7 @@ import { useNotifications } from '@/context/NotificationContext';
 import { useInboxSummary } from '@/hooks/useInboxSummary';
 import { dismissUnreadFeedItem } from '@/lib/unreadFeedDismiss';
 import { useMarkFeedItemRead } from '@/hooks/useMarkFeedItemRead';
+import { useReturnCall } from '@/hooks/useReturnCall';
 import { NotificationPanel } from './NotificationPanel';
 import { NotificationSettings } from './NotificationSettings';
 import { badgeLabel, pendingOpenFromFeedItem } from './unread-feed';
@@ -30,6 +31,7 @@ export function NotificationBell() {
   const { prefs, requestOpen } = useNotifications();
   const { unread, count, truncated, failed, isLoading } = useInboxSummary();
   const markRead = useMarkFeedItemRead();
+  const { returnCall, blockedReason } = useReturnCall();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'list' | 'settings'>('list');
 
@@ -101,6 +103,13 @@ export function NotificationBell() {
             failed={failed}
             onOpen={handleOpen}
             onMarkRead={(item) => markRead.mutate(item)}
+            // The popover deliberately STAYS OPEN, unlike opening a row: the call card
+            // appears over the page by itself, and closing this would hide the rest of
+            // the list the moment somebody starts working through it.
+            onReturnCall={(item) =>
+              returnCall(item, () => markRead.mutate(item))
+            }
+            returnCallBlocked={blockedReason}
           />
         ) : (
           <NotificationSettings />

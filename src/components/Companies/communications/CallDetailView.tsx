@@ -12,6 +12,7 @@ import { CallSummaryPanel } from './CallSummaryPanel';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { formatE164 } from '@/lib/phone';
 import { formatEmailDate } from '../message-utils';
+import { isImplicitlyRead } from './types';
 import type { CompleteTarget, ItemKind } from './types';
 
 function duration(totalSec: number): string {
@@ -123,17 +124,22 @@ export function CallDetailView({
               </Button>
             </span>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            onClick={() => {
-              markUnread.mutate(itemId);
-              onClose();
-            }}
-          >
-            <MailOpen size={13} /> Mark as unread
-          </Button>
+          {/* Hidden on a call that is read by construction — an outbound one, or one
+              somebody answered. The mark would flip and bounce back; see
+              `isImplicitlyRead` in ./types. */}
+          {call && !isImplicitlyRead({ kind: 'call', data: call }) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              onClick={() => {
+                markUnread.mutate(itemId);
+                onClose();
+              }}
+            >
+              <MailOpen size={13} /> Mark as unread
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"

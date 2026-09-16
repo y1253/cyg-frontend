@@ -6,12 +6,25 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import type { SmsItem } from '@/api/phone';
+import {
+  MAX_MMS_FILES,
+  MAX_MMS_UPLOAD_BYTES,
+  smsMediaUrl,
+  type SmsItem,
+  type SmsMedia,
+} from '@/api/phone';
 import { useSmsThread } from '@/hooks/useSmsThread';
 import { useSendSms } from '@/hooks/useSendSms';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { formatE164 } from '@/lib/phone';
-import { formatEmailDate, openPrintWindow, escapeHtml } from '../message-utils';
+import {
+  formatEmailDate,
+  openPrintWindow,
+  escapeHtml,
+  mergeAttachments,
+} from '../message-utils';
+import { AttachRow } from '../AttachRow';
+import { AttachmentChip } from '../AttachmentPreview';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
 import { buildSmsReplyBody, smsQuoteCost, smsReplyBudget } from './sms-reply';
@@ -139,14 +152,41 @@ export function SmsThreadView({
   const outgoing = buildSmsReplyBody(quoted?.body, draft);
   const { segments, unicode } = segmentsFor(outgoing);
 
+  /**
+   * Pictures and clips to send with this text.
+   *
+   * The per-file cap here is generous because the SERVER shrinks rather than refuses — a
+   * camera photo is 3-8 MB as a matter of course, and a limit that rejected those would
+   * make the feature unusable. What the server enforces is the message budget a carrier
+   * will actually deliver, which is much smaller and is reached by re-encoding.
+   */
+  const [attached, setAttached] = useState<File[]>([]);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+
+  const pickFiles = (picked: FileList | null) => {
+    if (!picked) return;
+    const { files, notice } = mergeAttachments(
+      attached,
+      Array.from(picked),
+      MAX_MMS_FILES,
+      MAX_MMS_UPLOAD_BYTES,
+    );
+    setAttached(files);
+    setAttachNotice(notice);
+  };
+
   const handleSend = () => {
     const body = outgoing.trim();
-    if (!draft.trim()) return;
+    // A picture with no words is an ordinary message — the text is only required when
+    // there is nothing else in it.
+    if (!draft.trim() && attached.length === 0) return;
     sendMutation.mutate(
-      { to: peer, body },
+      { to: peer, body, attachments: attached },
       {
         onSuccess: () => {
           setDraft('');
+          setAttached([]);
+          setAttachNotice(null);
           // Back to quoting the anchor, not to nothing: the next message is still a
           // reply in the same conversation.
           setQuotePick(undefined);
@@ -318,18 +358,36 @@ export function SmsThreadView({
           // rather than letting someone write a message that cannot be sent whole.
           maxLength={smsReplyBudget(quoted?.body)}
         />
+
+        {/* `cloudLabel={null}`: nothing here spills to a cloud drive. An attachment too
+            big for a carrier is SHRUNK by the server, and only refused if that fails. */}
+        <AttachRow
+          files={attached}
+          setFiles={setAttached}
+          onPick={pickFiles}
+          notice={attachNotice}
+          cloudLabel={null}
+        />
+
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">
             {outgoing.length} characters
             {quoted && ` (${smsQuoteCost(quoted.body)} of them quoted)`}
             {segments > 0 && ` · ${segments} segment${segments === 1 ? '' : 's'}`}
             {unicode && ' · unicode (shorter segments)'}
+            {/* The counter above is about the TEXT. A picture makes this an MMS, which is
+                billed as one message whatever the body costs — saying so stops the segment
+                count reading as the price of the whole thing. */}
+            {attached.length > 0 && ' · sent as a picture message (MMS)'}
           </span>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
-              disabled={sendMutation.isPending || !draft.trim()}
+              disabled={
+                sendMutation.isPending ||
+                (!draft.trim() && attached.length === 0)
+              }
               onClick={handleSend}
             >
               <Send size={13} />
@@ -380,11 +438,24 @@ function SmsBubble({
       >
         <div
           className={[
-            'min-w-0 rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+            'flex min-w-0 flex-col gap-2 rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
             own ? 'bg-teal-600 text-white' : 'bg-muted text-foreground',
           ].join(' ')}
         >
-          {m.body || (m.numMedia > 0 ? `(${m.numMedia} attachment${m.numMedia === 1 ? '' : 's'})` : '(no text)')}
+          {/* The attachments, above the text — the order every phone uses. `media` is
+              present only in a thread; the inbox row still shows the count, because
+              listing media costs a provider request per message. */}
+          {m.media?.map((file) => (
+            <SmsAttachment key={file.sid} media={file} messageSid={m.sid} />
+          ))}
+          {/* A picture with no words is an ordinary message, so it gets no placeholder
+              text. The count is still the fallback when the bytes could not be listed. */}
+          {m.body ||
+            (m.media?.length
+              ? null
+              : m.numMedia > 0
+                ? `(${m.numMedia} attachment${m.numMedia === 1 ? '' : 's'})`
+                : '(no text)')}
         </div>
         <button
           type="button"
@@ -405,4 +476,61 @@ function SmsBubble({
       </span>
     </div>
   );
+}
+
+/**
+ * One MMS attachment.
+ *
+ * Images render inline, because that is what the message IS — a text with a photo in it
+ * reading "(1 attachment)" is the bug this replaces. Everything else (a clip, a vCard) gets
+ * the same chip the email and WhatsApp threads use, so a sender's odd file type degrades to
+ * a download rather than a broken element.
+ *
+ * The URL is our own proxy, never SignalWire's: the provider serves message media with no
+ * authentication at all, so its URL is a permanent public link to a client's photo.
+ */
+function SmsAttachment({
+  media,
+  messageSid,
+}: {
+  media: SmsMedia;
+  messageSid: string;
+}) {
+  const url = smsMediaUrl(media, messageSid);
+  const download = smsMediaUrl(media, messageSid, { download: true });
+
+  if (media.contentType.startsWith('image/')) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={url}
+          alt="Attachment"
+          loading="lazy"
+          className="max-h-64 w-auto max-w-full rounded-lg object-contain"
+        />
+      </a>
+    );
+  }
+  if (media.contentType.startsWith('audio/')) {
+    return <audio controls src={url} className="max-w-full" />;
+  }
+  if (media.contentType.startsWith('video/')) {
+    return <video controls src={url} className="max-h-64 max-w-full rounded-lg" />;
+  }
+  return (
+    <AttachmentChip
+      url={url}
+      downloadUrl={download}
+      mimeType={media.contentType}
+      filename={`attachment${extensionHint(media.contentType)}`}
+    />
+  );
+}
+
+/** A friendly-looking suffix for a chip's label; the real name is the server's business. */
+function extensionHint(contentType: string): string {
+  const base = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (base === 'text/vcard' || base === 'text/x-vcard') return '.vcf';
+  if (base === 'application/pdf') return '.pdf';
+  return '';
 }

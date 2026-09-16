@@ -16,7 +16,7 @@ import {
 import { formatE164 } from '@/lib/phone';
 import { AttachmentChip } from '../AttachmentPreview';
 import { displayName, formatEmailDate, senderInitial } from '../message-utils';
-import { KIND_STYLES, type UnifiedItem } from './types';
+import { isImplicitlyRead, KIND_STYLES, type UnifiedItem } from './types';
 
 const MAX_CHIPS = 3;
 
@@ -86,6 +86,9 @@ export function InboxRow({
 }) {
   const style = KIND_STYLES[item.kind];
   const { isRead, isCompleted } = item.data;
+  // Nothing to toggle: the server rebuilds this row as read whatever the table says, so
+  // the control would flip and bounce back. See `isImplicitlyRead`.
+  const readLocked = isImplicitlyRead(item);
 
   return (
     <div
@@ -111,10 +114,11 @@ export function InboxRow({
           <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
         </div>
       )}
-      {/* Read/unread toggle dot. A draft is never unread and cannot be marked, so it
-          gets a spacer instead — keeping the avatar and text aligned with every other
-          row in the list. */}
-      {isDraft ? (
+      {/* Read/unread toggle dot. A draft is never unread and cannot be marked, and neither
+          is an implicitly-read row (an outbound message, a call somebody answered), so both
+          get a spacer instead — keeping the avatar and text aligned with every other row in
+          the list. */}
+      {isDraft || readLocked ? (
         <span className="mt-1 shrink-0 w-5 h-5" aria-hidden />
       ) : (
         <button

@@ -59,7 +59,7 @@ import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { showListSpinner } from './communications/inbox-loading';
 import {
-  ALL_LABELS, CONTACTS_FOLDER, FOLDERS, INBOX_TABS,
+  ALL_LABELS, CONTACTS_FOLDER, FOLDERS, INBOX_TABS, isImplicitlyRead,
   type CompleteTarget, type ItemKind, type KindFilter,
   type Selection, type UnifiedItem,
 } from './communications/types';
@@ -944,7 +944,14 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   ) => {
     // Dispatched off each item's own `kind`, which the caller already carries — the
     // id shape is never inspected to work out what a row is.
-    for (const it of items) stateMutations[it.kind][action](it.data.id);
+    //
+    // Implicitly-read rows are dropped from an `unread` fan-out: the server rebuilds them
+    // as read whatever the state table says, so the mutation would flip the row and let it
+    // bounce back on the next refetch. The row-level control is hidden for the same reason
+    // (`InboxRow`), and this is the third way to reach it.
+    const targets =
+      action === 'unread' ? items.filter((it) => !isImplicitlyRead(it)) : items;
+    for (const it of targets) stateMutations[it.kind][action](it.data.id);
   };
 
   const handleSelectFolder = (folderId: string) => {

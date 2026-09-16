@@ -389,6 +389,30 @@ export async function sendWhatsAppText(
 }
 
 /**
+ * Meta's caption ceiling — a QUARTER of the 4096 a plain text message allows, so the
+ * composer's counter has to switch when a file is attached.
+ */
+export const WHATSAPP_CAPTION_LIMIT = 1024;
+
+/**
+ * Will WhatsApp show a caption on this file?
+ *
+ * Image, video and document only; audio and stickers silently discard one. The composer
+ * disables the field rather than letting somebody type a sentence the recipient never sees.
+ *
+ * ⚠️ Mirrors the server's `whatsappMediaKind` + `whatsappAcceptsCaption` pair
+ * (`whatsapp.util.ts`), which is what actually decides the kind and drops the caption. This
+ * copy only has a File to look at, so it deliberately asks the WEAKER question — "could
+ * this ever be an image or a video" — and errs toward offering the field: a caption the
+ * server then drops is a small loss, while wrongly disabling it on a photo would be a
+ * missing feature with no explanation.
+ */
+export function fileAcceptsCaption(file: File): boolean {
+  const mime = (file.type || '').toLowerCase();
+  return !mime.startsWith('audio/');
+}
+
+/**
  * Upload a recorded voice note. XHR rather than fetch for upload progress — the
  * `api/gmail.ts#sendEmail` reason — with the same auth and error handling.
  */
@@ -439,6 +463,70 @@ export function sendWhatsAppVoice(
       reject(new Error(message));
     };
     xhr.onerror = () => reject(new Error('Network error while sending the voice message'));
+    xhr.send(form);
+  });
+}
+
+/**
+ * Send an attached file — anything at all; the server decides whether WhatsApp takes it
+ * as an image, a video, an audio file or a document.
+ *
+ * XHR for the same reason as the voice note above: a 100 MB document takes minutes and the
+ * composer has to show a progress bar rather than looking frozen.
+ */
+export function sendWhatsAppMedia(
+  token: string,
+  companyId: number,
+  to: string,
+  file: File,
+  opts: { caption?: string; replyToMessageId?: number } = {},
+  onProgress?: (fraction: number) => void,
+): Promise<WhatsAppItem> {
+  const form = new FormData();
+  form.set('to', to);
+  form.set('file', file, file.name);
+  if (opts.caption) form.set('caption', opts.caption);
+  if (opts.replyToMessageId !== undefined) {
+    form.set('replyToMessageId', String(opts.replyToMessageId));
+  }
+  const url = `${API}/whatsapp/companies/${companyId}/messages/media`;
+
+  return new Promise<WhatsAppItem>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        handleUnauthorized();
+        reject(new Error('Your session expired'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as WhatsAppItem);
+        } catch {
+          reject(new Error('The file was sent, but the reply could not be read'));
+        }
+        return;
+      }
+      let message = 'Failed to send the file';
+      try {
+        const body = JSON.parse(xhr.responseText) as { message?: string | string[] };
+        if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+      } catch {
+        // non-JSON error body (e.g. a proxy page)
+      }
+      // nginx refuses an over-large body before Node ever sees it, so there is no
+      // service message to quote here.
+      if (xhr.status === 413) message = 'That file is too large to send.';
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('Network error while sending the file'));
     xhr.send(form);
   });
 }

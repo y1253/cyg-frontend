@@ -7,8 +7,15 @@ export function useSendSms(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ to, body }: { to: string; body: string }) =>
-      sendSms(token!, companyId, to, body),
+    mutationFn: ({
+      to,
+      body,
+      attachments,
+    }: {
+      to: string;
+      body: string;
+      attachments?: File[];
+    }) => sendSms(token!, companyId, to, body, attachments ?? []),
     onSuccess: () => {
       // Both the conversation and the inbox row for it.
       void qc.invalidateQueries({ queryKey: ['sms-thread', companyId] });

@@ -1,6 +1,12 @@
-import { BellOff, Check, Loader2, type LucideIcon } from 'lucide-react';
+import {
+  BellOff,
+  Check,
+  Loader2,
+  PhoneOutgoing,
+  type LucideIcon,
+} from 'lucide-react';
 import type { UnreadFeedItem } from '@/api/gmail';
-import { feedRowChrome, relativeTime } from './unread-feed';
+import { feedRowChrome, relativeTime, returnCallTarget } from './unread-feed';
 
 /**
  * The unread list under the bell.
@@ -19,6 +25,8 @@ export function NotificationPanel({
   failed,
   onOpen,
   onMarkRead,
+  onReturnCall,
+  returnCallBlocked,
   emptyIcon = BellOff,
   emptyTitle = "You're all caught up",
   emptyBody = 'New messages for your companies show up here.',
@@ -30,6 +38,15 @@ export function NotificationPanel({
   failed: { companyId: number; companyName: string }[];
   onOpen: (item: UnreadFeedItem) => void;
   onMarkRead: (item: UnreadFeedItem) => void;
+  /**
+   * Ring the caller back, straight from the row.
+   *
+   * Optional, and absent means the button is not rendered at all — so a surface that has
+   * no softphone in scope simply does not offer it, rather than offering a dead control.
+   */
+  onReturnCall?: (item: UnreadFeedItem) => void;
+  /** Why this row cannot be dialled right now, if it cannot. */
+  returnCallBlocked?: (item: UnreadFeedItem) => string | null;
   /**
    * The empty state, overridable so a filtered view of this same feed does not claim
    * the whole inbox is clear. Defaulted to the bell's own wording, so the bell renders
@@ -65,6 +82,8 @@ export function NotificationPanel({
                 item={item}
                 onOpen={onOpen}
                 onMarkRead={onMarkRead}
+                onReturnCall={onReturnCall}
+                returnCallBlocked={returnCallBlocked}
               />
             ))}
           </ul>
@@ -117,13 +136,21 @@ function FeedRow({
   item,
   onOpen,
   onMarkRead,
+  onReturnCall,
+  returnCallBlocked,
 }: {
   item: UnreadFeedItem;
   onOpen: (item: UnreadFeedItem) => void;
   onMarkRead: (item: UnreadFeedItem) => void;
+  onReturnCall?: (item: UnreadFeedItem) => void;
+  returnCallBlocked?: (item: UnreadFeedItem) => string | null;
 }) {
   const chrome = feedRowChrome(item);
   const { Icon } = chrome;
+  // Every call row with something to dial, not only the missed ones — see
+  // `returnCallTarget`. A row with no target renders no button rather than a dead one.
+  const canCall = !!onReturnCall && returnCallTarget(item) !== null;
+  const callBlocked = canCall ? (returnCallBlocked?.(item) ?? null) : null;
 
   return (
     <li className="group relative">
@@ -156,21 +183,43 @@ function FeedRow({
         </span>
       </button>
 
-      {/* Per-row rather than a "mark all read" button: email read is one provider call
-          per message with no batch endpoint, and chat read state is shared across staff,
-          so a single click could clear other people's bells. */}
-      <button
-        type="button"
-        title="Mark as read"
-        aria-label={`Mark as read: ${item.title || chrome.label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onMarkRead(item);
-        }}
-        className="absolute right-1.5 bottom-1.5 hidden h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground group-hover:flex"
-      >
-        <Check size={13} />
-      </button>
+      {/* ⚠️ `opacity-0 … group-hover:opacity-100` with `focus-within`, NOT `hidden …
+          group-hover:flex`. `hidden` takes these out of the tab order entirely, so the only
+          actions on a notification row were unreachable by keyboard. The container is
+          `pointer-events-none` so its empty area cannot swallow a click meant for the row
+          underneath; the buttons take pointer events back. */}
+      <div className="pointer-events-none absolute right-1.5 bottom-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        {canCall && (
+          <button
+            type="button"
+            title={callBlocked ?? 'Call back'}
+            aria-label={`Call back: ${item.from}`}
+            disabled={!!callBlocked}
+            onClick={(e) => {
+              e.stopPropagation();
+              onReturnCall?.(item);
+            }}
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-green-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          >
+            <PhoneOutgoing size={13} />
+          </button>
+        )}
+        {/* Per-row rather than a "mark all read" button: email read is one provider call
+            per message with no batch endpoint, and chat read state is shared across staff,
+            so a single click could clear other people's bells. */}
+        <button
+          type="button"
+          title="Mark as read"
+          aria-label={`Mark as read: ${item.title || chrome.label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onMarkRead(item);
+          }}
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Check size={13} />
+        </button>
+      </div>
     </li>
   );
 }

@@ -1,5 +1,6 @@
 import {
   Check,
+  CheckCheck,
   Grid3x3,
   Loader2,
   Mic,
@@ -20,8 +21,11 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { formatE164 } from '@/lib/phone';
-import type { ConferenceStatus } from '@/api/phone';
+import { useAuth } from '@/context/AuthContext';
+import { completeCall, type ConferenceStatus } from '@/api/phone';
+import { setInternalCallState } from '@/api/internalCalls';
 import { DTMF_KEYS, dtmfTones } from '@/lib/dtmf';
 import { playDtmfTone, unlockAudio } from '@/lib/notificationSound';
 import {
@@ -121,9 +125,55 @@ export function CallOverlay() {
     retryAudio,
   } = useSoftphoneActions();
   const navigate = useNavigate();
+  const { token } = useAuth();
+  const qc = useQueryClient();
   const [transferOpen, setTransferOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [padOpen, setPadOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
+
+  /**
+   * Hang up AND clear the call off the worklist, in one action.
+   *
+   * ── WHY THE COMPLETE RUNS FIRST, AND IS AWAITED ────────────────────────────────
+   * The server has to work out which inbox row this call is — for a click-to-call the
+   * browser holds the `outbound-api` parent while the row is its `outbound-dial` child —
+   * and it does that by asking SignalWire which legs are LIVE. After the BYE lands there
+   * are none, and on a forked click-to-call the sid we hold is the dead twin about half
+   * the time. So the call stays up for the round-trip. It is billed per minute; a second
+   * costs nothing.
+   *
+   * ⚠️ And the hang-up happens either way. A failed bookkeeping write must never leave a
+   * customer connected to an agent who has already pressed the red button — the worst case
+   * here is a call that has to be completed from the inbox, which is where it already was.
+   */
+  const endAndComplete = () => {
+    const call = info;
+    if (!call || completing) return;
+    setCompleting(true);
+
+    const done = () => {
+      setCompleting(false);
+      hangup();
+    };
+
+    const mark =
+      call.kind === 'internal'
+        ? setInternalCallState(token!, call.callSid, 'complete')
+        : completeCall(token!, call.companyId, call.callSid);
+
+    // A budget, not a wait: if SignalWire is slow the agent still gets their hang-up on
+    // the beat they asked for it.
+    const budget = new Promise((resolve) => setTimeout(resolve, 1500));
+    void Promise.race([mark.catch(() => undefined), budget])
+      .then(() => {
+        void qc.invalidateQueries({ queryKey: ['phone-timeline', call.companyId] });
+        void qc.invalidateQueries({ queryKey: ['phone-counts', call.companyId] });
+        void qc.invalidateQueries({ queryKey: ['internal-calls'] });
+        void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
+      })
+      .finally(done);
+  };
 
   /**
    * More than two people on the line.
@@ -132,6 +182,7 @@ export function CallOverlay() {
    * `'active'` for the reason `SoftphoneState.conference` gives.
    */
   const inConference = showConferenceCard(conference);
+  const ringing = phase === 'ringing';
 
   // Call waiting. `waiting` is the ring the agent is NOT on; `rows` is every answered
   // call, so the two can never describe the same call twice.
@@ -154,6 +205,27 @@ export function CallOverlay() {
     />
   ) : null;
   const swapTo = canQuickSwap(calls) ? otherCallId(calls, activeCallId) : null;
+
+  /**
+   * Is there one unambiguous call to complete?
+   *
+   * Three exclusions, each for its own reason:
+   *  - RINGING: an outbound call that is still ringing has no child leg BY CONSTRUCTION,
+   *    so there is no row to resolve — and completing a call you then DECLINE would tick
+   *    off the missed call the team is supposed to act on. (The ringing bar is
+   *    Answer/Decline anyway, so this costs no layout.)
+   *  - CONFERENCE: `addCall` creates a second call with its own timeline row, so "the
+   *    call" stops having one answer. Transfer is disabled here for the same reason.
+   *  - An internal CALLER: `InternalCallsService.setState` scopes its write to `calleeId`,
+   *    so the caller's request is a guaranteed no-op — correctly, since a call you placed
+   *    already projects completed. `token` is present only on the CALLEE's event, which is
+   *    the one thing that tells the two apart in the browser.
+   */
+  const canEndAndComplete =
+    !ringing &&
+    !inConference &&
+    !!info &&
+    (info.kind !== 'internal' || !!info.token);
 
   if (phase === 'idle') return null;
 
@@ -193,7 +265,6 @@ export function CallOverlay() {
     );
   }
 
-  const ringing = phase === 'ringing';
   // A call we placed: it is connecting, not asking to be answered.
   const outgoing = info?.direction === 'outbound';
   const otherParty = outgoing ? info?.to : info?.from;
@@ -458,13 +529,36 @@ export function CallOverlay() {
                 </button>
               )}
               </div>
-              <button
-                onClick={hangup}
-                className="flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
-              >
-                <PhoneOff size={14} />
-                Hang up
-              </button>
+              {/* ⚠️ A SPLIT bar, not two buttons sharing the row.
+                  `SECONDARY_BTN`'s docblock above exists because halving Hang up is the
+                  failure this card keeps being redesigned to avoid — it is the one control
+                  that must never shrink, and on a short viewport it is also the one that
+                  must never be pushed off screen. An attached 44px segment costs Hang up
+                  44 pixels rather than half its width, and adds no height at all. */}
+              <div className="flex w-full min-w-[7rem] flex-1 overflow-hidden rounded-md">
+                <button
+                  onClick={hangup}
+                  className="flex flex-1 items-center justify-center gap-1.5 bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+                >
+                  <PhoneOff size={14} />
+                  Hang up
+                </button>
+                {canEndAndComplete && (
+                  <button
+                    onClick={endAndComplete}
+                    disabled={completing}
+                    title="End the call and mark it complete"
+                    aria-label="End the call and mark it complete"
+                    className="flex w-11 shrink-0 items-center justify-center border-l border-red-500/40 bg-red-600 text-white hover:bg-red-500 disabled:opacity-70"
+                  >
+                    {completing ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <CheckCheck size={15} />
+                    )}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>

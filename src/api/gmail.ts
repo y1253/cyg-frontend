@@ -520,6 +520,12 @@ export type UnreadFeedItem =
       /** `sid` is SignalWire's key; `itemId` is the READ-STATE key. Not interchangeable. */
       sid: string;
       itemId: string;
+      /**
+       * The E.164 number the row's Return call button dials, or null when the caller
+       * cannot be dialled back. NOT `from`, which is a display label and is usually a
+       * person's name.
+       */
+      peer: string | null;
       isVoicemail: boolean;
       /**
        * Unread + inbound + unanswered, decided server-side by `isUnreadMissedCall` —
@@ -539,6 +545,8 @@ export type UnreadFeedItem =
       scope: 'internal';
       kind: 'call';
       sid: string;
+      /** Who to ring back — a USER id, since a staff call has no number in its path. */
+      peerUserId: number;
       /** The staff-call twin of the field above. */
       isMissed: boolean;
     });

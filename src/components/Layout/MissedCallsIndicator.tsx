@@ -9,6 +9,7 @@ import { useNotifications } from '@/context/NotificationContext';
 import { useInboxSummary } from '@/hooks/useInboxSummary';
 import { dismissUnreadFeedItem } from '@/lib/unreadFeedDismiss';
 import { useMarkFeedItemRead } from '@/hooks/useMarkFeedItemRead';
+import { useReturnCall } from '@/hooks/useReturnCall';
 import { NotificationPanel } from './NotificationPanel';
 import { isMissedCallRow, pendingOpenFromFeedItem } from './unread-feed';
 import type { UnreadFeedItem } from '@/api/gmail';
@@ -35,6 +36,7 @@ export function MissedCallsIndicator({
   const { requestOpen } = useNotifications();
   const { unread, missedCallsOwn, failed, isLoading } = useInboxSummary();
   const markRead = useMarkFeedItemRead();
+  const { returnCall, blockedReason } = useReturnCall();
   const [open, setOpen] = useState(false);
 
   const rows = unread.filter(isMissedCallRow);
@@ -118,6 +120,10 @@ export function MissedCallsIndicator({
           failed={failed}
           onOpen={handleOpen}
           onMarkRead={(item) => markRead.mutate(item)}
+          // Kept open on a call-back, unlike `handleOpen` above: this list exists to be
+          // worked through, and the call card raises itself over the page anyway.
+          onReturnCall={(item) => returnCall(item, () => markRead.mutate(item))}
+          returnCallBlocked={blockedReason}
           emptyIcon={PhoneMissed}
           emptyTitle="No missed calls"
           emptyBody="Callers nobody picked up show up here."

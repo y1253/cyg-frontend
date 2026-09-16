@@ -82,6 +82,34 @@ export function isMissedCallRow(item: UnreadFeedItem): boolean {
 }
 
 /**
+ * Can this row be rung back, and what would it dial?
+ *
+ * Every `kind: 'call'` row with a target, NOT only the missed ones. Every row in this feed
+ * is unread by definition and an answered call is now read by construction, so what remains
+ * is already missed, failed or a voicemail — and gating on `isMissed` would leave a FAILED
+ * inbound call (a real case: the SIP child reported `failed`) with no way to call back, for
+ * no benefit.
+ *
+ * The honest gate is "is there something to dial", which is also the one that narrows the
+ * type: a company call carries an E.164 `peer` — null when the caller withheld a number, so
+ * the button is hidden rather than offered and broken — and a staff call carries a user id,
+ * because an internal call has no number anywhere in its path.
+ */
+export type ReturnCallTarget =
+  | { scope: 'company'; companyId: number; to: string }
+  | { scope: 'internal'; calleeId: number };
+
+export function returnCallTarget(item: UnreadFeedItem): ReturnCallTarget | null {
+  if (item.kind !== 'call') return null;
+  if (item.scope === 'internal') {
+    return { scope: 'internal', calleeId: item.peerUserId };
+  }
+  return item.peer
+    ? { scope: 'company', companyId: item.companyId, to: item.peer }
+    : null;
+}
+
+/**
  * A client company row, rebuilt as the `Selection` the Communications tab opens.
  *
  * Returns null for the internal workspace, whose inbox is a different component with a

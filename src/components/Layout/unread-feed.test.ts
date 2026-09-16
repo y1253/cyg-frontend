@@ -6,6 +6,7 @@ import {
   pendingOpenFromFeedItem,
   readIdForSelection,
   relativeTime,
+  returnCallTarget,
   selectionFromFeedItem,
 } from './unread-feed';
 import { isValidSelection } from '@/components/Companies/communications/useCommUiState';
@@ -58,6 +59,7 @@ const ITEMS: UnreadFeedItem[] = [
     kind: 'call',
     sid: 'c1',
     itemId: 'swcall:c1',
+    peer: '+14385551212',
     isVoicemail: false,
     isMissed: false,
   },
@@ -75,6 +77,7 @@ const ITEMS: UnreadFeedItem[] = [
     scope: 'internal',
     kind: 'call',
     sid: 'c9',
+    peerUserId: 7,
     isMissed: false,
   },
   // Appended rather than inserted, so the ITEMS[n] indexes the tests below use hold.
@@ -287,5 +290,38 @@ describe('isMissedCallRow', () => {
       isMissed: false,
     } as UnreadFeedItem;
     expect(isMissedCallRow(liar)).toBe(false);
+  });
+});
+
+describe('returnCallTarget', () => {
+  /**
+   * The gate is "is there something to dial", not "was it missed". Every row in this feed
+   * is unread by definition and an answered call is read by construction, so what is left
+   * is already missed, failed or a voicemail — and gating on `isMissed` would strand a
+   * FAILED inbound call with no way to ring the person back.
+   */
+  it('offers a company call its E.164 counterparty and its company', () => {
+    const call = ITEMS.find((i) => i.id === 'swcall:c1')!;
+    expect(returnCallTarget(call)).toEqual({
+      scope: 'company',
+      companyId: call.companyId,
+      to: '+14385551212',
+    });
+  });
+
+  it('offers a staff call a USER id — there is no number in its path', () => {
+    const call = ITEMS.find((i) => i.id === 'intcall:c9')!;
+    expect(returnCallTarget(call)).toEqual({ scope: 'internal', calleeId: 7 });
+  });
+
+  it('offers nothing when the caller withheld a number', () => {
+    const call = ITEMS.find((i) => i.id === 'swcall:c1')!;
+    expect(returnCallTarget({ ...call, peer: null } as UnreadFeedItem)).toBeNull();
+  });
+
+  it('offers nothing on a row that is not a call', () => {
+    for (const item of ITEMS.filter((i) => i.kind !== 'call')) {
+      expect(returnCallTarget(item)).toBeNull();
+    }
   });
 });

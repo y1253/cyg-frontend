@@ -98,6 +98,42 @@ export function matchesKindFilter(item: UnifiedItem, filter: KindFilter): boolea
 }
 
 /**
+ * A row that is READ by construction, so "Mark as unread" on it would do NOTHING.
+ *
+ * Read state is "a row exists ⇔ read" in a shared table, which gives it no way to record
+ * that an implicitly-read item was later marked unread: the mark-unread call deletes a row
+ * that is not there, and the server rebuilds the item as read on the next poll. The control
+ * flips optimistically and bounces back — so it is hidden instead.
+ *
+ * Calls: outbound (you cannot have an unread call you placed) and inbound calls somebody
+ * ANSWERED. A missed call — a voicemail included — stays unread and stays markable.
+ * Texts: outbound only.
+ *
+ * ⚠️ Mirrors `isImplicitlyReadCall` in server `phone/phone-timeline.util.ts`, which is what
+ * actually stamps `isRead`. If the two disagree, the control reappears on a row where it
+ * does nothing.
+ */
+export function isImplicitlyRead(item: UnifiedItem): boolean {
+  if (item.kind === 'sms') return item.data.direction === 'outbound';
+  if (item.kind !== 'call') return false;
+  if (item.data.direction === 'outbound') return true;
+  // Exhaustive, for the reason the server copy gives: a fifth outcome must break the
+  // build in BOTH copies rather than defaulting silently in either direction.
+  switch (item.data.outcome) {
+    case 'answered':
+    case 'in-progress':
+      return true;
+    case 'missed':
+    case 'failed':
+      return false;
+    default: {
+      const never: never = item.data.outcome;
+      return never;
+    }
+  }
+}
+
+/**
  * An UNREAD MISSED CALL — what the Missed calls folder lists.
  *
  * Voicemails match with no clause of their own: the server only sets `hasVoicemail` on an

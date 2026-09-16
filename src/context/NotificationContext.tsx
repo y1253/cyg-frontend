@@ -115,6 +115,19 @@ interface NotificationValue {
    * in-page reaction (the Messages tab shows a banner). Null until the first event.
    */
   lastInternalEventAt: number | null;
+  /**
+   * Raise an in-app toast and nothing else.
+   *
+   * Deliberately separate from `notify`/`notifyPush`: this is for telling somebody that an
+   * action they just took FAILED, which must never be filtered by alert preferences, never
+   * chime, and never raise a desktop notification the way an arriving message does. Same
+   * component underneath, different event.
+   */
+  pushToast: (input: {
+    title: string;
+    body: string;
+    onClick?: () => void;
+  }) => void;
   /** Announce a message a push stream just delivered. See `notify` for the rules. */
   notifyPush: (input: {
     source: string;
@@ -625,6 +638,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       lastInternalEventAt,
       notifyPush,
       suppressSource,
+      // The in-app toast on its own, deliberately separate from `notify`: this is for
+      // telling somebody an action they just took failed, which must never be filtered by
+      // alert preferences, chime or raise a desktop notification the way an incoming
+      // MESSAGE does. Same component, different event.
+      pushToast,
       pendingOpen,
       requestOpen,
       clearPendingOpen,
@@ -639,6 +657,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       lastInternalEventAt,
       notifyPush,
       suppressSource,
+      pushToast,
       pendingOpen,
       requestOpen,
       clearPendingOpen,

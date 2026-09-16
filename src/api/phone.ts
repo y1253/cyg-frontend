@@ -266,12 +266,49 @@ export interface CallItem extends PhoneItemBase {
   parentCallSid: string | null;
 }
 
+/**
+ * How many files may ride on one text, and how large one may be BEFORE shrinking.
+ *
+ * ⚠️ Mirrors `mms-staging.util.ts`, and neither number is the real limit. The server
+ * re-encodes an attachment down to what a carrier will actually deliver (about a megabyte
+ * for the whole message), so this cap is deliberately generous — a phone photo is 3-8 MB as
+ * a matter of course, and refusing those in the browser would make the feature unusable.
+ * What these do is stop somebody waiting through the upload of a 200 MB video that could
+ * never be sent.
+ */
+export const MAX_MMS_FILES = 3;
+export const MAX_MMS_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** One picture, clip or file attached to a text. */
+export interface SmsMedia {
+  sid: string;
+  contentType: string;
+  /** Bound to this attachment and short-lived — see the server's `sms-media-token.util`. */
+  token: string;
+}
+
 export interface SmsItem extends PhoneItemBase {
   kind: 'sms';
   body: string;
   numMedia: number;
   status: string;
   errorCode: number | null;
+  /**
+   * The attachments, present only in a THREAD — the inbox list is polled and listing media
+   * costs a provider request per message. A list row shows `numMedia` instead.
+   */
+  media?: SmsMedia[];
+}
+
+/** Where the browser fetches one MMS attachment. Proxied: the provider's own URL is public. */
+export function smsMediaUrl(
+  media: SmsMedia,
+  messageSid: string,
+  opts: { download?: boolean } = {},
+): string {
+  const query = new URLSearchParams({ token: media.token });
+  if (opts.download) query.set('download', '1');
+  return `${API}/phone/sms-media/${encodeURIComponent(messageSid)}/${encodeURIComponent(media.sid)}?${query.toString()}`;
 }
 
 export type PhoneItem = CallItem | SmsItem;
@@ -353,24 +390,58 @@ export async function fetchSmsThread(
   return res.json() as Promise<SmsThreadResult>;
 }
 
-/** Send a text from the company's support number. */
+/**
+ * Send a text from the company's support number, with or without attachments.
+ *
+ * Always multipart, even with no files: one request shape rather than two, and the server
+ * route is multipart regardless. Note NO `Content-Type` header — the browser has to set it
+ * itself so the multipart boundary is included.
+ */
 export async function sendSms(
   token: string,
   companyId: number,
   to: string,
   body: string,
+  attachments: File[] = [],
 ): Promise<SmsItem> {
+  const form = new FormData();
+  form.set('to', to);
+  form.set('body', body);
+  for (const file of attachments) form.append('attachments', file, file.name);
+
   const res = await fetchWithAuth(
     token,
     `${API}/phone/companies/${companyId}/sms`,
-    {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ to, body }),
-    },
+    { method: 'POST', body: form },
   );
   if (!res.ok) throw await failure(res, 'Failed to send the message');
   return res.json() as Promise<SmsItem>;
+}
+
+/**
+ * Mark the call the agent is on COMPLETED, resolving which inbox row that is server-side.
+ *
+ * Takes the sid the softphone holds and returns the row id it actually wrote, because the
+ * two differ on every click-to-call: the browser's leg is the `outbound-api` parent, and
+ * the rendered row is its `outbound-dial` child. Building `swcall:{sid}` here instead would
+ * write against a row that does not exist — silently. There is no client-side `swcall:`
+ * constructor anywhere in this app, deliberately, and this is why.
+ *
+ * ⚠️ Call this BEFORE hanging up. The server finds the child leg by asking SignalWire which
+ * legs are live, and after the BYE there are none.
+ */
+export async function completeCall(
+  token: string,
+  companyId: number,
+  sid: string,
+): Promise<{ itemId: string }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(sid)}/complete`,
+    { method: 'POST' },
+  );
+  if (!res.ok) throw await failure(res, 'Failed to mark the call complete');
+  return res.json() as Promise<{ itemId: string }>;
 }
 
 /**

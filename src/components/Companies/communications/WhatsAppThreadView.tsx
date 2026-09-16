@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  WHATSAPP_CAPTION_LIMIT,
+  fileAcceptsCaption,
   formatVoiceDuration,
   formatWhatsAppNumber,
   whatsappMediaUrl,
@@ -17,9 +19,13 @@ import {
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { useSendWhatsAppVoice } from '@/hooks/useSendWhatsAppVoice';
+import { useSendWhatsAppMedia } from '@/hooks/useSendWhatsAppMedia';
 import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
 import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
 import { AttachmentChip } from '../AttachmentPreview';
+import { AttachRow } from '../AttachRow';
+import { UploadProgressBar } from '../ComposerBits';
+import { mergeAttachments } from '../message-utils';
 import { escapeHtml, formatEmailDate, openPrintWindow } from '../message-utils';
 import { VoiceRecorder } from './VoiceRecorder';
 import { TemplatePicker } from './TemplatePicker';
@@ -68,6 +74,7 @@ export function WhatsAppThreadView({
   const { data, isLoading } = useWhatsAppThread(companyId, peer, active);
   const sendText = useSendWhatsApp(companyId);
   const sendVoice = useSendWhatsAppVoice(companyId);
+  const sendFile = useSendWhatsAppMedia(companyId);
   const markUnread = useMarkWhatsAppItem(companyId, 'unread');
 
   const [draft, setDraft] = useState('');
@@ -141,6 +148,49 @@ export function WhatsAppThreadView({
       ? null
       : (byMessageId.get(m.replyToMessageId) ?? null);
 
+  /**
+   * One attachment per message, not many.
+   *
+   * WhatsApp has no multi-attachment message — N files would be N separate sends, N rows
+   * and N chances to half-fail. Capping at one also matches what the composer already does
+   * with the voice recorder, which is mutually exclusive with typing.
+   */
+  const [attached, setAttached] = useState<File[]>([]);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+  const file = attached[0] ?? null;
+  // Caption support is Meta's rule, not ours: audio and stickers silently discard one, so
+  // the field says so rather than letting somebody type a sentence that never arrives.
+  const captionAllowed = file ? fileAcceptsCaption(file) : true;
+  const captionLimit = file ? WHATSAPP_CAPTION_LIMIT : 4096;
+
+  const pickFiles = (picked: FileList | null) => {
+    if (!picked) return;
+    const { files, notice } = mergeAttachments(attached, Array.from(picked), 1);
+    setAttached(files);
+    setAttachNotice(
+      notice ??
+        (picked.length > 1 || attached.length
+          ? 'WhatsApp sends one file per message.'
+          : null),
+    );
+  };
+
+  const handleSendFile = () => {
+    if (!file) return;
+    const caption = captionAllowed ? draft.trim() : '';
+    sendFile.mutate(
+      { to: peer, file, caption, replyToMessageId: quoted?.messageId },
+      {
+        onSuccess: () => {
+          setDraft('');
+          setAttached([]);
+          setAttachNotice(null);
+          setQuotePick(undefined);
+        },
+      },
+    );
+  };
+
   const handleSend = () => {
     const body = draft.trim();
     if (!body) return;
@@ -175,7 +225,9 @@ export function WhatsAppThreadView({
     );
   };
 
-  const sendError = (sendText.error ?? sendVoice.error) as Error | null;
+  const sendError = (sendText.error ??
+    sendVoice.error ??
+    sendFile.error) as Error | null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -380,20 +432,41 @@ export function WhatsAppThreadView({
             <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Write a WhatsApp message…"
+              placeholder={
+                file
+                  ? captionAllowed
+                    ? 'Add a caption…'
+                    : 'WhatsApp shows no caption on this kind of file'
+                  : 'Write a WhatsApp message…'
+              }
               rows={3}
-              maxLength={4096}
-              disabled={!canReply}
+              maxLength={captionLimit}
+              disabled={!canReply || (!!file && !captionAllowed)}
             />
+
+            {/* The picked file, with the same chips the email and internal composers use.
+                `cloudLabel={null}` suppresses the "sent as Drive link" badge: nothing here
+                ever spills to a cloud drive — Meta stores the media itself. */}
+            <AttachRow
+              files={attached}
+              setFiles={setAttached}
+              onPick={pickFiles}
+              notice={attachNotice}
+              cloudLabel={null}
+            />
+
             <div className="flex items-start justify-between gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">
-                {draft.length} / 4096
+                {draft.length} / {captionLimit}
                 {data?.windowOpenUntil && (
                   <> · reply window open until {formatEmailDate(data.windowOpenUntil)}</>
                 )}
               </span>
               <div className="flex items-start gap-2">
-                {!draft.trim() && (
+                {/* The recorder is for when there is nothing else to send — it is a
+                    third way to fill the same message, so it hides as soon as either
+                    of the other two is in play. */}
+                {!draft.trim() && !file && (
                   <VoiceRecorder
                     disabled={!canReply}
                     sending={sendVoice.isPending}
@@ -403,7 +476,18 @@ export function WhatsAppThreadView({
                     }
                   />
                 )}
-                {draft.trim() && (
+                {file && (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                    disabled={sendFile.isPending || !canReply}
+                    onClick={handleSendFile}
+                  >
+                    <Send size={13} />
+                    {sendFile.isPending ? 'Sending…' : 'Send file'}
+                  </Button>
+                )}
+                {!file && draft.trim() && (
                   <Button
                     size="sm"
                     className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
@@ -416,6 +500,9 @@ export function WhatsAppThreadView({
                 )}
               </div>
             </div>
+            {sendFile.uploadProgress !== null && (
+              <UploadProgressBar progress={sendFile.uploadProgress} />
+            )}
           </>
         )}
 
