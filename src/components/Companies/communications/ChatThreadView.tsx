@@ -13,6 +13,7 @@ import { RichTextEditor } from '../RichTextEditor';
 import { PolishButton, PolishPanel } from '../PolishPanel';
 import { htmlToText, openPrintWindow, textToHtml } from '../message-utils';
 import { ChatBubble } from './ChatBubble';
+import { countCompletableUpTo } from './complete-until';
 import { buildChatPrintHtml } from './print-html';
 import { htmlToChatMarkdown } from './chat-markdown';
 import type { CompleteTarget, QuoteTarget } from './types';
@@ -30,6 +31,7 @@ import type { CompleteTarget, QuoteTarget } from './types';
 export function ChatThreadView({
   companyId,
   token,
+  onCompleteUntil,
   isAdmin,
   account,
   provider,
@@ -70,6 +72,8 @@ export function ChatThreadView({
   onAnchorChange: (m: { id: string; createTime: string }) => void;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: 'email' | 'chat', id: string) => void;
+  /** "Complete till here" — the anchor's id and how many messages that covers. */
+  onCompleteUntil: (messageId: string, count: number) => void;
 }) {
   const {
     data: chatThread,
@@ -362,6 +366,20 @@ export function ChatThreadView({
                         companyId={companyId}
                         token={token}
                         onNavigateToMessage={navigateToMessage}
+                        onCompleteUntil={(msg) =>
+                          onCompleteUntil(
+                            msg.id,
+                            // A chat message you sent IS completable — the shared table
+                            // has no direction — so nothing is marked `isOwn`.
+                            countCompletableUpTo(
+                              threadMessages.map((x) => ({
+                                id: x.id,
+                                at: x.createTime,
+                              })),
+                              msg.id,
+                            ),
+                          )
+                        }
                       />
                     )}
                     {/* My own future replies to this message, surfaced here in

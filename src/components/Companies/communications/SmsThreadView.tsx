@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, CheckCircle2, MailOpen, MessageSquareText, Phone, Printer, Reply, Send, X,
+  ArrowLeft, CheckCheck, CheckCircle2, MailOpen, MessageSquareText, Phone, Printer,
+  Reply, Send, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   MAX_MMS_FILES,
   MAX_MMS_UPLOAD_BYTES,
+  MMS_ACCEPT,
+  isMmsImageFile,
   smsMediaUrl,
   type SmsItem,
   type SmsMedia,
@@ -24,10 +27,13 @@ import {
   mergeAttachments,
 } from '../message-utils';
 import { AttachRow } from '../AttachRow';
+import { FileDropOverlay } from '../ComposerBits';
+import { useFileDrop } from '@/hooks/useFileDrop';
 import { AttachmentChip } from '../AttachmentPreview';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
 import { buildSmsReplyBody, smsQuoteCost, smsReplyBudget } from './sms-reply';
+import { countCompletableUpTo } from './complete-until';
 
 /**
  * A GSM-7 message fits 160 characters, 153 once it is split across segments; any
@@ -78,6 +84,7 @@ export function SmsThreadView({
   callBlockedReason = null,
   onRequestComplete,
   onUncomplete,
+  onCompleteUntil,
 }: {
   companyId: number;
   peer: string;
@@ -93,6 +100,14 @@ export function SmsThreadView({
   callBlockedReason?: string | null;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
+  /**
+   * "Complete till here" — the anchor's id, and how many messages that covers.
+   *
+   * The count is computed HERE because this is where the conversation is loaded; the tab
+   * only holds inbox rows. It is an estimate for the dialog's wording — the server does
+   * the real cut and reports what it actually changed.
+   */
+  onCompleteUntil: (itemId: string, count: number) => void;
 }) {
   const { data, isLoading } = useSmsThread(companyId, peer, active);
   /**
@@ -163,17 +178,28 @@ export function SmsThreadView({
   const [attached, setAttached] = useState<File[]>([]);
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
 
-  const pickFiles = (picked: FileList | null) => {
+  /**
+   * The ONE way a file gets attached — the paperclip, a paste, and a drop all land here.
+   *
+   * `isMmsImageFile` is the filter rather than the input's `accept`, because `accept`
+   * only governs the picker: a pasted screenshot or a dragged PDF never sees it. A
+   * rejected file is named in the notice rather than vanishing.
+   */
+  const addFiles = (picked: FileList | File[] | null) => {
     if (!picked) return;
     const { files, notice } = mergeAttachments(
       attached,
       Array.from(picked),
       MAX_MMS_FILES,
       MAX_MMS_UPLOAD_BYTES,
+      isMmsImageFile,
     );
     setAttached(files);
     setAttachNotice(notice);
   };
+
+  // Paste and drag-and-drop, from the same hook the email composers use.
+  const { isOver, handlers } = useFileDrop({ onFiles: addFiles });
 
   const handleSend = () => {
     const body = outgoing.trim();
@@ -300,6 +326,14 @@ export function SmsThreadView({
                 dimmed={isFuture(m)}
                 anchorRef={m.id === anchorMsgId ? anchorRef : undefined}
                 onReply={() => setQuotePick(m)}
+                onCompleteUntil={() =>
+                  onCompleteUntil(
+                    m.id,
+                    // A text you SENT is completable — the shared table has no
+                    // direction — so nothing is marked `isOwn` here.
+                    countCompletableUpTo(messages, m.id),
+                  )
+                }
               />
             ))}
           </div>
@@ -318,7 +352,13 @@ export function SmsThreadView({
       )}
 
       {/* Reply */}
-      <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+      {/* The drop/paste target is the whole composer, so a screenshot can be pasted with
+          the cursor anywhere in it rather than only inside the textarea. */}
+      <div
+        {...handlers}
+        className="relative border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
+      >
+        {isOver && <FileDropOverlay label="Drop a picture to attach" />}
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Reply to {peerName || formatE164(peer)}
           {supportNumber && ` from ${formatE164(supportNumber)}`}
@@ -364,9 +404,10 @@ export function SmsThreadView({
         <AttachRow
           files={attached}
           setFiles={setAttached}
-          onPick={pickFiles}
+          onPick={addFiles}
           notice={attachNotice}
           cloudLabel={null}
+          accept={MMS_ACCEPT}
         />
 
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -411,12 +452,15 @@ function SmsBubble({
   dimmed,
   anchorRef,
   onReply,
+  onCompleteUntil,
 }: {
   message: SmsItem;
   dimmed: boolean;
   anchorRef?: React.Ref<HTMLDivElement>;
   /** Quote this message in the composer. */
   onReply: () => void;
+  /** Complete this message and everything above it. */
+  onCompleteUntil: () => void;
 }) {
   const own = m.direction === 'outbound';
   return (
@@ -465,6 +509,15 @@ function SmsBubble({
           className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
         >
           <Reply size={13} />
+        </button>
+        <button
+          type="button"
+          title="Mark everything up to here complete"
+          aria-label="Mark everything up to here complete"
+          onClick={onCompleteUntil}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
+        >
+          <CheckCheck size={13} />
         </button>
       </div>
       <span className="text-[10px] text-muted-foreground">

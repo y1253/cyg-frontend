@@ -24,18 +24,34 @@ export function AttachRow({
   onPick,
   notice,
   cloudLabel,
+  accept,
   children,
 }: {
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  /** Handed the raw FileList — the caller runs `mergeAttachments` and sets the notice. */
-  onPick: (picked: FileList | null) => void;
+  /**
+   * Handed the picked files — the caller runs `mergeAttachments` and sets the notice.
+   *
+   * The union is what lets ONE handler serve the picker (a `FileList`) and a paste or a
+   * drop (a plain array). Every caller already normalises with `Array.from`, so there is
+   * no second shape to keep in step — which is the point: a composer where paste and
+   * pick take different routes is a composer where only one of them enforces the limits.
+   */
+  onPick: (picked: FileList | File[] | null) => void;
   notice: string | null;
   /**
    * "Drive" / "OneDrive" — which service oversized files get hosted on, or `null`
    * for internal messages, which keep every attachment on our own disk.
    */
   cloudLabel: string | null;
+  /**
+   * The file picker's filter, e.g. `image/png,image/jpeg`.
+   *
+   * A CONVENIENCE, never the gate: a drag, a paste, and anything the OS dialog is talked
+   * into all bypass it, so the caller still filters in `onPick` and the server still
+   * refuses. Omitted means "any file", which is what WhatsApp wants.
+   */
+  accept?: string;
   /** Form-specific warnings (forward's "not forwarded…", the body-budget notice). */
   children?: ReactNode;
 }) {
@@ -47,6 +63,7 @@ export function AttachRow({
         ref={inputRef}
         type="file"
         multiple
+        accept={accept}
         className="hidden"
         onChange={(e) => {
           onPick(e.target.files);

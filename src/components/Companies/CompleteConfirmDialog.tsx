@@ -21,17 +21,26 @@ export function CompleteConfirmDialog({
   onOpenChange,
   onConfirm,
   description,
+  title = 'Mark message complete?',
+  confirmLabel = 'Mark complete',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   description: string;
+  /**
+   * Overridden by "Complete till here", which affects a RANGE — a dialog headed "Mark
+   * message complete?" over a button that is about to clear twelve of them is the kind of
+   * miscount somebody only notices afterwards, and there is no bulk undo.
+   */
+  title?: string;
+  confirmLabel?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Mark message complete?</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">{description}</p>
         <div className="flex justify-end gap-2 mt-4">
@@ -42,7 +51,7 @@ export function CompleteConfirmDialog({
             className="bg-blue-600 hover:bg-blue-700 text-white gap-1"
             onClick={onConfirm}
           >
-            <CheckCircle2 size={14} /> Mark complete
+            <CheckCircle2 size={14} /> {confirmLabel}
           </Button>
         </div>
       </DialogContent>

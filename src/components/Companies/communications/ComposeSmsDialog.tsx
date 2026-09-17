@@ -8,6 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useSendSms } from '@/hooks/useSendSms';
+import {
+  MAX_MMS_FILES,
+  MAX_MMS_UPLOAD_BYTES,
+  MMS_ACCEPT,
+  isMmsImageFile,
+} from '@/api/phone';
+import { useFileDrop } from '@/hooks/useFileDrop';
+import { AttachRow } from '../AttachRow';
+import { FileDropOverlay } from '../ComposerBits';
+import { mergeAttachments } from '../message-utils';
 import { formatE164, toE164 } from '@/lib/phone';
 
 /**
@@ -33,12 +43,32 @@ export function ComposeSmsDialog({
   const [to, setTo] = useState('');
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [attached, setAttached] = useState<File[]>([]);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const sendMutation = useSendSms(companyId);
+
+  /** Same funnel as the reply composer: paperclip, paste and drop, one set of limits. */
+  const addFiles = (picked: FileList | File[] | null) => {
+    if (!picked) return;
+    const { files, notice } = mergeAttachments(
+      attached,
+      Array.from(picked),
+      MAX_MMS_FILES,
+      MAX_MMS_UPLOAD_BYTES,
+      isMmsImageFile,
+    );
+    setAttached(files);
+    setAttachNotice(notice);
+  };
+
+  const { isOver, handlers } = useFileDrop({ onFiles: addFiles });
 
   const reset = () => {
     setTo('');
     setBody('');
     setError(null);
+    setAttached([]);
+    setAttachNotice(null);
   };
 
   const handleSend = () => {
@@ -50,13 +80,15 @@ export function ComposeSmsDialog({
       setError('Enter a valid phone number, e.g. (438) 256-1210');
       return;
     }
-    if (!body.trim()) {
-      setError('Write a message first');
+    // A picture with no words is an ordinary message, so the text is only required when
+    // there is nothing else to send. The server agrees — `SendSmsDto.body` is optional.
+    if (!body.trim() && attached.length === 0) {
+      setError('Write a message or attach a picture first');
       return;
     }
     setError(null);
     sendMutation.mutate(
-      { to: peer, body: body.trim() },
+      { to: peer, body: body.trim(), attachments: attached },
       {
         onSuccess: (sent) => {
           reset();
@@ -74,7 +106,8 @@ export function ComposeSmsDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" {...handlers}>
+        {isOver && <FileDropOverlay label="Drop a picture to attach" />}
         <DialogHeader>
           <DialogTitle>New text message</DialogTitle>
         </DialogHeader>
@@ -102,8 +135,19 @@ export function ComposeSmsDialog({
               rows={4}
               maxLength={1600}
             />
-            <span className="text-xs text-muted-foreground">{body.length} characters</span>
+            <span className="text-xs text-muted-foreground">
+              {body.length} characters
+              {attached.length > 0 && ' · sent as a picture message (MMS)'}
+            </span>
           </div>
+          <AttachRow
+            files={attached}
+            setFiles={setAttached}
+            onPick={addFiles}
+            notice={attachNotice}
+            cloudLabel={null}
+            accept={MMS_ACCEPT}
+          />
           {(error || sendMutation.isError) && (
             <p className="text-xs text-destructive">
               {error ?? (sendMutation.error as Error)?.message ?? 'Failed to send'}

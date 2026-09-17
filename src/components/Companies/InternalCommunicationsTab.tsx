@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
+  ArrowLeft, CheckCheck, CheckCircle2, ChevronRight, Circle, Forward, Inbox, ListChecks,
   Loader2, MailOpen, Paperclip, Pencil, Phone, Printer, Reply, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -22,6 +22,8 @@ import { EmailBodyFrame } from './EmailBodyFrame';
 import { Linkified } from './Linkified';
 import { AttachmentPreview } from './AttachmentPreview';
 import { CompleteConfirmDialog } from './CompleteConfirmDialog';
+import { useCompleteUntil } from '@/hooks/useCompleteUntil';
+import { countCompletableUpTo } from './communications/complete-until';
 import { InlineComposerPanel } from './InlineComposerPanel';
 import { AdvancedSearchPanel } from './communications/AdvancedSearchPanel';
 import { clampSources } from './communications/inbox-clamp';
@@ -621,17 +623,48 @@ export function InternalCommunicationsTab({ active }: Props) {
     }
   };
 
+  /** "Complete till here" — the range version, with the count its dialog needs. */
+  const [untilTarget, setUntilTarget] = useState<
+    { messageId: number; count: number } | null
+  >(null);
+  const completeUntil = useCompleteUntil();
+
+  const confirmUntil = () => {
+    if (!untilTarget) return;
+    completeUntil.mutate({ kind: 'internal', messageId: untilTarget.messageId });
+    setUntilTarget(null);
+    // Back to the list, matching `confirmComplete`: the thread the person was reading has
+    // just been cleared behind them.
+    closeThread();
+  };
+
   const completeConfirmDialog = (
-    <CompleteConfirmDialog
-      open={completeTarget !== null}
-      onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
-      onConfirm={confirmComplete}
-      description={
-        completeTarget?.kind === 'call'
-          ? "Confirm you've dealt with this call. It stays in your inbox with a blue check."
-          : "Confirm you've completed this message. It stays in your inbox with a blue check."
-      }
-    />
+    <>
+      <CompleteConfirmDialog
+        open={completeTarget !== null}
+        onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
+        onConfirm={confirmComplete}
+        description={
+          completeTarget?.kind === 'call'
+            ? "Confirm you've dealt with this call. It stays in your inbox with a blue check."
+            : "Confirm you've completed this message. It stays in your inbox with a blue check."
+        }
+      />
+      {/* The range twin — its own count, because there is no bulk undo. "Up to" because
+          the server does the real cut and reports what it actually changed. */}
+      <CompleteConfirmDialog
+        open={untilTarget !== null}
+        onOpenChange={(open) => { if (!open) setUntilTarget(null); }}
+        onConfirm={confirmUntil}
+        title={
+          untilTarget && untilTarget.count > 1
+            ? `Mark ${untilTarget.count} messages complete?`
+            : 'Mark this message complete?'
+        }
+        confirmLabel="Complete till here"
+        description="This message and everything above it in the thread will be marked complete in your inbox."
+      />
+    </>
   );
 
   // ── Placing a call ────────────────────────────────────────────────────────
@@ -1037,6 +1070,34 @@ export function InternalCommunicationsTab({ active }: Props) {
               )}
             </div>
           </button>
+          {/* Offered on the anchor too, unlike reply/forward: "everything up to the
+              message I opened" is the most likely thing to clear. */}
+          <div className="shrink-0 self-center mr-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button
+              type="button"
+              title="Mark everything up to here complete"
+              aria-label="Mark everything up to here complete"
+              onClick={() =>
+                setUntilTarget({
+                  messageId: m.id,
+                  // `isOwn` is excluded because a message YOU sent has no recipient row
+                  // of your own — the server's update would not touch it either.
+                  count: countCompletableUpTo(
+                    (threadQuery.data?.messages ?? []).map((x) => ({
+                      id: String(x.id),
+                      at: x.date,
+                      isCompleted: x.isCompleted,
+                      isOwn: x.isOwn,
+                    })),
+                    String(m.id),
+                  ),
+                })
+              }
+              className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-blue-700"
+            >
+              <CheckCheck size={14} />
+            </button>
+          </div>
           {/* Reply to / forward THIS message even though newer ones follow it.
               Hidden on the message that is already the target, where the toolbar
               buttons do the same thing. */}

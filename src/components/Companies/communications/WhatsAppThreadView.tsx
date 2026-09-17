@@ -24,12 +24,14 @@ import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
 import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
 import { AttachmentChip } from '../AttachmentPreview';
 import { AttachRow } from '../AttachRow';
-import { UploadProgressBar } from '../ComposerBits';
+import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
+import { useFileDrop } from '@/hooks/useFileDrop';
 import { mergeAttachments } from '../message-utils';
 import { escapeHtml, formatEmailDate, openPrintWindow } from '../message-utils';
 import { VoiceRecorder } from './VoiceRecorder';
 import { TemplatePicker } from './TemplatePicker';
 import { makeIsFuture } from './thread-dim';
+import { countCompletableUpTo } from './complete-until';
 import type { CompleteTarget, ItemKind } from './types';
 
 /**
@@ -49,6 +51,7 @@ export function WhatsAppThreadView({
   anchorMsgId,
   anchorTime,
   isCompleted,
+  onCompleteUntil,
   active,
   onClose,
   onCall,
@@ -70,6 +73,8 @@ export function WhatsAppThreadView({
   callBlockedReason?: string | null;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
+  /** "Complete till here" — the anchor's id and how many messages that covers. */
+  onCompleteUntil: (messageId: number, count: number) => void;
 }) {
   const { data, isLoading } = useWhatsAppThread(companyId, peer, active);
   const sendText = useSendWhatsApp(companyId);
@@ -163,17 +168,21 @@ export function WhatsAppThreadView({
   const captionAllowed = file ? fileAcceptsCaption(file) : true;
   const captionLimit = file ? WHATSAPP_CAPTION_LIMIT : 4096;
 
-  const pickFiles = (picked: FileList | null) => {
+  /** The paperclip, a paste and a drop all land here — one set of limits, one notice. */
+  const addFiles = (picked: FileList | File[] | null) => {
     if (!picked) return;
-    const { files, notice } = mergeAttachments(attached, Array.from(picked), 1);
+    const incoming = Array.from(picked);
+    const { files, notice } = mergeAttachments(attached, incoming, 1);
     setAttached(files);
     setAttachNotice(
       notice ??
-        (picked.length > 1 || attached.length
+        (incoming.length > 1 || attached.length
           ? 'WhatsApp sends one file per message.'
           : null),
     );
   };
+
+  const { isOver, handlers } = useFileDrop({ onFiles: addFiles });
 
   const handleSendFile = () => {
     if (!file) return;
@@ -307,6 +316,23 @@ export function WhatsAppThreadView({
               <WhatsAppBubble
                 key={m.id}
                 onReply={() => setQuotePick(m)}
+                onCompleteUntil={() =>
+                  onCompleteUntil(
+                    // The numeric row id — what the server's keyset cut is keyed on.
+                    Number(m.id),
+                    // `isOwn` on outbound: WhatsApp's `setState` refuses to change an
+                    // outbound row, so counting it would overstate what happens.
+                    countCompletableUpTo(
+                      messages.map((x) => ({
+                        id: String(x.id),
+                        at: x.at,
+                        isCompleted: x.isCompleted,
+                        isOwn: x.direction === 'outbound',
+                      })),
+                      String(m.id),
+                    ),
+                  )
+                }
                 quotedOf={quotedOf}
                 message={m}
                 token={token}
@@ -329,7 +355,12 @@ export function WhatsAppThreadView({
       )}
 
       {/* Reply */}
-      <div className="border rounded-md p-4 flex flex-col gap-3 bg-muted/10">
+      {/* Drop/paste target is the whole composer — see the SMS view for why. */}
+      <div
+        {...handlers}
+        className="relative border rounded-md p-4 flex flex-col gap-3 bg-muted/10"
+      >
+        {isOver && <FileDropOverlay label="Drop a file to attach" />}
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Reply to {title} on WhatsApp
         </p>
@@ -450,7 +481,7 @@ export function WhatsAppThreadView({
             <AttachRow
               files={attached}
               setFiles={setAttached}
-              onPick={pickFiles}
+              onPick={addFiles}
               notice={attachNotice}
               cloudLabel={null}
             />
@@ -634,6 +665,7 @@ function WhatsAppBubble({
   dimmed,
   anchorRef,
   onReply,
+  onCompleteUntil,
   quotedOf,
 }: {
   message: WhatsAppItem;
@@ -642,6 +674,8 @@ function WhatsAppBubble({
   anchorRef?: React.Ref<HTMLDivElement>;
   /** Quote this message in the composer. */
   onReply: () => void;
+  /** Complete this message and everything above it. */
+  onCompleteUntil: () => void;
   /** Resolve `replyToMessageId` against the loaded thread. */
   quotedOf: (m: WhatsAppItem) => WhatsAppItem | null;
 }) {
@@ -699,6 +733,15 @@ function WhatsAppBubble({
           className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
         >
           <Reply size={13} />
+        </button>
+        <button
+          type="button"
+          title="Mark everything up to here complete"
+          aria-label="Mark everything up to here complete"
+          onClick={onCompleteUntil}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
+        >
+          <CheckCheck size={13} />
         </button>
       </div>
       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">

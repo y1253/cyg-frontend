@@ -279,6 +279,38 @@ export interface CallItem extends PhoneItemBase {
 export const MAX_MMS_FILES = 3;
 export const MAX_MMS_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+/** What the file picker offers. A convenience — `isMmsImageFile` is the actual filter. */
+export const MMS_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
+
+/**
+ * May this file ride on a text message? Pictures only.
+ *
+ * ⚠️ Mirrors `isMmsImage` in server `phone/mms-shrink.util.ts`, which is what actually
+ * refuses the upload. This copy exists so a dropped or pasted file is rejected with a
+ * sentence in the composer instead of travelling 25 MB to earn a 400 — and, like every
+ * mirrored rule here, if the two disagree the browser is the one that is wrong.
+ *
+ * A browser sometimes reports no type at all for a dragged file, so an empty `type` falls
+ * back to the extension rather than being refused outright.
+ */
+export function isMmsImageFile(file: File): boolean {
+  const mime = (file.type || '').split(';')[0]?.trim().toLowerCase() ?? '';
+  const ext = /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase() ?? '';
+  const byExt: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+  };
+  const allowed = new Set(Object.values(byExt));
+  if (!mime) return ext in byExt;
+  if (!allowed.has(mime)) return false;
+  // The name has to corroborate the type, matching the server. No extension is fine —
+  // a pasted screenshot often has none.
+  return !ext || byExt[ext] === mime;
+}
+
 /** One picture, clip or file attached to a text. */
 export interface SmsMedia {
   sid: string;

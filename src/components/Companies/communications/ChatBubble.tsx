@@ -1,4 +1,4 @@
-import { Reply } from 'lucide-react';
+import { CheckCheck, Reply } from 'lucide-react';
 import type { ChatMessage } from '@/api/gmail';
 import { chatAttachmentUrl } from '@/api/gmail';
 import { AttachmentPreview } from '../AttachmentPreview';
@@ -24,6 +24,7 @@ export function ChatBubble({
   companyId,
   token,
   onNavigateToMessage,
+  onCompleteUntil,
 }: {
   message: ChatMessage;
   /** The loaded thread, used to resolve a quoted message into a preview. */
@@ -34,6 +35,8 @@ export function ChatBubble({
   anchorRef?: React.Ref<HTMLDivElement>;
   hideQuote: boolean;
   surfaced?: boolean;
+  /** Complete this message and everything above it in the space. */
+  onCompleteUntil?: (message: ChatMessage) => void;
   companyId: number;
   token: string | null;
   onNavigateToMessage: (m: ChatMessage) => void;
@@ -144,6 +147,19 @@ export function ChatBubble({
             className="shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
           >
             <Reply size={14} />
+          </button>
+        )}
+        {/* Unlike Reply, offered on the ANCHOR too: "everything up to the message I
+            opened" is the most likely thing somebody wants to clear. */}
+        {onCompleteUntil && !surfaced && (
+          <button
+            type="button"
+            title="Mark everything up to here complete"
+            aria-label="Mark everything up to here complete"
+            onClick={() => onCompleteUntil(m)}
+            className="shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity text-muted-foreground hover:text-blue-700"
+          >
+            <CheckCheck size={14} />
           </button>
         )}
       </div>

@@ -24,6 +24,7 @@ import {
   wrapBodyFont,
 } from '../message-utils';
 import { ThreadMessage } from './ThreadMessage';
+import { countCompletableUpTo } from './complete-until';
 import { buildEmailThreadPrintHtml } from './print-html';
 import { FORWARD_BODY_BUDGET, useForwardDraft } from './useForwardDraft';
 import { useProviderDraft } from '@/hooks/useProviderDraft';
@@ -46,6 +47,7 @@ type ReplyForm = { to: string[]; subject: string; body: string; cc: string[]; bc
  * remount and destroy the scroll offset and the expand bookkeeping.
  */
 export function EmailThreadView({
+  onCompleteUntil,
   companyId,
   token,
   account,
@@ -82,6 +84,8 @@ export function EmailThreadView({
   onClose: () => void;
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: 'email' | 'chat', id: string) => void;
+  /** "Complete till here" — the anchor's id and how many messages that covers. */
+  onCompleteUntil: (messageId: string, count: number) => void;
 }) {
   // Ids of the thread messages currently expanded (Gmail-style: older replies
   // collapsed, latest expanded). Click a message header to toggle.
@@ -670,6 +674,17 @@ export function EmailThreadView({
                     hasOthersToReplyTo(m) ? handleNavigateToEmailMessageReplyAll : undefined
                   }
                   onForwardThis={handleNavigateToEmailMessageForward}
+                  onCompleteUntil={(msg) =>
+                    onCompleteUntil(
+                      msg.id,
+                      // An email you SENT is completable — the shared table has no
+                      // direction — so nothing is marked `isOwn`.
+                      countCompletableUpTo(
+                        threadEmails.map((x) => ({ id: x.id, at: x.date })),
+                        msg.id,
+                      ),
+                    )
+                  }
                 />
               ))}
             </div>

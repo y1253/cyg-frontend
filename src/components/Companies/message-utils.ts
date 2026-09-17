@@ -434,15 +434,28 @@ export function mergeAttachments(
   /** Omit for no count limit — outbound email is uncapped. */
   max?: number,
   maxBytes: number = MAX_FILE_BYTES,
+  /**
+   * Which files this composer will take at all, e.g. `isMmsImageFile` for a text message.
+   *
+   * A rejected file is COUNTED and named in the notice rather than dropped in silence —
+   * the whole point, now that files can arrive by paste and by drag, where there is no
+   * `accept` filter to stop them and no dialog to explain itself.
+   */
+  allow?: (file: File) => boolean,
 ): { files: File[]; notice: string | null } {
   const seen = new Set(existing.map((f) => `${f.name}:${f.size}`));
   const added: File[] = [];
   let duplicates = 0;
   let tooBig = 0;
+  let wrongType = 0;
   for (const file of incoming) {
     const key = `${file.name}:${file.size}`;
     if (seen.has(key)) {
       duplicates++;
+      continue;
+    }
+    if (allow && !allow(file)) {
+      wrongType++;
       continue;
     }
     if (file.size > maxBytes) {
@@ -460,6 +473,11 @@ export function mergeAttachments(
   const parts: string[] = [];
   if (duplicates > 0) {
     parts.push(`${duplicates} file${duplicates > 1 ? 's were' : ' was'} already attached`);
+  }
+  if (wrongType > 0) {
+    parts.push(
+      `${wrongType} file${wrongType > 1 ? 's are' : ' is'} not a picture`,
+    );
   }
   if (tooBig > 0) {
     parts.push(

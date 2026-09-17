@@ -93,7 +93,7 @@ export function InlineComposerPanel({
   maxHeight?: number;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  onPickFiles: (picked: FileList | null) => void;
+  onPickFiles: (picked: FileList | File[] | null) => void;
   /** Opt-in drag-and-drop / paste-to-attach. Omitted by internal messaging,
    *  which keeps the button-only flow. */
   onDropFiles?: (files: File[]) => void;

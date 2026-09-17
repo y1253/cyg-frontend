@@ -55,6 +55,8 @@ import { CommsHeader } from './communications/CommsHeader';
 import { ContactsPanel } from './communications/ContactsPanel';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { readIdForSelection } from '@/components/Layout/unread-feed';
+import { useCompleteUntil } from '@/hooks/useCompleteUntil';
+import type { CompleteUntilTarget } from '@/api/completeUntil';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { showListSpinner } from './communications/inbox-loading';
@@ -923,6 +925,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const uncomplete = (kind: ItemKind, id: string) =>
     stateMutations[kind].uncomplete(id);
 
+  /**
+   * "Complete till here" — the range version, which is a different confirmation.
+   *
+   * Kept beside `completeTarget` rather than folded into it: that one carries a single
+   * id and every consumer reads it as such, while this needs the anchor AND the count to
+   * word its dialog. Two small states beat one that means two things.
+   */
+  const [untilTarget, setUntilTarget] = useState<
+    { target: CompleteUntilTarget; count: number } | null
+  >(null);
+  const completeUntil = useCompleteUntil();
+
+  const confirmUntil = () => {
+    if (!untilTarget) return;
+    completeUntil.mutate(untilTarget.target);
+    setUntilTarget(null);
+    // Back to the inbox, matching `confirmComplete`: the thread the person was reading
+    // has just been cleared behind them.
+    closeDetail();
+  };
+
   const confirmComplete = () => {
     if (!completeTarget) return;
     const { kind, id, fromDetail } = completeTarget;
@@ -969,12 +992,31 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // Mark-complete confirmation — shared across the inbox and both detail views
   // so it can appear in-place wherever "Mark complete" is clicked.
   const completeConfirm = (
-    <CompleteConfirmDialog
-      open={completeTarget !== null}
-      onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
-      onConfirm={confirmComplete}
-      description="Confirm you've completed this message. It stays in the inbox with a blue check, visible to everyone."
-    />
+    <>
+      <CompleteConfirmDialog
+        open={completeTarget !== null}
+        onOpenChange={(open) => { if (!open) setCompleteTarget(null); }}
+        onConfirm={confirmComplete}
+        description="Confirm you've completed this message. It stays in the inbox with a blue check, visible to everyone."
+      />
+      {/* The range twin. Its own title and count, because a dialog headed "Mark message
+          complete?" over a button about to clear twelve of them is a miscount somebody
+          only notices afterwards — and there is no bulk undo. "Up to" because the server
+          decides the real number: it can see further back than this view, and it skips
+          what is already complete. */}
+      <CompleteConfirmDialog
+        open={untilTarget !== null}
+        onOpenChange={(open) => { if (!open) setUntilTarget(null); }}
+        onConfirm={confirmUntil}
+        title={
+          untilTarget && untilTarget.count > 1
+            ? `Mark ${untilTarget.count} messages complete?`
+            : 'Mark this message complete?'
+        }
+        confirmLabel="Complete till here"
+        description="This message and everything above it in the conversation will be marked complete, with a blue check everyone can see."
+      />
+    </>
   );
 
   // ── Loading / not connected ───────────────────────────────────────────────
@@ -1030,6 +1072,17 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           openedChatMsgId={selected.msgId}
           openedChatMsgTime={selected.msgTime}
           inboxRow={chatItems.find((m) => m.id === selected.msgId) ?? null}
+          onCompleteUntil={(messageId, count) =>
+            setUntilTarget({
+              target: {
+                kind: 'chat',
+                companyId,
+                spaceId: selected.spaceId,
+                messageId,
+              },
+              count,
+            })
+          }
           active={active}
           pollEnabled={active && !viewerItem}
           onClose={closeDetail}
@@ -1076,6 +1129,17 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onClose={closeDetail}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
+          onCompleteUntil={(messageId, count) =>
+            setUntilTarget({
+              target: {
+                kind: 'email',
+                companyId,
+                threadId: selected.threadId ?? restoredThreadId ?? messageId,
+                messageId,
+              },
+              count,
+            })
+          }
         />
         {completeConfirm}
       </>
@@ -1100,6 +1164,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
+          onCompleteUntil={(itemId, count) =>
+            setUntilTarget({
+              target: { kind: 'sms', companyId, peer: selected.peer, itemId },
+              count,
+            })
+          }
         />
         {completeConfirm}
       </>
@@ -1124,6 +1194,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
+          onCompleteUntil={(messageId, count) =>
+            setUntilTarget({
+              target: { kind: 'whatsapp', companyId, messageId },
+              count,
+            })
+          }
         />
         {completeConfirm}
       </>

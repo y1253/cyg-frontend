@@ -9,7 +9,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
+import { useSendWhatsAppMedia } from '@/hooks/useSendWhatsAppMedia';
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
+import { useFileDrop } from '@/hooks/useFileDrop';
+import { WHATSAPP_CAPTION_LIMIT, fileAcceptsCaption } from '@/api/whatsapp';
+import { AttachRow } from '../AttachRow';
+import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
+import { mergeAttachments } from '../message-utils';
 import { formatE164, toE164 } from '@/lib/phone';
 import { TemplatePicker } from './TemplatePicker';
 
@@ -46,9 +52,12 @@ export function ComposeWhatsAppDialog({
   const [body, setBody] = useState('');
   const [picked, setPicked] = useState<Picked>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attached, setAttached] = useState<File[]>([]);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
 
   const sendText = useSendWhatsApp(companyId);
   const sendTemplate = useSendWhatsAppTemplate(companyId);
+  const sendFile = useSendWhatsAppMedia(companyId);
 
   // A WhatsApp id is the E.164 number without its "+". Resolved here so the lookup below
   // only fires once the number is actually valid.
@@ -73,20 +82,55 @@ export function ComposeWhatsAppDialog({
     !!thread?.windowOpenUntil &&
     new Date(thread.windowOpenUntil).getTime() > dataUpdatedAt;
 
+  /**
+   * ⚠️ DERIVED from the window, not synced to it.
+   *
+   * The number is typed AFTER a file may have been picked, so `windowOpen` can turn false
+   * with an attachment already sitting in the dialog — and a template send cannot carry
+   * one. Deriving means the file simply stops counting the moment the window shuts (with
+   * the notice below saying so), where an effect that cleared the state would be a
+   * render-triggering write, and would also throw the file away if the window flickered
+   * while the thread query settled.
+   */
+  const file = windowOpen ? (attached[0] ?? null) : null;
+  const captionAllowed = file ? fileAcceptsCaption(file) : true;
+
+  /** One file per message — WhatsApp has no multi-attachment message. */
+  const addFiles = (incoming: FileList | File[] | null) => {
+    if (!incoming) return;
+    const list = Array.from(incoming);
+    const { files, notice } = mergeAttachments(attached, list, 1);
+    setAttached(files);
+    setAttachNotice(
+      notice ??
+        (list.length > 1 || attached.length
+          ? 'WhatsApp sends one file per message.'
+          : null),
+    );
+  };
+
+  const { isOver, handlers } = useFileDrop({ onFiles: addFiles });
+
   const reset = () => {
     setTo('');
     setBody('');
     setPicked(null);
     setError(null);
+    setAttached([]);
+    setAttachNotice(null);
   };
+
+
 
   // Stable, or `TemplatePicker`'s reporting effect would re-run on every render here.
   const handlePicked = useCallback((next: Picked) => setPicked(next), []);
 
-  const pending = sendText.isPending || sendTemplate.isPending;
+  const pending =
+    sendText.isPending || sendTemplate.isPending || sendFile.isPending;
   const sendError =
     (sendText.error as Error)?.message ??
     (sendTemplate.error as Error)?.message ??
+    (sendFile.error as Error)?.message ??
     null;
 
   const handleSend = () => {
@@ -98,8 +142,19 @@ export function ComposeWhatsAppDialog({
     const done = { onSuccess: (sent: { at: string }) => { reset(); onSent(peer, sent.at); } };
 
     if (windowOpen) {
+      if (file) {
+        sendFile.mutate(
+          {
+            to: peer,
+            file,
+            caption: captionAllowed ? body.trim() : '',
+          },
+          done,
+        );
+        return;
+      }
       if (!body.trim()) {
-        setError('Write a message first');
+        setError('Write a message or attach a file first');
         return;
       }
       sendText.mutate({ to: peer, body: body.trim() }, done);
@@ -120,7 +175,8 @@ export function ComposeWhatsAppDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" {...handlers}>
+        {isOver && windowOpen && <FileDropOverlay label="Drop a file to attach" />}
         <DialogHeader>
           <DialogTitle>New WhatsApp message</DialogTitle>
         </DialogHeader>
@@ -153,13 +209,33 @@ export function ComposeWhatsAppDialog({
                 id="wa-body"
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                placeholder="Write a WhatsApp message…"
+                placeholder={
+                  file
+                    ? captionAllowed
+                      ? 'Add a caption…'
+                      : 'WhatsApp shows no caption on this kind of file'
+                    : 'Write a WhatsApp message…'
+                }
                 rows={4}
-                maxLength={4096}
+                maxLength={file && captionAllowed ? WHATSAPP_CAPTION_LIMIT : 4096}
+                disabled={!!file && !captionAllowed}
               />
               <span className="text-xs text-muted-foreground">
                 They wrote recently, so you can send anything.
               </span>
+              {/* Rendered only inside the open window — a template carries no
+                  attachment, which is why `file` is derived from `windowOpen` above
+                  rather than read straight off the picked list. */}
+              <AttachRow
+                files={attached}
+                setFiles={setAttached}
+                onPick={addFiles}
+                notice={attachNotice}
+                cloudLabel={null}
+              />
+              {sendFile.uploadProgress !== null && (
+                <UploadProgressBar progress={sendFile.uploadProgress} />
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-3">

@@ -1,5 +1,12 @@
 import { useMemo } from 'react';
-import { ChevronRight, Forward, Paperclip, Reply, ReplyAll } from 'lucide-react';
+import {
+  CheckCheck,
+  ChevronRight,
+  Forward,
+  Paperclip,
+  Reply,
+  ReplyAll,
+} from 'lucide-react';
 import type { EmailDetail } from '@/api/gmail';
 import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import { AttachmentPreview } from '../AttachmentPreview';
@@ -32,6 +39,7 @@ export function ThreadMessage({
   onReplyToThis,
   onReplyAllToThis,
   onForwardThis,
+  onCompleteUntil,
 }: {
   message: EmailDetail;
   isFuture: boolean;
@@ -48,6 +56,8 @@ export function ThreadMessage({
   /** Omitted when this message has nobody else on it — the button then hides. */
   onReplyAllToThis?: (m: EmailDetail) => void;
   onForwardThis: (m: EmailDetail) => void;
+  /** Complete this message and everything above it in the thread. */
+  onCompleteUntil?: (m: EmailDetail) => void;
 }) {
   const strip = (m.attachments ?? []).filter((a) => !a.isInline);
 
@@ -109,6 +119,22 @@ export function ThreadMessage({
         {/* Reply to / forward THIS message even though newer ones follow it.
             Hidden on the message that is already the target, where the toolbar
             buttons do the same thing. */}
+        {/* The till-here action is offered on the ANCHOR too — "everything up to the
+            message I opened" is the most likely thing to clear — so it sits outside the
+            reply/forward group, which is deliberately hidden there. */}
+        {isAnchor && onCompleteUntil && (
+          <div className="shrink-0 self-center mr-2 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button
+              type="button"
+              title="Mark everything up to here complete"
+              aria-label="Mark everything up to here complete"
+              onClick={() => onCompleteUntil(m)}
+              className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-blue-700"
+            >
+              <CheckCheck size={14} />
+            </button>
+          </div>
+        )}
         {!isAnchor && (
           <div className="shrink-0 self-center mr-2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
             <button
@@ -137,6 +163,17 @@ export function ThreadMessage({
             >
               <Forward size={14} />
             </button>
+            {onCompleteUntil && (
+              <button
+                type="button"
+                title="Mark everything up to here complete"
+                aria-label="Mark everything up to here complete"
+                onClick={() => onCompleteUntil(m)}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-blue-700"
+              >
+                <CheckCheck size={14} />
+              </button>
+            )}
           </div>
         )}
       </div>
