@@ -94,6 +94,36 @@ export const INTERNAL_KIND_STYLES: Record<InternalItemKind, InternalKindStyle> =
     },
   };
 
+/**
+ * A staff call that needs no attention, because it already had it.
+ *
+ * ⚠️ Mirrors `isImplicitlyReadInternalCall` in server
+ * `internal-calls/internal-call-read.util.ts`, which is what actually stamps `isRead`.
+ * One rule, two copies, each naming the other — and the reason this copy exists is that
+ * read state here is "a row exists ⇔ read", with no way to record that it was later
+ * cleared. So an implicitly-read call can never be marked UNREAD: the toggle flips
+ * optimistically and bounces back on the next poll. The control is HIDDEN instead, exactly
+ * as `isImplicitlyRead` does for a client company's calls.
+ *
+ * Exhaustive for the reason the server copy gives: a fourth outcome must break the build
+ * in BOTH copies rather than defaulting silently in either direction.
+ */
+export function isImplicitlyReadInternalCall(call: InternalCall): boolean {
+  // You cannot have an unread call you placed.
+  if (call.direction === 'outbound') return true;
+  switch (call.outcome) {
+    case 'answered':
+    case 'in-progress':
+      return true;
+    case 'missed':
+      return false;
+    default: {
+      const never: never = call.outcome;
+      return never;
+    }
+  }
+}
+
 export const INTERNAL_FOLDER_ICON: Record<string, LucideIcon> = { INBOX: Inbox };
 
 /**

@@ -104,6 +104,7 @@ export function CallOverlay() {
     calls,
     activeCallId,
     audioBlocked,
+    dialing,
   } = useSoftphone();
   const {
     answer,
@@ -123,6 +124,7 @@ export function CallOverlay() {
     declineWaiting,
     endAndAnswer,
     retryAudio,
+    cancelDialing,
   } = useSoftphoneActions();
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -227,7 +229,63 @@ export function CallOverlay() {
     !!info &&
     (info.kind !== 'internal' || !!info.token);
 
-  if (phase === 'idle') return null;
+  /**
+   * The optimistic "Calling…" card, shown from the click until the call pairs.
+   *
+   * ── WHY IT IS ITS OWN BRANCH AND NOT A `phase` ─────────────────────────────────
+   * `phase` drives `tryPair`'s `!== 'idle'` guard, the call timer and `sendDigit`'s
+   * `=== 'active'` check. A fifth value would have to be handled in each of those, and
+   * pairing in particular MUST go on believing this tab is idle — otherwise the INVITE
+   * this very dial produces would be refused and the call would ring nobody's screen.
+   * So `dialing` is a field beside `phase`, exactly as `conference` and `held` are.
+   *
+   * It renders only while there is no real call: the moment one pairs it takes over, and
+   * the transition is invisible because this card is deliberately the same shell.
+   */
+  if (phase === 'idle') {
+    if (!dialing) return null;
+    const cancelling = dialing.cancelled;
+    return (
+      <div className="fixed bottom-4 right-4 z-[200] w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-background shadow-2xl">
+        <div className="flex items-start gap-3 p-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+            <Phone size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {/* The same word the real card uses while ringing, so nothing changes on
+                  screen when the two swap over. */}
+              {cancelling ? 'Cancelling…' : 'Calling…'}
+            </p>
+            <p className="truncate text-sm font-semibold">
+              {dialing.peerName ||
+                formatE164(dialing.to ?? '') ||
+                dialing.companyName}
+            </p>
+            {dialing.peerName && dialing.to && (
+              <p className="truncate text-xs text-muted-foreground">
+                {formatE164(dialing.to)}
+              </p>
+            )}
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              Connecting…
+            </p>
+          </div>
+        </div>
+        <div className="px-4 pb-4">
+          <button
+            type="button"
+            onClick={cancelDialing}
+            disabled={cancelling}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            <PhoneOff size={15} />
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === 'transferring') {
     return (

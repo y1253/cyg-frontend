@@ -15,6 +15,7 @@ import { useInternalCallRecordings } from '@/hooks/useInternalCallRecordings';
 import { CallSummaryPanel } from './communications/CallSummaryPanel';
 import { formatEmailDate } from './message-utils';
 import type { InternalCall } from '@/api/internalCalls';
+import { isImplicitlyReadInternalCall } from './communications/internal-inbox';
 
 function duration(totalSec: number | null): string {
   if (totalSec === null) return '—';
@@ -71,6 +72,10 @@ export function InternalCallDetail({
   // Your own call is read and completed by definition, so those two controls would be
   // buttons that do nothing — the same reason the row hides them.
   const own = call.direction === 'outbound';
+  // A call you placed, or one you answered, is read by construction — see
+  // `isImplicitlyReadInternalCall`. There is no way to record that it was later cleared,
+  // so "Mark as unread" would flip and bounce back on the next poll. Hide it instead.
+  const readByConstruction = isImplicitlyReadInternalCall(call);
 
   const DirectionIcon =
     call.outcome === 'missed'
@@ -102,19 +107,21 @@ export function InternalCallDetail({
           >
             <Phone size={13} /> Call back
           </Button>
+          {!readByConstruction && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              onClick={() => {
+                onMarkUnread();
+                onClose();
+              }}
+            >
+              <MailOpen size={13} /> Mark as unread
+            </Button>
+          )}
           {!own && (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1"
-                onClick={() => {
-                  onMarkUnread();
-                  onClose();
-                }}
-              >
-                <MailOpen size={13} /> Mark as unread
-              </Button>
               <Button
                 size="sm"
                 variant="outline"

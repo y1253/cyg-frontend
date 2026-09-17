@@ -8,7 +8,10 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { formatEmailDate, senderInitial } from './message-utils';
-import { INTERNAL_KIND_STYLES } from './communications/internal-inbox';
+import {
+  INTERNAL_KIND_STYLES,
+  isImplicitlyReadInternalCall,
+} from './communications/internal-inbox';
 import type { InternalCall } from '@/api/internalCalls';
 
 interface InternalCallRowProps {
@@ -17,6 +20,10 @@ interface InternalCallRowProps {
   onOpen: () => void;
   onToggleRead: () => void;
   onToggleComplete: () => void;
+  /** Ring this colleague back. Omitted where dialling is not available. */
+  onCallBack?: () => void;
+  /** Why calling is unavailable right now, or null. Shown as the button's tooltip. */
+  callBlockedReason?: string | null;
 }
 
 function duration(sec: number | null): string {
@@ -49,6 +56,11 @@ const OUTCOME_LABEL: Record<InternalCall['outcome'], string> = {
  * The read and complete controls are hidden for a call you PLACED, the same way
  * `sentView` hides them on a message you sent: your own call is projected read and
  * completed server-side, so a control there would be a button that does nothing.
+ *
+ * ⚠️ The read dot is hidden for an ANSWERED incoming call too, for the same reason one
+ * step further out: read state is "a row exists ⇔ read", so a call the server stamps read
+ * by construction cannot be marked unread — the toggle would flip and bounce back on the
+ * next poll. See `isImplicitlyReadInternalCall`.
  */
 export function InternalCallRow({
   call,
@@ -56,10 +68,13 @@ export function InternalCallRow({
   onOpen,
   onToggleRead,
   onToggleComplete,
+  onCallBack,
+  callBlockedReason,
 }: InternalCallRowProps) {
   const style = INTERNAL_KIND_STYLES.call;
   const unread = !call.isRead;
   const own = call.direction === 'outbound';
+  const readByConstruction = isImplicitlyReadInternalCall(call);
   const Icon =
     call.outcome === 'missed'
       ? PhoneMissed
@@ -83,8 +98,9 @@ export function InternalCallRow({
         />
       )}
 
-      {/* Read/unread toggle dot — absent on your own call, which is read by definition. */}
-      {own ? (
+      {/* Read/unread toggle dot — absent on a call that is read by construction: your
+          own, or one you answered. Marking either unread is a no-op that bounces back. */}
+      {readByConstruction ? (
         <span className="mt-1 shrink-0 w-5 h-5" />
       ) : (
         <button
@@ -145,6 +161,29 @@ export function InternalCallRow({
                 ) : (
                   <Circle size={14} className="text-muted-foreground/40" />
                 )}
+              </button>
+            )}
+            {onCallBack && (
+              // Ring this colleague back, without opening the call first. The detail view
+              // has had this button all along; the row — the thing people actually look
+              // at — did not, so the one action a call log exists to prompt meant a click
+              // into the call and a wait for it to load.
+              //
+              // ⚠️ `opacity-0 … group-hover:opacity-100 focus-within:opacity-100`, NEVER
+              // `hidden`: `hidden` takes the button out of the tab order, which is the
+              // regression `NotificationPanel` documents on exactly this pattern.
+              <button
+                type="button"
+                title={callBlockedReason ?? `Call ${call.peer.name} back`}
+                aria-label={`Call back: ${call.peer.name}`}
+                disabled={!!callBlockedReason}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCallBack();
+                }}
+                className="flex items-center justify-center w-5 h-5 rounded-full text-green-700 opacity-0 transition-opacity hover:bg-green-100 focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+              >
+                <PhoneOutgoing size={13} />
               </button>
             )}
             <Badge

@@ -4,6 +4,9 @@ import {
   Loader2, MailOpen, Paperclip, Pencil, Phone, Printer, Reply, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
+import { unlockAudio } from '@/lib/notificationSound';
+import { callBlockedReason } from './communications/call-busy';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SearchInput } from '@/components/ui/SearchInput';
@@ -281,6 +284,8 @@ export function InternalCommunicationsTab({ active }: Props) {
   const { data: callCounts } = useInternalCallCounts(active);
   const callStateMutation = useInternalCallState();
   const startCall = useStartInternalCall();
+  const { calls: softphoneCalls } = useSoftphone();
+  const { beginDialing } = useSoftphoneActions();
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
@@ -670,18 +675,75 @@ export function InternalCommunicationsTab({ active }: Props) {
   // ── Placing a call ────────────────────────────────────────────────────────
   // The overlay takes over the moment this succeeds — it is mounted above the router, so
   // it follows the user anywhere for the rest of the call.
+  /**
+   * ⚠️ `unlockAudio()` runs HERE, synchronously inside the click, before anything async.
+   * It is what buys the browser's permission to play the ringback and the call audio, and
+   * a gesture that has already yielded to a promise no longer counts as one. Every other
+   * dial site in the app does this; this one did NOT — which produces a silent call rather
+   * than an error, the hardest kind of failure to attribute.
+   *
+   * `startingCallRef` is a ref, not `startCall.isPending`, for the reason
+   * `CommunicationsTab` gives: two clicks can both run before React re-renders with the
+   * new mutation state, and each would place its own call. Ringing a colleague twice is
+   * the visible half; the overlay then pairing whichever event arrived last is the worse
+   * one. A LIST of call-back buttons makes a double click more likely, not less.
+   */
+  const startingCallRef = useRef(false);
   const placeCall = (calleeId: number | undefined) => {
-    if (!calleeId) return;
+    if (!calleeId || startingCallRef.current) return;
+    startingCallRef.current = true;
+    unlockAudio();
     setDialError(null);
+    // Beside unlockAudio, before the request. A staff call has no company line, so there
+    // is no sid to latch -- the card waits for the INVITE or its own TTL.
+    const dial = beginDialing({
+      // -1, the same sentinel `callBlockedReason` takes below: a staff call sits on no
+      // company's line. The field is never read for `kind: 'internal'` — the server
+      // hangup is company-only — and the real call's event carries each participant's own
+      // workspace id once it pairs.
+      companyId: -1,
+      companyName:
+        directory.find((u) => u.id === calleeId)?.name ?? 'a colleague',
+      to: null,
+      peerName: directory.find((u) => u.id === calleeId)?.name ?? null,
+      kind: 'internal',
+      cancelled: false,
+    });
     startCall.mutate(calleeId, {
       onSuccess: () => {
         setDialOpen(false);
         setDialPicked([]);
       },
-      onError: (e: unknown) =>
-        setDialError(e instanceof Error ? e.message : 'Could not place the call'),
+      onError: (e: unknown) => {
+        // Nothing will ring, so the optimistic card goes with the error.
+        dial.done();
+        setDialError(e instanceof Error ? e.message : 'Could not place the call');
+      },
+      // Cleared on failure too, so retrying after an error is never swallowed.
+      onSettled: () => {
+        startingCallRef.current = false;
+      },
     });
   };
+
+  /**
+   * Why a call cannot be placed right now, or null.
+   *
+   * `activeCall: undefined` and `companyId: -1` exactly as `useReturnCall` does for an
+   * internal target: a staff call sits on no company's line, so nothing in `calls` can
+   * match it and only the `starting` clause applies.
+   */
+  const dialBlocked = callBlockedReason({
+    activeCall: undefined,
+    local: {
+      calls: softphoneCalls.map((c) => ({
+        companyId: c.info.companyId,
+        kind: c.info.kind,
+      })),
+    },
+    companyId: -1,
+    starting: startCall.isPending,
+  });
 
   const dialDialog = (
     <Dialog open={dialOpen} onOpenChange={setDialOpen}>
@@ -1617,6 +1679,8 @@ export function InternalCommunicationsTab({ active }: Props) {
                     })
                   }
                   onToggleComplete={() => toggleCallComplete(item.data)}
+                  onCallBack={() => placeCall(item.data.peer.id)}
+                  callBlockedReason={dialBlocked}
                 />
               ),
             )}

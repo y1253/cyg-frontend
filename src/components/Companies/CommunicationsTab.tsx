@@ -380,7 +380,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // query stays idle. `phase !== 'idle'` means this browser is already showing the call
   // in the floating overlay, or is on another call.
   const { calls: localCalls, hasHeldInvite } = useSoftphone();
-  const { answerHeld } = useSoftphoneActions();
+  const { answerHeld, beginDialing } = useSoftphoneActions();
   const [ignoredCallSid, setIgnoredCallSid] = useState<string | null>(null);
 
   const { data: ringingCall } = useRingingCall(
@@ -488,13 +488,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       if (startingCallRef.current || callBlocked) return;
       startingCallRef.current = true;
       unlockAudio();
+      // Synchronously in the click, beside unlockAudio and BEFORE the request: the card
+      // exists to fill the gap the request itself is most of.
+      const dial = beginDialing({
+        companyId,
+        companyName: company?.businessName ?? '',
+        to: number,
+        peerName: null,
+        kind: 'company',
+        cancelled: false,
+      });
       startCall(number, {
+        onSuccess: (res) => dial.placed(res.callSid),
+        // Only on failure. On success the card stays up until the INVITE pairs, which is
+        // the whole gap this exists to cover.
+        onError: () => dial.done(),
         onSettled: () => {
           startingCallRef.current = false;
         },
       });
     },
-    [startCall, callBlocked],
+    [startCall, callBlocked, beginDialing, companyId, company?.businessName],
   );
 
   /**

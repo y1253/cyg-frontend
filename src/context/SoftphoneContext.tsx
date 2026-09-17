@@ -38,6 +38,7 @@ import {
   fetchConferenceStatus,
   reportCallAnswered,
   type AddCallTarget,
+  hangUpCall,
   type ConferenceStatus,
   type TransferState,
 } from '@/api/phone';
@@ -288,11 +289,77 @@ interface SoftphoneState {
    * much the server knows about the call.
    */
   hasHeldInvite: boolean;
+  /**
+   * A call this tab has asked for, before SignalWire has rung it back.
+   *
+   * ⚠️ A FIELD beside `phase`, deliberately NOT a fifth `CallPhase` value — the same rule
+   * `conference` and `held` state above. `phase` drives `tryPair`'s `!== 'idle'` guard,
+   * the call timer and `sendDigit`'s `=== 'active'` check; a fifth value would have to be
+   * handled in each of those and every omission is a silent bug. Pairing in particular
+   * must go on believing this tab is idle, or the INVITE this very dial produces would be
+   * refused.
+   *
+   * It exists because nothing at all appeared between the click and pairing — roughly one
+   * to three seconds of a button that looked broken, made of the server's DB and provider
+   * round trips plus SignalWire forking the INVITE back to us.
+   */
+  dialing: DialingView | null;
+}
+
+/** What the optimistic card shows while a dial is in flight. */
+export interface DialingView {
+  companyId: number;
+  companyName: string;
+  /** E.164 for a company call; null for a staff call, which is placed by user id. */
+  to: string | null;
+  /** Who is being rung, when we know a name — a colleague, or a saved contact. */
+  peerName: string | null;
+  kind: 'company' | 'internal';
+  startedAt: number;
+  /**
+   * Known only once the dial request answers. Until then Cancel has nothing to act on, so
+   * it latches `cancelled` and the sid is hung up the moment it arrives.
+   */
+  callSid: string | null;
+  /**
+   * Cancel was pressed. Only ever visible while `callSid` is still null — once the sid
+   * lands the call is hung up and the card comes down, so there is nothing left to show.
+   */
+  cancelled: boolean;
+}
+
+/**
+ * What a dial site holds onto between the click and the call appearing.
+ *
+ * Deliberately tiny: the three dial sites are hooks in three different files, each already
+ * owning its own mutation, so the context supplies the card and they supply the request.
+ */
+export interface DialHandle {
+  /** The dial answered; `callSid` is now known. Also hangs it up if Cancel got there first. */
+  placed: (callSid: string) => void;
+  /** The dial failed, or the call has paired and owns the screen now. */
+  done: () => void;
 }
 
 interface SoftphoneActions {
   answer: () => void;
   hangup: () => void;
+  /**
+   * "A call is being placed" — call this synchronously in the click, beside
+   * `unlockAudio()`, before the request goes out.
+   *
+   * Returns a handle rather than taking the promise: the dial sites are three different
+   * hooks in three different files, and each already owns its own mutation.
+   */
+  beginDialing: (view: Omit<DialingView, 'startedAt' | 'callSid'>) => DialHandle;
+  /**
+   * Cancel a dial from the optimistic card.
+   *
+   * Before the sid is known there is nothing to hang up, so this only latches the intent
+   * and `DialHandle.placed` ends the call the moment the sid lands — the request was
+   * already accepted by then and somebody's phone is ringing.
+   */
+  cancelDialing: () => void;
   toggleMute: () => void;
   toggleHold: () => void;
   /**
@@ -426,6 +493,24 @@ const EVENT_STALE_MS = 60_000;
 const PAIR_WINDOW_MS = 33_000;
 
 /** How often the transferring agent's card asks whether the colleague picked up. */
+/**
+ * How long to wait before re-checking a leg we rejected mid-`Establishing`.
+ *
+ * Long enough for an `accept()` already in flight to settle into `Established`, short
+ * enough that nobody is left connected to a call they hung up on. See
+ * `terminateInvitation`.
+ */
+const ESTABLISHING_BYE_MS = 1_500;
+
+/**
+ * How long the optimistic "Calling…" card may stand with no INVITE behind it.
+ *
+ * Just past the 30s `<Dial timeout>` the server rings the browser with, so a call that is
+ * genuinely still being set up is never cut short — and a dial whose INVITE never arrives
+ * at all cannot strand a card the agent has no way to dismiss.
+ */
+const DIAL_CARD_TTL_MS = 35_000;
+
 const TRANSFER_POLL_MS = 3_000;
 
 /**
@@ -568,6 +653,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [calls, setCalls] = useState<CallView[]>([]);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [hasHeldInvite, setHasHeldInvite] = useState(false);
+  const [dialing, setDialing] = useState<DialingView | null>(null);
+  /**
+   * The live dial, read synchronously.
+   *
+   * A ref beside the state for the reason every other slot field is: `cancel()` and the
+   * sid arriving can both happen before React re-renders, and a stale closure would hang
+   * up the wrong call or none at all.
+   */
+  const dialingRef = useRef<DialingView | null>(null);
+  const dialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
@@ -680,6 +775,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     );
     setActiveCallId(activeId);
     setHasHeldInvite(invitesRef.current.length > 0);
+    // A copy, not the ref: the fields are mutated in place, and React would skip a
+    // re-render for the same object identity — so pressing Cancel would change nothing.
+    setDialing(dialingRef.current ? { ...dialingRef.current } : null);
     syncTones();
   }, [slotList, syncTones]);
 
@@ -891,6 +989,41 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Close this browser's SIP dialog, whatever state it is in.
+   *
+   * ⚠️ **`Establishing` was the hole.** sip.js only allows `bye()` on an `Established`
+   * session, so the old two-branch form (`Established ? bye() : reject()`) sent no BYE at
+   * all for the whole window between `accept()` and the 200 OK — which on an OUTBOUND
+   * click-to-call is every call, because `pair()` auto-accepts and `accept()` runs
+   * getUserMedia plus ICE first. Press Cancel in that window and `endSlot` tore the card
+   * down while the leg stayed up. A cross-border call has a longer post-dial delay, which
+   * is exactly what makes the window wide enough to hit.
+   *
+   * So the `Establishing` branch rejects AND follows up with a BYE once the accept has
+   * settled: whichever of the two the far end acts on, the dialog closes. Both are
+   * swallowed — by the time either runs the agent has already been shown a dismissed card,
+   * and the server-side hangup is the belt to this pair of braces.
+   */
+  const terminateInvitation = useCallback((inv: Invitation) => {
+    if (inv.state === SessionState.Established) {
+      void inv.bye().catch(() => undefined);
+      return;
+    }
+    if (inv.state === SessionState.Establishing) {
+      void inv.reject().catch(() => undefined);
+      // The accept may still land after the reject. Ask again once it has, or the leg
+      // survives its own hang-up.
+      setTimeout(() => {
+        if (inv.state === SessionState.Established) {
+          void inv.bye().catch(() => undefined);
+        }
+      }, ESTABLISHING_BYE_MS);
+      return;
+    }
+    void inv.reject().catch(() => undefined);
+  }, []);
+
+  /**
    * Turn one matched (INVITE, event) pair into a live slot.
    *
    * `path` is logged rather than branched on: it is how a field report says whether the
@@ -900,6 +1033,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     (held: HeldInvite, info: IncomingCallInfo, path: 'marker' | 'order') => {
       releaseInvite(held);
       eventsRef.current = eventsRef.current.filter((e) => e !== info);
+
+      // A real call has arrived, so the optimistic card has done its job and the slot
+      // below takes over the screen. Cleared unconditionally rather than matched against
+      // this call: with one dial in flight at a time there is nothing else it could be,
+      // and a card that outlived a mismatch would sit there until its TTL with a live
+      // call already on top of it.
+      if (dialingRef.current) {
+        if (dialTimerRef.current) {
+          clearTimeout(dialTimerRef.current);
+          dialTimerRef.current = null;
+        }
+        dialingRef.current = null;
+      }
 
       const id = `call-${++slotSeqRef.current}`;
       const audio = new Audio();
@@ -1315,9 +1461,7 @@ Transferred by ${info.transferFrom.name}`
       // The server's agent-leg hangup is best-effort and swallowed. When it failed,
       // no BYE ever arrives and this session would linger until the media times out,
       // so it is closed explicitly rather than waiting on a listener that may not fire.
-      if (slot.invitation.state === SessionState.Established) {
-        void slot.invitation.bye().catch(() => undefined);
-      }
+      terminateInvitation(slot.invitation);
       slot.transferTimer = setTimeout(
         () => endSlot(slot.id, 'transfer settled'),
         TRANSFER_SETTLE_MS,
@@ -1350,7 +1494,7 @@ Transferred by ${info.transferFrom.name}`
       clearInterval(id);
       clearTimeout(giveUp);
     };
-  }, [transferringId, endSlot, publish]);
+  }, [transferringId, endSlot, publish, terminateInvitation]);
 
   // ── Conference ────────────────────────────────────────────────────────────
 
@@ -1541,6 +1685,85 @@ Transferred by ${info.transferFrom.name}`
     [endSlot, switchTo],
   );
 
+
+  /**
+   * Tell the server to end every leg of this call, not just ours.
+   *
+   * ⚠️ Fired BEFORE the local BYE and deliberately NOT awaited. The server asks
+   * SignalWire which legs are live, and after our BYE lands there are none — the same
+   * ordering constraint "End & complete" documents in `CallOverlay`. Not awaiting is what
+   * keeps the red button instant: the card still dismisses on the beat.
+   *
+   * Internal calls are skipped: both legs are browsers on the shared SIP credential, they
+   * touch no company's support number, and so they cannot wedge a line the way an
+   * orphaned `<Dial>` child does.
+   */
+  const endCallServerSide = useCallback((slot: CallSlot) => {
+    const tok = tokenRef.current;
+    if (!tok) return;
+    const { kind, companyId, callSid } = slot.info;
+    if (kind === 'internal' || !callSid) return;
+    void hangUpCall(tok, companyId, callSid);
+  }, []);
+
+  /** Take the optimistic card down, and stop its expiry timer. */
+  const clearDialing = useCallback(() => {
+    if (dialTimerRef.current) {
+      clearTimeout(dialTimerRef.current);
+      dialTimerRef.current = null;
+    }
+    if (!dialingRef.current) return;
+    dialingRef.current = null;
+    publish();
+  }, [publish]);
+
+  /**
+   * Raise the "Calling…" card immediately, and hand back the two callbacks the dial site
+   * needs.
+   *
+   * ⚠️ The card is torn down by `pair()`, by `done()`, or by `DIAL_CARD_TTL_MS` —
+   * whichever comes first. The TTL is not belt-and-braces: a dial whose INVITE never
+   * arrives (SIP down, the agent's registration lost) would otherwise strand a card with
+   * no call behind it and no way to dismiss it.
+   */
+  const beginDialing = useCallback(
+    (view: Omit<DialingView, 'startedAt' | 'callSid'>): DialHandle => {
+      if (dialTimerRef.current) clearTimeout(dialTimerRef.current);
+      dialingRef.current = {
+        ...view,
+        startedAt: Date.now(),
+        callSid: null,
+        cancelled: false,
+      };
+      dialTimerRef.current = setTimeout(() => {
+        log('dial card expired with no INVITE');
+        clearDialing();
+      }, DIAL_CARD_TTL_MS);
+      publish();
+
+      return {
+        placed: (callSid: string) => {
+          const live = dialingRef.current;
+          if (!live) return;
+          live.callSid = callSid;
+          // Cancel was pressed before the sid existed. Now it does, so end the call it
+          // names — the request was already accepted and somebody's phone is ringing.
+          if (live.cancelled) {
+            const tok = tokenRef.current;
+            if (tok && live.kind === 'company') {
+              void hangUpCall(tok, live.companyId, callSid);
+            }
+            clearDialing();
+            return;
+          }
+          publish();
+        },
+        done: () => clearDialing(),
+      };
+    },
+    [clearDialing, publish],
+  );
+
   // ── Actions ───────────────────────────────────────────────────────────────
   const actions = useMemo<SoftphoneActions>(
     () => ({
@@ -1548,16 +1771,30 @@ Transferred by ${info.transferFrom.name}`
         const id = activeIdRef.current;
         if (id) answerSlot(id);
       },
+      beginDialing,
+      cancelDialing: () => {
+        const live = dialingRef.current;
+        if (!live) return;
+        live.cancelled = true;
+        if (live.callSid) {
+          const tok = tokenRef.current;
+          if (tok && live.kind === 'company') {
+            void hangUpCall(tok, live.companyId, live.callSid);
+          }
+          clearDialing();
+          return;
+        }
+        // No sid yet: keep the card up, now reading "Cancelling…", until `placed`
+        // arrives and hangs it up. Dropping it here would leave a call ringing somebody's
+        // phone with no UI anywhere to end it.
+        publish();
+      },
       hangup: () => {
         const slot = activeSlot();
         if (!slot) return;
-        const inv = slot.invitation;
-        // Before answering the correct rejection is a decline; after, a BYE.
-        if (inv.state === SessionState.Established) {
-          void inv.bye().catch(() => undefined);
-        } else {
-          void inv.reject().catch(() => undefined);
-        }
+        // Server FIRST, then our own dialog — see `endCallServerSide`.
+        endCallServerSide(slot);
+        terminateInvitation(slot.invitation);
         endSlot(slot.id, 'hung up');
       },
       switchTo,
@@ -1577,12 +1814,8 @@ Transferred by ${info.transferFrom.name}`
         if (target) target.answering = true;
         const current = activeSlot();
         if (current && current.id !== callId) {
-          const inv = current.invitation;
-          if (inv.state === SessionState.Established) {
-            void inv.bye().catch(() => undefined);
-          } else {
-            void inv.reject().catch(() => undefined);
-          }
+          endCallServerSide(current);
+          terminateInvitation(current.invitation);
           endSlot(current.id, 'ended to answer another call');
         }
         answerSlot(callId);
@@ -1883,6 +2116,9 @@ Transferred by ${info.transferFrom.name}`
       activeSlot,
       answerSlot,
       attachRemoteAudio,
+      beginDialing,
+      clearDialing,
+      endCallServerSide,
       endSlot,
       holdAllParties,
       holdSlot,
@@ -1896,6 +2132,7 @@ Transferred by ${info.transferFrom.name}`
       slotIn,
       slotList,
       switchTo,
+      terminateInvitation,
       token,
     ],
   );
@@ -1974,8 +2211,10 @@ Transferred by ${info.transferFrom.name}`
       calls,
       activeCallId,
       waitingCallId: waiting?.id ?? null,
+      // Not derived from `calls` — it is what stands in the gap BEFORE there is a call.
+      dialing,
     };
-  }, [status, calls, activeCallId, hasHeldInvite]);
+  }, [status, calls, activeCallId, hasHeldInvite, dialing]);
 
   return (
     <ActionsCtx.Provider value={actions}>
@@ -1992,7 +2231,7 @@ Transferred by ${info.transferFrom.name}`
           Mount gated on call state ONLY, never on the route — gating on anything
           route-derived would unmount a live call on navigation.
         */}
-        {calls.length > 0
+        {calls.length > 0 || dialing
           ? createPortal(<CallOverlay />, document.body)
           : null}
       </StateCtx.Provider>

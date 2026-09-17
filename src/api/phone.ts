@@ -776,6 +776,49 @@ export async function declineCall(
 }
 
 /**
+ * End a company call on the provider — every leg of it — not just in this browser.
+ *
+ * ── WHY A LOCAL BYE IS NOT ENOUGH ─────────────────────────────────────────────
+ * Hanging up used to be pure SIP: a BYE on this browser's own leg, trusting `<Dial>` to
+ * take the customer's leg with it. Verified on the live account, it does not always — an
+ * outbound leg to a US number stayed `ringing` for 3.5 hours after its parent completed.
+ * Because that leg carries the company's support number, the server went on reporting the
+ * line busy: the agent saw "…is on a call on this line" after hanging up, and every
+ * further dial was refused with a 409.
+ *
+ * ⚠️ **Call this BEFORE the BYE, not after.** The server asks SignalWire which legs are
+ * live, and after the BYE lands there are none — the same ordering constraint
+ * `endAndComplete` documents in `CallOverlay`.
+ *
+ * ⚠️ **Best-effort, so it never delays the hang-up.** The agent pressed the red button;
+ * a slow or failing provider must not keep them connected while we wait. A failure
+ * degrades to exactly the old behaviour, which is why this resolves rather than throws.
+ */
+export async function hangUpCall(
+  token: string,
+  companyId: number,
+  callSid: string,
+): Promise<{ ended: string[] } | null> {
+  try {
+    const res = await fetchWithAuth(
+      token,
+      `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(
+        callSid,
+      )}/hangup`,
+      { method: 'POST', headers: JSON_HEADERS },
+    );
+    if (!res.ok) {
+      console.warn('[softphone] server hangup failed', res.status);
+      return null;
+    }
+    return (await res.json()) as { ended: string[] };
+  } catch (err) {
+    console.warn('[softphone] server hangup threw', err);
+    return null;
+  }
+}
+
+/**
  * Hand a company call to a colleague and drop out — a blind (cold) transfer.
  *
  * `targetUserId`, never a phone number: the picker commits only directory choices, and

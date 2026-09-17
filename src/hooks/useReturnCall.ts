@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { useSoftphone } from '@/context/SoftphoneContext';
+import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
 import { startCall, type ActiveCall } from '@/api/phone';
 import { startInternalCall } from '@/api/internalCalls';
 import type { UnreadFeedItem } from '@/api/gmail';
@@ -38,6 +38,7 @@ export function useReturnCall() {
   const { token } = useAuth();
   const { pushToast } = useNotifications();
   const { calls } = useSoftphone();
+  const { beginDialing } = useSoftphoneActions();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   /**
@@ -77,11 +78,37 @@ export function useReturnCall() {
       unlockAudio();
       dialInFlight = true;
       setPendingId(item.id);
+      // Beside unlockAudio and before the request, for the same reason: the card exists
+      // to fill the gap the request itself is most of.
+      const dial = beginDialing(
+        target.scope === 'company'
+          ? {
+              companyId: target.companyId,
+              companyName: item.companyName,
+              to: target.to,
+              peerName: item.from,
+              kind: 'company',
+              cancelled: false,
+            }
+          : {
+              companyId: item.companyId,
+              companyName: item.companyName,
+              to: null,
+              peerName: item.from,
+              kind: 'internal',
+              cancelled: false,
+            },
+      );
 
       const placing =
         target.scope === 'company'
-          ? startCall(token!, target.companyId, target.to)
-          : startInternalCall(token!, target.calleeId);
+          ? startCall(token!, target.companyId, target.to).then((res) => {
+              dial.placed(res.callSid);
+            })
+          : startInternalCall(token!, target.calleeId).then(() => {
+              // A staff call has no company line to hang up, so there is no sid worth
+              // latching -- the card simply waits for the INVITE or the TTL.
+            });
 
       void placing
         .then(() => {
@@ -90,6 +117,8 @@ export function useReturnCall() {
           onPlaced?.();
         })
         .catch((err: unknown) => {
+          // Nothing is going to ring, so take the optimistic card down with the error.
+          dial.done();
           // The server refuses a dial on a busy line with a 409 whose message names who is
           // on it. Without this it would vanish and the button would look broken.
           pushToast({
@@ -105,7 +134,7 @@ export function useReturnCall() {
           setPendingId(null);
         });
     },
-    [token, pushToast],
+    [token, pushToast, beginDialing],
   );
 
   return { returnCall, blockedReason, pendingId };
