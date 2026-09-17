@@ -54,13 +54,16 @@ export function PhoneNumberSection({
               <span className="text-sm font-medium">
                 {formatE164(number.phoneNumber)}
               </span>
+              {/* ⚠️ No "Voice + SMS" badge here, deliberately.
+                  It used to be hardcoded on every connected number, which made it a claim
+                  with nothing behind it. `SupportNumber` stores no capability columns, and
+                  adding them would not help: the PURCHASE response's capabilities are a
+                  constant that lies (see CLAUDE.md), so the only truthful source is a
+                  provider round trip — and even that would be a snapshot, since a number's
+                  SMS capability moves with its 10DLC/campaign state. The search list's own
+                  badge stays, because that one is derived from real capabilities and goes
+                  MISSING rather than lying. */}
               <div className="flex items-center gap-1.5">
-                <Badge
-                  variant="outline"
-                  className="bg-teal-50 text-teal-700 border-teal-200 text-[10px] px-1.5 py-0"
-                >
-                  Voice + SMS
-                </Badge>
                 {number.region && (
                   <Badge
                     variant="outline"

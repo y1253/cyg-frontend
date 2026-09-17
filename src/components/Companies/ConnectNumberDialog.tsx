@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { formatE164 } from '@/lib/phone';
 import type { AvailableNumber } from '@/api/phone';
 import { useAttachNumber, useSearchAvailableNumbers } from '@/hooks/usePhoneNumber';
+import { emptyResultMessage } from './connect-number-message';
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Error';
@@ -45,7 +46,25 @@ export function ConnectNumberDialog({
 
   const search = useSearchAvailableNumbers();
   const attach = useAttachNumber(companyId);
-  const results = search.data ?? [];
+  const results = search.data?.numbers ?? [];
+  /**
+   * The message comes from what was SEARCHED, not from the inputs as they stand now.
+   * Typing a new area code after a search must not relabel the previous result — it would
+   * describe a search that never ran.
+   */
+  const emptyMessage = emptyResultMessage({
+    outcome: search.isError
+      ? 'error'
+      : search.isPending
+        ? 'pending'
+        : search.isSuccess
+          ? 'success'
+          : 'idle',
+    totalFound: search.data?.totalFound ?? 0,
+    eligibleCount: results.length,
+    country: search.data?.searched.country === 'US' ? 'USA' : 'CANADA',
+    areaCode: search.data?.searched.areaCode ?? '',
+  });
 
   const reset = () => {
     setSelected(null);
@@ -120,17 +139,13 @@ export function ConnectNumberDialog({
 
           {search.isError && <p className="text-xs text-destructive">{errorText(search.error)}</p>}
 
-          {search.isSuccess && results.length === 0 && (
+          {/* One sentence per situation, decided by `emptyResultMessage`. The A2P 10DLC
+              explanation is reachable ONLY when numbers were genuinely found and rejected
+              on a US search — never for an empty result, and never for a failed request,
+              both of which this used to blame on it. */}
+          {emptyMessage && (
             <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-              No numbers available that support both calls and texts
-              {areaCode ? ` in area code ${areaCode}` : ''}.
-              {country === 'USA' && (
-                <>
-                  {' '}
-                  US numbers stay voice-only until your A2P 10DLC registration completes, so
-                  none qualify yet. Canadian numbers are unaffected.
-                </>
-              )}
+              {emptyMessage}
             </p>
           )}
 

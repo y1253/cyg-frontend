@@ -55,17 +55,52 @@ export async function fetchSupportNumber(
  * Searches purchasable numbers. Admin only, and every call hits a paid provider — which
  * is why the hook wrapping this is a mutation rather than an auto-refetching query.
  */
+/**
+ * What a number search found.
+ *
+ * `totalFound` is what the provider returned BEFORE the voice+SMS bar, which is the only
+ * thing that separates "100 exist, none can text" from "none exist" — see
+ * `connect-number-message.ts` for why those must not read the same.
+ */
+export interface NumberSearchResult {
+  numbers: AvailableNumber[];
+  totalFound: number;
+  searched: { country: 'US' | 'CA'; areaCode: string | null; regions: string[] };
+}
+
 export async function searchAvailableNumbers(
   token: string,
   params: { country: string; areaCode?: string },
-): Promise<AvailableNumber[]> {
+): Promise<NumberSearchResult> {
   const query = new URLSearchParams({ country: params.country });
   if (params.areaCode) query.set('areaCode', params.areaCode);
   const res = await fetchWithAuth(token, `${API}/phone/available?${query}`, {
     headers: JSON_HEADERS,
   });
   if (!res.ok) throw await failure(res, 'Failed to search numbers');
-  return res.json() as Promise<AvailableNumber[]>;
+  const body: unknown = await res.json();
+
+  /**
+   * ⚠️ Tolerates the OLD bare-array shape for one release.
+   *
+   * Server and client are separate repos deployed one after the other, so there is a
+   * window where a browser running the old bundle meets the new server, or vice versa.
+   * Without this, `results.map` throws inside the dialog and the admin sees a blank
+   * popup. Three lines now; delete once both sides have shipped.
+   */
+  if (Array.isArray(body)) {
+    const numbers = body as AvailableNumber[];
+    return {
+      numbers,
+      totalFound: numbers.length,
+      searched: {
+        country: params.country === 'USA' ? 'US' : 'CA',
+        areaCode: params.areaCode ?? null,
+        regions: [],
+      },
+    };
+  }
+  return body as NumberSearchResult;
 }
 
 /** Buys the number and attaches it. Irreversible and billable. */

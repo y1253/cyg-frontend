@@ -326,14 +326,27 @@ export async function fetchWhatsAppCounts(
  * header needs a media id, which is a different feature.
  */
 export interface WhatsAppTemplate {
+  id: string | null;
   name: string;
   /** Meta's own code, e.g. `en_US`. Sent back verbatim. */
   language: string;
   category: string;
-  /** The approved copy, `{{1}}` placeholders intact. */
-  body: string;
+  /** The copy, `{{1}}` placeholders intact. Null for a template with no BODY component. */
+  body: string | null;
   variableCount: number;
+  /** Meta's review state. Only APPROVED can be sent — see `isSendableTemplate`. */
+  status: string;
+  /** Why Meta refused it. The only thing that says what to change. */
+  rejectedReason: string | null;
 }
+
+/** Only an APPROVED template may carry a message. Mirrors the server rule of the same name. */
+export function isSendableTemplate(t: WhatsAppTemplate): boolean {
+  return t.status === 'APPROVED' && t.body !== null;
+}
+
+/** What the create form may submit. AUTHENTICATION is excluded — see the server's list. */
+export const TEMPLATE_CATEGORIES = ['UTILITY', 'MARKETING'] as const;
 
 /**
  * The templates this company may send.
@@ -351,6 +364,33 @@ export async function fetchWhatsAppTemplates(
   );
   if (!res.ok) throw await failure(res, 'Failed to load templates');
   return res.json() as Promise<WhatsAppTemplate[]>;
+}
+
+/**
+ * Submit a template for Meta's review.
+ *
+ * ⚠️ Fails loudly, unlike the listing above. An empty picker is a legitimate answer to
+ * "what can I send"; a silently swallowed submission would leave somebody waiting for a
+ * review that was never requested.
+ */
+export async function createWhatsAppTemplate(
+  token: string,
+  companyId: number,
+  input: {
+    name: string;
+    language: string;
+    category: string;
+    body: string;
+    examples: string[];
+  },
+): Promise<WhatsAppTemplate> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/templates`,
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(input) },
+  );
+  if (!res.ok) throw await failure(res, 'Failed to create the template');
+  return res.json() as Promise<WhatsAppTemplate>;
 }
 
 /**

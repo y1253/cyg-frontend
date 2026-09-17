@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/context/AuthContext';
+import { canManage } from '@/lib/roles';
 import { useWhatsAppTemplates } from '@/hooks/useWhatsAppTemplates';
-import type { WhatsAppTemplate } from '@/api/whatsapp';
+import { useCreateWhatsAppTemplate } from '@/hooks/useCreateWhatsAppTemplate';
+import {
+  TEMPLATE_CATEGORIES,
+  isSendableTemplate,
+  type WhatsAppTemplate,
+} from '@/api/whatsapp';
+
+/** `{{1}}`, `{{ 2 }}` — Meta writes them positionally, one-based. */
+const PLACEHOLDER = /\{\{\s*(\d+)\s*\}\}/g;
+const BODY_PLACEHOLDER = 'Hi {{1}}, your {{2}} is ready to collect.';
+const VARIABLE_HINT =
+  'Use {{1}}, {{2}} for anything that changes from message to message.';
 
 /**
  * Fill in an approved WhatsApp template.
@@ -30,8 +45,19 @@ export function TemplatePicker({
     value: { name: string; language: string; variables: string[] } | null,
   ) => void;
 }) {
+  const { user } = useAuth();
+  const canCreate = canManage(user);
   const { data, isLoading, isError } = useWhatsAppTemplates(companyId, enabled);
-  const templates = useMemo(() => data ?? [], [data]);
+  const all = useMemo(() => data ?? [], [data]);
+  /**
+   * ⚠️ The list is no longer APPROVED-only — that filter was ours, and it is why a
+   * template somebody had just submitted was invisible for the whole review. Only
+   * sendable ones may be SELECTED; the rest are reported below so the person who
+   * submitted one can see what became of it.
+   */
+  const templates = useMemo(() => all.filter(isSendableTemplate), [all]);
+  const awaiting = useMemo(() => all.filter((t) => !isSendableTemplate(t)), [all]);
+  const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [variables, setVariables] = useState<string[]>([]);
 
@@ -83,13 +109,32 @@ export function TemplatePicker({
   // An empty list is a legitimate answer, not a failure — see the note below.
   if (isError || templates.length === 0) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        <p className="font-medium">No approved templates</p>
-        <p className="mt-1">
-          WhatsApp only allows a pre-approved template as the first message, or after 24
-          hours of silence. Create one in Meta Business Manager and it will appear here
-          once Meta approves it.
-        </p>
+      <div className="flex flex-col gap-2">
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">No approved templates</p>
+          <p className="mt-1">
+            WhatsApp only allows a pre-approved template as the first message, or after 24
+            hours of silence.
+          </p>
+        </div>
+        <TemplateStatusList templates={awaiting} />
+        {canCreate &&
+          (creating ? (
+            <CreateTemplatePanel
+              companyId={companyId}
+              onClose={() => setCreating(false)}
+            />
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-fit gap-1"
+              onClick={() => setCreating(true)}
+            >
+              <Plus size={13} /> Create a template
+            </Button>
+          ))}
       </div>
     );
   }
@@ -148,6 +193,28 @@ export function TemplatePicker({
           </p>
         </div>
       )}
+
+      {/* Also here, not only in the empty state: once a company has ONE approved
+          template the empty branch never renders again, and a second submission would be
+          invisible for its whole review — the very problem this feature exists to fix. */}
+      <TemplateStatusList templates={awaiting} />
+      {canCreate &&
+        (creating ? (
+          <CreateTemplatePanel
+            companyId={companyId}
+            onClose={() => setCreating(false)}
+          />
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-fit gap-1"
+            onClick={() => setCreating(true)}
+          >
+            <Plus size={13} /> Create a template
+          </Button>
+        ))}
     </div>
   );
 }
@@ -156,9 +223,202 @@ export function TemplatePicker({
  * Mirrors the server's `renderTemplateBody`, including leaving an unfilled placeholder
  * visible rather than blanking it — a gap the user can see is a gap they can fix.
  */
-function previewOf(body: string, variables: readonly string[]): string {
-  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (whole, digits: string) => {
+function previewOf(body: string | null, variables: readonly string[]): string {
+  return (body ?? '').replace(/\{\{\s*(\d+)\s*\}\}/g, (whole, digits: string) => {
     const value = variables[Number(digits) - 1];
     return value === undefined || value.trim() === '' ? whole : value.trim();
   });
+}
+
+/**
+ * Templates Meta has not approved — yet, or at all.
+ *
+ * Shown rather than hidden, because the person reading this is usually the person who
+ * submitted one: "pending" is the answer to "where did it go", and a rejection is useless
+ * without Meta's reason for it. Before this, our own APPROVED-only filter meant a
+ * submission was invisible for the entire review.
+ */
+function TemplateStatusList({
+  templates,
+}: {
+  templates: readonly WhatsAppTemplate[];
+}) {
+  if (templates.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border p-2.5">
+      <span className="text-xs font-medium text-muted-foreground">
+        Submitted, not yet sendable
+      </span>
+      {templates.map((t) => (
+        <div key={`${t.name}|${t.language}`} className="text-xs">
+          <span className="font-medium">{t.name}</span>{' '}
+          <span className="text-muted-foreground">({t.language})</span>{' '}
+          <span
+            className={
+              t.status === 'REJECTED' ? 'text-destructive' : 'text-amber-700'
+            }
+          >
+            {t.status.toLowerCase()}
+          </span>
+          {t.rejectedReason && (
+            <p className="text-muted-foreground">{t.rejectedReason}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Submit a template for Meta's review, inline.
+ *
+ * ⚠️ An inline panel, NOT a nested Dialog. Both of this picker's homes already render
+ * inside one, and stacking base-ui dialogs is a focus and scroll-lock fight for nothing.
+ *
+ * The example inputs are not optional politeness: Meta rejects a submission whose body
+ * contains a placeholder and carries no example, with wording that never says so.
+ */
+function CreateTemplatePanel({
+  companyId,
+  onClose,
+}: {
+  companyId: number;
+  onClose: () => void;
+}) {
+  const create = useCreateWhatsAppTemplate(companyId);
+  const [name, setName] = useState('');
+  const [language, setLanguage] = useState('en_US');
+  const [category, setCategory] = useState<string>(TEMPLATE_CATEGORIES[0]);
+  const [body, setBody] = useState('');
+  const [examples, setExamples] = useState<string[]>([]);
+
+  // Highest index, not occurrence count — a repeated placeholder still takes one value.
+  // Mirrors `countTemplateVariables` on the server.
+  const variableCount = useMemo(() => {
+    let highest = 0;
+    for (const m of body.matchAll(PLACEHOLDER)) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+    return highest;
+  }, [body]);
+
+  const submit = () => {
+    create.mutate(
+      {
+        name: name.trim().toLowerCase(),
+        language,
+        category,
+        body: body.trim(),
+        examples: Array.from(
+          { length: variableCount },
+          (_, i) => examples[i] ?? '',
+        ),
+      },
+      { onSuccess: onClose },
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-md border p-3">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="wa-tpl-name">Name</Label>
+        <Input
+          id="wa-tpl-name"
+          value={name}
+          placeholder="appointment_reminder"
+          // Lowercased as you type: Meta REJECTS uppercase rather than folding it, and
+          // its 400 is a poor way to learn that.
+          onChange={(e) =>
+            setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))
+          }
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <div className="flex flex-1 flex-col gap-1.5">
+          <Label htmlFor="wa-tpl-lang">Language</Label>
+          <Input
+            id="wa-tpl-lang"
+            value={language}
+            placeholder="en_US"
+            onChange={(e) => setLanguage(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-1 flex-col gap-1.5">
+          <Label htmlFor="wa-tpl-cat">Category</Label>
+          <select
+            id="wa-tpl-cat"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {TEMPLATE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c.toLowerCase()}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="wa-tpl-body">Message</Label>
+        <Textarea
+          id="wa-tpl-body"
+          value={body}
+          rows={3}
+          maxLength={1024}
+          placeholder={BODY_PLACEHOLDER}
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">
+          {VARIABLE_HINT}
+        </span>
+      </div>
+
+      {variableCount > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Example values</Label>
+          <span className="text-xs text-muted-foreground">
+            Meta reviews the template with these filled in, and refuses it without them.
+          </span>
+          {Array.from({ length: variableCount }, (_, i) => (
+            <Input
+              key={i}
+              value={examples[i] ?? ''}
+              placeholder={`Example for placeholder ${i + 1}`}
+              onChange={(e) =>
+                setExamples((prev) => {
+                  const next = [...prev];
+                  next[i] = e.target.value;
+                  return next;
+                })
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {create.isError && (
+        <p className="text-xs text-destructive">
+          {(create.error as Error)?.message ?? 'Could not create the template'}
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          className="bg-emerald-600 text-white hover:bg-emerald-700"
+          disabled={create.isPending || !name.trim() || !body.trim()}
+          onClick={submit}
+        >
+          {create.isPending ? 'Submitting…' : 'Submit for review'}
+        </Button>
+      </div>
+    </div>
+  );
 }
