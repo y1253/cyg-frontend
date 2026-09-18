@@ -152,6 +152,63 @@ export function isUnreadMissedCall(item: UnifiedItem): boolean {
   );
 }
 
+/** How a call ended, as every surface spells it. */
+export type CallOutcome = 'answered' | 'missed' | 'failed' | 'in-progress';
+
+/**
+ * What a call outcome is CALLED, which depends on which way the call went.
+ *
+ * ── WHY THE SERVER KEEPS ONE `outcome` AND THIS SPLITS IT ──────────────────────
+ * "Missed" means somebody tried to reach us and we were not there. A call WE placed that
+ * rang out is a different fact, and reads wrong under that word — an agent seeing "Missed
+ * call" on their own outgoing call reasonably reports it as a bug.
+ *
+ * It is fixed HERE rather than by adding an outcome on the server because the server's
+ * union is an exhaustive switch in several places (`isImplicitlyReadCall`,
+ * `isImplicitlyReadInternalCall`, `isImplicitlyRead`), and because every COUNT is
+ * already direction-scoped: `isUnreadMissedCall` above requires `direction === 'inbound'`,
+ * and the dashboard badge, the Missed folder, the tab badge and the bell all funnel
+ * through it. So this is purely what the row SAYS; no number moves.
+ *
+ * Used by all four call surfaces — `InboxRow`, `CallDetailView`, `InternalCallRow` and
+ * `InternalCallDetail` — so the company and staff inboxes cannot drift apart on wording.
+ */
+export function callOutcomeLabel(
+  outcome: CallOutcome,
+  direction: 'inbound' | 'outbound',
+): string {
+  if (outcome === 'missed' && direction === 'outbound') return 'No answer';
+  switch (outcome) {
+    case 'answered':
+      return 'Answered';
+    case 'missed':
+      return 'Missed';
+    case 'failed':
+      return 'Failed';
+    case 'in-progress':
+      return 'In progress';
+    default: {
+      const never: never = outcome;
+      return never;
+    }
+  }
+}
+
+/**
+ * Should this outcome be shown in the alarming red the inbox uses for work owed?
+ *
+ * Red here means "somebody is waiting on you". An outbound call that rang out is your own
+ * action to retry, and it is already excluded from every missed-call count by direction —
+ * so red would be the one place left still claiming it is a backlog item.
+ */
+export function isAlarmingOutcome(
+  outcome: CallOutcome,
+  direction: 'inbound' | 'outbound',
+): boolean {
+  if (direction === 'outbound') return false;
+  return outcome === 'missed' || outcome === 'failed';
+}
+
 export type UnifiedItem =
   | { kind: 'email'; data: EmailSummary }
   | { kind: 'chat'; data: ChatInboxMessage }
@@ -226,14 +283,18 @@ export const KIND_STYLES: Record<ItemKind, KindStyle> = {
     hoverUnread: 'bg-white hover:bg-amber-50/60',
     hoverRead: 'bg-muted/10 hover:bg-amber-50/40',
   },
-  // Emerald rather than calls' green-500, so the two stay distinguishable side by side.
+  // ⚠️ Emerald rather than calls' green-500, AND a darker ramp (-100/-900/-400) than every
+    // other kind's -50/-700/-200. The hue alone was not enough: emerald-700 and green-700
+    // sit about 15 degrees apart at near-identical LIGHTNESS, so the two tags read as the
+    // same chip beside each other in the inbox and in CommsHeader. Separating them by
+    // weight is what actually distinguishes them.
   whatsapp: {
     label: 'WhatsApp',
     Icon: MessageCircle,
     accent: 'bg-emerald-600',
     dot: 'bg-emerald-600 border-emerald-600',
     avatar: 'bg-emerald-100 text-emerald-700',
-    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    badge: 'bg-emerald-100 text-emerald-900 border-emerald-400',
     hoverUnread: 'bg-white hover:bg-emerald-50/60',
     hoverRead: 'bg-muted/10 hover:bg-emerald-50/40',
   },

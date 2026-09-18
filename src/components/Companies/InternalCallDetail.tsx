@@ -16,6 +16,10 @@ import { CallSummaryPanel } from './communications/CallSummaryPanel';
 import { formatEmailDate } from './message-utils';
 import type { InternalCall } from '@/api/internalCalls';
 import { isImplicitlyReadInternalCall } from './communications/internal-inbox';
+import {
+  callOutcomeLabel,
+  isAlarmingOutcome,
+} from './communications/types';
 
 function duration(totalSec: number | null): string {
   if (totalSec === null) return '—';
@@ -31,11 +35,7 @@ const OUTCOME_STYLE: Record<InternalCall['outcome'], string> = {
   'in-progress': 'bg-amber-50 text-amber-700 border-amber-200',
 };
 
-const OUTCOME_LABEL: Record<InternalCall['outcome'], string> = {
-  answered: 'Answered',
-  missed: 'Missed',
-  'in-progress': 'In progress',
-};
+// Shared with the company inbox — see `callOutcomeLabel`.
 
 /**
  * One staff-to-staff call: who, when, how long, and the recording if there is one.
@@ -77,12 +77,14 @@ export function InternalCallDetail({
   // so "Mark as unread" would flip and bounce back on the next poll. Hide it instead.
   const readByConstruction = isImplicitlyReadInternalCall(call);
 
-  const DirectionIcon =
-    call.outcome === 'missed'
-      ? PhoneMissed
-      : own
-        ? PhoneOutgoing
-        : PhoneIncoming;
+  // A missed-call glyph depicts a call coming IN, so a call this user PLACED keeps its
+  // own arrow -- the Direction row below already says "Outgoing", which this contradicted.
+  const alarming = isAlarmingOutcome(call.outcome, call.direction);
+  const DirectionIcon = alarming
+    ? PhoneMissed
+    : own
+      ? PhoneOutgoing
+      : PhoneIncoming;
 
   return (
     <div className="flex flex-col gap-4">
@@ -147,9 +149,11 @@ export function InternalCallDetail({
           <div
             className={[
               'flex size-12 shrink-0 items-center justify-center rounded-full',
-              call.outcome === 'missed'
+              alarming
                 ? 'bg-red-100 text-red-600'
-                : 'bg-green-100 text-green-700',
+                : call.outcome === 'missed'
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-green-100 text-green-700',
             ].join(' ')}
           >
             <DirectionIcon size={20} />
@@ -162,9 +166,13 @@ export function InternalCallDetail({
           </div>
           <Badge
             variant="outline"
-            className={`ml-auto ${OUTCOME_STYLE[call.outcome]}`}
+            className={`ml-auto ${
+              call.outcome === 'missed' && !alarming
+                ? 'bg-muted text-muted-foreground border-border'
+                : OUTCOME_STYLE[call.outcome]
+            }`}
           >
-            {OUTCOME_LABEL[call.outcome]}
+            {callOutcomeLabel(call.outcome, call.direction)}
           </Badge>
         </div>
 

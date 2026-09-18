@@ -246,7 +246,7 @@ export function WhatsAppThreadView({
           <Button size="sm" variant="ghost" onClick={onClose} className="gap-1">
             <ArrowLeft size={14} /> Back
           </Button>
-          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
+          <Badge variant="outline" className="bg-emerald-100 text-emerald-900 border-emerald-400 gap-1">
             <MessageCircle size={11} /> WhatsApp
           </Badge>
           <span className="text-sm font-semibold">{title}</span>

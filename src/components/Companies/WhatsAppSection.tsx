@@ -138,7 +138,7 @@ export function WhatsAppSection({
                 {account.verifiedName && (
                   <Badge
                     variant="outline"
-                    className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] px-1.5 py-0"
+                    className="bg-emerald-100 text-emerald-900 border-emerald-400 text-[10px] px-1.5 py-0"
                   >
                     {account.verifiedName}
                   </Badge>

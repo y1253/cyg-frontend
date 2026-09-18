@@ -123,7 +123,7 @@ export function CommsHeader({
             <Button
               size="sm"
               variant="outline"
-              className="gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              className="gap-1 border-emerald-400 text-emerald-900 hover:bg-emerald-100"
               onClick={onComposeWhatsApp}
             >
               <MessageCircle size={14} /> New WhatsApp

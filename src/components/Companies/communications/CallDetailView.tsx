@@ -12,7 +12,11 @@ import { CallSummaryPanel } from './CallSummaryPanel';
 import { useMarkPhoneItem } from '@/hooks/useMarkPhoneItem';
 import { formatE164 } from '@/lib/phone';
 import { formatEmailDate } from '../message-utils';
-import { isImplicitlyRead } from './types';
+import {
+  callOutcomeLabel,
+  isAlarmingOutcome,
+  isImplicitlyRead,
+} from './types';
 import type { CompleteTarget, ItemKind } from './types';
 
 function duration(totalSec: number): string {
@@ -29,12 +33,9 @@ const OUTCOME_STYLE: Record<CallItem['outcome'], string> = {
   'in-progress': 'bg-amber-50 text-amber-700 border-amber-200',
 };
 
-const OUTCOME_LABEL: Record<CallItem['outcome'], string> = {
-  answered: 'Answered',
-  missed: 'Missed',
-  failed: 'Failed',
-  'in-progress': 'In progress',
-};
+// Labels come from `callOutcomeLabel` now, because "Missed" depends on which way the call
+// went — a flat Record cannot express that, and this card used to contradict itself by
+// showing a red "Missed" badge beside a "Direction: Outgoing" row.
 
 /**
  * One call: who, when, how long, and the recording if there is one.
@@ -88,11 +89,14 @@ export function CallDetailView({
   // A voicemail is a missed call that left something behind, so it is checked FIRST --
   // every one of them also satisfies `outcome === 'missed'`.
   const isVoicemail = call?.hasVoicemail ?? false;
+  const direction = call?.direction ?? 'inbound';
+  // A missed-call glyph depicts a call coming IN, so an outbound call keeps its own.
+  const alarming = outcome !== null && isAlarmingOutcome(outcome, direction);
   const DirectionIcon = isVoicemail
     ? Voicemail
-    : outcome === 'missed' || outcome === 'failed'
+    : alarming
       ? PhoneMissed
-      : call?.direction === 'outbound'
+      : direction === 'outbound'
         ? PhoneOutgoing
         : PhoneIncoming;
 
@@ -169,9 +173,11 @@ export function CallDetailView({
               // just as loudly as the badge does.
               outcome === null
                 ? 'bg-muted text-muted-foreground'
-                : outcome === 'missed' || outcome === 'failed'
+                : alarming
                   ? 'bg-red-100 text-red-600'
-                  : 'bg-green-100 text-green-700',
+                  : outcome === 'missed'
+                    ? 'bg-muted text-muted-foreground'
+                    : 'bg-green-100 text-green-700',
             ].join(' ')}
           >
             <DirectionIcon size={20} />
@@ -192,8 +198,15 @@ export function CallDetailView({
             </p>
           </div>
           {outcome && (
-            <Badge variant="outline" className={`ml-auto ${OUTCOME_STYLE[outcome]}`}>
-              {isVoicemail ? 'Voicemail' : OUTCOME_LABEL[outcome]}
+            <Badge
+              variant="outline"
+              className={`ml-auto ${
+                outcome === 'missed' && direction === 'outbound'
+                  ? 'bg-muted text-muted-foreground border-border'
+                  : OUTCOME_STYLE[outcome]
+              }`}
+            >
+              {isVoicemail ? 'Voicemail' : callOutcomeLabel(outcome, direction)}
             </Badge>
           )}
         </div>

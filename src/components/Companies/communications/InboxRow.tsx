@@ -16,7 +16,12 @@ import {
 import { formatE164 } from '@/lib/phone';
 import { AttachmentChip } from '../AttachmentPreview';
 import { displayName, formatEmailDate, senderInitial } from '../message-utils';
-import { isImplicitlyRead, KIND_STYLES, type UnifiedItem } from './types';
+import {
+  isAlarmingOutcome,
+  isImplicitlyRead,
+  KIND_STYLES,
+  type UnifiedItem,
+} from './types';
 
 const MAX_CHIPS = 3;
 
@@ -311,13 +316,20 @@ function CallDirectionIcon({ item }: { item: CallItem }) {
   if (item.hasVoicemail) {
     return <Voicemail size={11} className="text-red-500 shrink-0" />;
   }
-  if (item.outcome === 'missed' || item.outcome === 'failed') {
+  // ⚠️ Direction BEFORE outcome for outbound. A missed-call glyph depicts a call coming
+  // IN, so putting it on a call the agent placed is simply the wrong picture — and the
+  // card already says "Outgoing" two lines up, which it then contradicted.
+  if (isAlarmingOutcome(item.outcome, item.direction)) {
     return <PhoneMissed size={11} className="text-red-500 shrink-0" />;
   }
+  const tone =
+    item.outcome === 'missed' || item.outcome === 'failed'
+      ? 'text-muted-foreground'
+      : 'text-green-600';
   return item.direction === 'inbound' ? (
-    <PhoneIncoming size={11} className="text-green-600 shrink-0" />
+    <PhoneIncoming size={11} className={`${tone} shrink-0`} />
   ) : (
-    <PhoneOutgoing size={11} className="text-green-600 shrink-0" />
+    <PhoneOutgoing size={11} className={`${tone} shrink-0`} />
   );
 }
 
@@ -477,7 +489,11 @@ function CallRowBody({
     call.hasVoicemail
       ? 'Voicemail'
       : call.outcome === 'missed'
-        ? 'Missed call'
+        ? // Direction-aware: a call WE placed that rang out is "No answer", not a missed
+          // call. See `callOutcomeLabel` — no count moves, only the wording.
+          call.direction === 'inbound'
+          ? 'Missed call'
+          : 'No answer'
         : call.outcome === 'failed'
           ? 'Call failed'
           : call.outcome === 'in-progress'
@@ -498,8 +514,7 @@ function CallRowBody({
         className={[
           'text-xs truncate',
           call.hasVoicemail ||
-          call.outcome === 'missed' ||
-          call.outcome === 'failed'
+          isAlarmingOutcome(call.outcome, call.direction)
             ? 'font-medium text-red-600'
             : 'text-muted-foreground',
         ].join(' ')}

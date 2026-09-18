@@ -13,6 +13,10 @@ import {
   isImplicitlyReadInternalCall,
 } from './communications/internal-inbox';
 import type { InternalCall } from '@/api/internalCalls';
+import {
+  callOutcomeLabel,
+  isAlarmingOutcome,
+} from './communications/types';
 
 interface InternalCallRowProps {
   call: InternalCall;
@@ -39,11 +43,8 @@ const OUTCOME_BADGE: Record<InternalCall['outcome'], string> = {
   'in-progress': 'bg-amber-50 text-amber-700 border-amber-200',
 };
 
-const OUTCOME_LABEL: Record<InternalCall['outcome'], string> = {
-  answered: 'Answered',
-  missed: 'Missed',
-  'in-progress': 'In progress',
-};
+// Labels come from `callOutcomeLabel` — shared with the company inbox so the two cannot
+// drift on wording. "Missed" depends on which way the call went.
 
 /**
  * One call in the workspace inbox, sitting between message rows.
@@ -75,12 +76,10 @@ export function InternalCallRow({
   const unread = !call.isRead;
   const own = call.direction === 'outbound';
   const readByConstruction = isImplicitlyReadInternalCall(call);
-  const Icon =
-    call.outcome === 'missed'
-      ? PhoneMissed
-      : own
-        ? PhoneOutgoing
-        : PhoneIncoming;
+  // A missed-call glyph depicts a call coming IN, so a call this user PLACED keeps its
+  // own arrow — the row already says "Outgoing call" on the next line.
+  const alarming = isAlarmingOutcome(call.outcome, call.direction);
+  const Icon = alarming ? PhoneMissed : own ? PhoneOutgoing : PhoneIncoming;
 
   return (
     <div
@@ -212,7 +211,11 @@ export function InternalCallRow({
           <Icon
             size={13}
             className={
-              call.outcome === 'missed' ? 'text-red-600' : 'text-green-600'
+              alarming
+                ? 'text-red-600'
+                : call.outcome === 'missed'
+                  ? 'text-muted-foreground'
+                  : 'text-green-600'
             }
             aria-hidden
           />
@@ -224,9 +227,15 @@ export function InternalCallRow({
         <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
           <Badge
             variant="outline"
-            className={`text-[10px] px-1.5 py-0 font-medium ${OUTCOME_BADGE[call.outcome]}`}
+            className={`text-[10px] px-1.5 py-0 font-medium ${
+              // An outgoing call that rang out is not a backlog item, so it loses the red
+              // as well as the word -- see `isAlarmingOutcome`.
+              call.outcome === 'missed' && !alarming
+                ? 'bg-muted text-muted-foreground border-border'
+                : OUTCOME_BADGE[call.outcome]
+            }`}
           >
-            {OUTCOME_LABEL[call.outcome]}
+            {callOutcomeLabel(call.outcome, call.direction)}
           </Badge>
           {call.hasRecording && (
             <span className="inline-flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
