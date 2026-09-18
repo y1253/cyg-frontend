@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { canManage } from '@/lib/roles';
 import { useWhatsAppTemplates } from '@/hooks/useWhatsAppTemplates';
 import { useCreateWhatsAppTemplate } from '@/hooks/useCreateWhatsAppTemplate';
+import { useTemplateDraft } from '@/hooks/useTemplateDraft';
 import {
   TEMPLATE_CATEGORIES,
   isSendableTemplate,
@@ -58,6 +59,7 @@ export function TemplatePicker({
   const templates = useMemo(() => all.filter(isSendableTemplate), [all]);
   const awaiting = useMemo(() => all.filter((t) => !isSendableTemplate(t)), [all]);
   const [creating, setCreating] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [variables, setVariables] = useState<string[]>([]);
 
@@ -125,16 +127,33 @@ export function TemplatePicker({
               onClose={() => setCreating(false)}
             />
           ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="w-fit gap-1"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={13} /> Create a template
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-fit gap-1"
+                onClick={() => setCreating(true)}
+              >
+                <Plus size={13} /> Create a template
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-fit gap-1"
+                onClick={() => setGenerating(true)}
+              >
+                <Sparkles size={13} /> Generate a template
+              </Button>
+            </div>
           ))}
+          {canCreate && generating && (
+            <GenerateTemplatePanel
+              companyId={companyId}
+              onClose={() => setGenerating(false)}
+            />
+          )}
       </div>
     );
   }
@@ -205,16 +224,33 @@ export function TemplatePicker({
             onClose={() => setCreating(false)}
           />
         ) : (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="w-fit gap-1"
-            onClick={() => setCreating(true)}
-          >
-            <Plus size={13} /> Create a template
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-fit gap-1"
+              onClick={() => setCreating(true)}
+            >
+              <Plus size={13} /> Create a template
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-fit gap-1"
+              onClick={() => setGenerating(true)}
+            >
+              <Sparkles size={13} /> Generate a template
+            </Button>
+          </div>
         ))}
+        {canCreate && generating && (
+          <GenerateTemplatePanel
+            companyId={companyId}
+            onClose={() => setGenerating(false)}
+          />
+        )}
     </div>
   );
 }
@@ -281,16 +317,26 @@ function TemplateStatusList({
 function CreateTemplatePanel({
   companyId,
   onClose,
+  initial,
 }: {
   companyId: number;
   onClose: () => void;
+  /**
+   * A generated draft to open with. The panel still owns every field afterwards -- the
+   * point of handing it over rather than submitting straight from the generator is that a
+   * person reads and edits it first, because a name Meta rejects cannot be retried for
+   * four weeks.
+   */
+  initial?: { name: string; category: string; body: string; examples: string[] };
 }) {
   const create = useCreateWhatsAppTemplate(companyId);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initial?.name ?? '');
   const [language, setLanguage] = useState('en_US');
-  const [category, setCategory] = useState<string>(TEMPLATE_CATEGORIES[0]);
-  const [body, setBody] = useState('');
-  const [examples, setExamples] = useState<string[]>([]);
+  const [category, setCategory] = useState<string>(
+    initial?.category ?? TEMPLATE_CATEGORIES[0],
+  );
+  const [body, setBody] = useState(initial?.body ?? '');
+  const [examples, setExamples] = useState<string[]>(initial?.examples ?? []);
 
   // Highest index, not occurrence count — a repeated placeholder still takes one value.
   // Mirrors `countTemplateVariables` on the server.
@@ -419,6 +465,100 @@ function CreateTemplatePanel({
           {create.isPending ? 'Submitting…' : 'Submit for review'}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Describe what the message should do, and have the system draft it.
+ *
+ * ⚠️ It fills the CREATE FORM rather than submitting. Accepting a draft hands it to
+ * `CreateTemplatePanel`, which owns every field from then on and runs the unchanged
+ * submit path — so a person always reads the final wording. That is not ceremony: a
+ * template name Meta rejects is unusable for four weeks, and Meta reviewers read the
+ * example values too.
+ *
+ * Shape copied from `PolishPanel` / `PolishButton`: a preview awaiting a decision, the
+ * trigger hidden once one exists, Accept / Regenerate / Discard, errors underneath.
+ */
+function GenerateTemplatePanel({
+  companyId,
+  onClose,
+}: {
+  companyId: number;
+  onClose: () => void;
+}) {
+  const draft = useTemplateDraft(companyId);
+  const [description, setDescription] = useState('');
+  // Separate from `preview`, so Discard can drop a draft without it counting as accepted.
+  const [accepted, setAccepted] = useState(false);
+
+  // Accepted: hand it to the create form, which takes over entirely.
+  if (draft.preview && accepted) {
+    return (
+      <CreateTemplatePanel
+        companyId={companyId}
+        initial={draft.preview}
+        onClose={onClose}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3">
+      <span className="text-xs font-medium">Generate a template</span>
+      <Textarea
+        rows={3}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="What should this message do? e.g. tell a client their tax return is ready to sign"
+      />
+
+      {draft.preview ? (
+        <div className="flex flex-col gap-2 rounded-md border border-teal-200 bg-teal-50/60 p-2.5">
+          <span className="flex items-center gap-1 text-xs font-medium text-teal-800">
+            <Sparkles size={13} /> Suggested template
+          </span>
+          <p className="whitespace-pre-wrap text-sm">{draft.preview.body}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={() => setAccepted(true)}>
+              Use this
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={draft.isPending}
+              onClick={draft.regenerate}
+            >
+              {draft.isPending ? 'Generating…' : 'Try again'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={draft.reset}>
+              Discard
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={draft.isPending || description.trim().length < 10}
+            onClick={() => draft.run(description)}
+          >
+            {draft.isPending ? 'Generating…' : 'Generate'}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {draft.isError && (
+        <p className="text-xs text-destructive">
+          {draft.error?.message ?? 'Could not draft a template'}
+        </p>
+      )}
     </div>
   );
 }

@@ -584,3 +584,92 @@ export async function markWhatsAppItem(
   );
   if (!res.ok) throw await failure(res, `Failed to mark ${action}`);
 }
+
+/**
+ * One template THIS company submitted, as the inbox strip shows it.
+ *
+ * Different from `WhatsAppTemplate`, which is WABA-wide and answers "what may I send".
+ * This is company-scoped and answers "what did we submit" — including the ones that were
+ * rejected, which the picker deliberately never offers.
+ */
+export interface WhatsAppSubmission {
+  id: number;
+  name: string;
+  language: string;
+  category: string;
+  body: string;
+  examples: string[];
+  status: string;
+  rejectedReason: string | null;
+  submittedAt: string;
+}
+
+/** A template drafted by the system, ready to fill the create form. */
+export interface GeneratedTemplateDraft {
+  name: string;
+  category: string;
+  body: string;
+  examples: string[];
+  variableCount: number;
+}
+
+/**
+ * A template whose review has finished, one way or the other.
+ *
+ * ⚠️ Twin of `isSettledTemplateStatus` in server `whatsapp/whatsapp.util.ts`. It decides
+ * when the status poll STOPS, so if the two disagree one side polls for ever and the
+ * other stops too early.
+ */
+export function isSettledTemplateStatus(status: string): boolean {
+  return status !== 'PENDING' && status !== 'IN_APPEAL';
+}
+
+export async function fetchTemplateSubmissions(
+  token: string,
+  companyId: number,
+): Promise<WhatsAppSubmission[]> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/template-submissions`,
+    { headers: JSON_HEADERS },
+  );
+  // Quiet, like the template list beside it: a strip that cannot load is a missing strip,
+  // never a broken inbox.
+  if (!res.ok) return [];
+  return (await res.json()) as WhatsAppSubmission[];
+}
+
+export async function dismissTemplateSubmission(
+  token: string,
+  companyId: number,
+  id: number,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/template-submissions/${id}/dismiss`,
+    { method: 'PATCH', headers: JSON_HEADERS },
+  );
+  if (!res.ok) throw new Error('Could not dismiss that template');
+}
+
+export async function generateWhatsAppTemplate(
+  token: string,
+  companyId: number,
+  description: string,
+): Promise<GeneratedTemplateDraft> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/templates/generate`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ description }),
+    },
+  );
+  // Loud, like `createWhatsAppTemplate`: the user pressed a button and is waiting.
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Could not draft a template');
+  }
+  return (await res.json()) as GeneratedTemplateDraft;
+}

@@ -16,6 +16,8 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import type { EmailProvider, EmailSummary, GmailAccount } from '@/api/gmail';
 import { MessageNotice } from '../MessageNotice';
 import { InboxNotices } from './InboxNotices';
+import { TemplateSubmissionRows } from './TemplateSubmissionRows';
+import type { WhatsAppSubmission } from '@/api/whatsapp';
 import { InboxRow } from './InboxRow';
 import {
   KIND_FILTER_LABELS,
@@ -37,6 +39,9 @@ export function InboxView({
   companyId,
   token,
   isAdmin,
+  templateSubmissions,
+  onDismissTemplate,
+  dismissingTemplate,
   account,
   provider,
   providerLabels,
@@ -93,6 +98,10 @@ export function InboxView({
   companyId: number;
   token: string | null;
   isAdmin: boolean;
+  /** This company's own template submissions, pinned above the list. */
+  templateSubmissions: readonly WhatsAppSubmission[];
+  onDismissTemplate: (id: number) => void;
+  dismissingTemplate: number | null;
   /** Null when no mailbox is connected — the tab still renders phone activity. */
   account: GmailAccount | null;
   provider: EmailProvider;
@@ -422,7 +431,18 @@ export function InboxView({
         <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
       ) : (
         <Card className="overflow-hidden gap-0 py-0 rounded-lg">
-          {rows.length === 0 ? (
+          {/* Pinned above every row — see TemplateSubmissionRows for why it is not IN the
+              list. Inside the Card so it reads as the top of the inbox rather than as one
+              more banner floating above it. */}
+          <TemplateSubmissionRows
+            submissions={templateSubmissions}
+            canManage={isAdmin}
+            onDismiss={onDismissTemplate}
+            dismissing={dismissingTemplate}
+          />
+          {/* ⚠️ The submissions count too, or "Inbox is empty" renders INSTEAD of the one
+              thing the user came back to check. */}
+          {rows.length === 0 && templateSubmissions.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
               {isInboxLike
                 ? isFiltering

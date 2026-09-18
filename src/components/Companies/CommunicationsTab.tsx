@@ -30,6 +30,8 @@ import { useStartCall } from '@/hooks/useStartCall';
 import { useRingingCall } from '@/hooks/useRingingCall';
 import { useActiveCall } from '@/hooks/useActiveCall';
 import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
+import { useTemplateSubmissions } from '@/hooks/useTemplateSubmissions';
+import { useDismissTemplateSubmission } from '@/hooks/useDismissTemplateSubmission';
 import { unlockAudio } from '@/lib/notificationSound';
 import { fetchAuthUrl } from '@/api/gmail';
 import { fetchLatestPreview } from '@/api/communications';
@@ -479,6 +481,19 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
    *
    * `onSettled` clears it on failure too, so retrying after an error is never swallowed.
    */
+  /**
+   * The templates this company submitted, for the strip above the list.
+   *
+   * Gated like the WhatsApp source itself: a submission is not a search result, and it
+   * could never be a missed call. Mounted with the INBOX rather than with the picker,
+   * which is the whole point — the picker's dialog closing used to stop the status poll.
+   */
+  const templateSubmissionsQuery = useTemplateSubmissions(
+    companyId,
+    active && !activeSearch && !isMissed,
+  );
+  const dismissTemplate = useDismissTemplateSubmission(companyId);
+
   const startingCallRef = useRef(false);
   const startCall = startCallMutation.mutate;
   const handleCall = useCallback(
@@ -1323,6 +1338,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       {ringingBanner}
       {headerBar}
       <InboxView
+      templateSubmissions={templateSubmissionsQuery.data ?? []}
+      onDismissTemplate={(id: number) => dismissTemplate.mutate(id)}
+      dismissingTemplate={
+        dismissTemplate.isPending ? (dismissTemplate.variables ?? null) : null
+      }
         companyId={companyId}
         token={token}
         isAdmin={isAdmin}
