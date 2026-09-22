@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { UntilAction } from '@/api/completeUntil';
 import {
   AlertOctagon, ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, MailOpen, Printer, Reply, Send, X,
 } from 'lucide-react';
@@ -11,9 +12,13 @@ import { useMarkChatUnread } from '@/hooks/useMarkChatUnread';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { RichTextEditor } from '../RichTextEditor';
 import { PolishButton, PolishPanel } from '../PolishPanel';
+import { DictateButton } from '../DictateButton';
+import { TranslateControl } from './TranslatePanel';
+import { useTranslation } from '@/hooks/useTranslation';
+import { escapeHtml } from '../message-utils';
 import { htmlToText, openPrintWindow, textToHtml } from '../message-utils';
 import { ChatBubble } from './ChatBubble';
-import { countCompletableUpTo } from './complete-until';
+import { countMarkableUpTo } from './complete-until';
 import { buildChatPrintHtml } from './print-html';
 import { htmlToChatMarkdown } from './chat-markdown';
 import type { CompleteTarget, QuoteTarget } from './types';
@@ -31,7 +36,7 @@ import type { CompleteTarget, QuoteTarget } from './types';
 export function ChatThreadView({
   companyId,
   token,
-  onCompleteUntil,
+  onMarkUntil,
   isAdmin,
   account,
   provider,
@@ -73,7 +78,11 @@ export function ChatThreadView({
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: 'email' | 'chat', id: string) => void;
   /** "Complete till here" — the anchor's id and how many messages that covers. */
-  onCompleteUntil: (messageId: string, count: number) => void;
+  onMarkUntil: (
+    messageId: string,
+    count: number,
+    action: UntilAction,
+  ) => void;
 }) {
   const {
     data: chatThread,
@@ -86,6 +95,7 @@ export function ChatThreadView({
 
   const [chatReplyOpen, setChatReplyOpen] = useState(false);
   const [chatReplyHtml, setChatReplyHtml] = useState('');
+  const translation = useTranslation();
   // The message the reply will natively quote (default = the opened/anchor
   // message; cleared → plain reply). Mirrors Google Chat's "Quote in reply".
   const [quoteTarget, setQuoteTarget] = useState<QuoteTarget | null>(null);
@@ -366,18 +376,47 @@ export function ChatThreadView({
                         companyId={companyId}
                         token={token}
                         onNavigateToMessage={navigateToMessage}
+                        translate={
+                          <TranslateControl
+                            id={m.id}
+                            text={m.text}
+                            translation={translation.textFor(m.id)}
+                            busy={translation.isBusy(m.id)}
+                            error={translation.errorFor(m.id)}
+                            shown={translation.isShown(m.id)}
+                            onToggle={(id, text) =>
+                              void translation.toggle(id, text)
+                            }
+                          />
+                        }
                         onCompleteUntil={(msg) =>
-                          onCompleteUntil(
+                          onMarkUntil(
                             msg.id,
                             // A chat message you sent IS completable — the shared table
                             // has no direction — so nothing is marked `isOwn`.
-                            countCompletableUpTo(
+                            countMarkableUpTo(
                               threadMessages.map((x) => ({
                                 id: x.id,
                                 at: x.createTime,
                               })),
                               msg.id,
+                              'isCompleted',
                             ),
+                            'complete',
+                          )
+                        }
+                        onReadUntil={(msg) =>
+                          onMarkUntil(
+                            msg.id,
+                            countMarkableUpTo(
+                              threadMessages.map((x) => ({
+                                id: x.id,
+                                at: x.createTime,
+                              })),
+                              msg.id,
+                              'isRead',
+                            ),
+                            'read',
                           )
                         }
                       />
@@ -508,6 +547,14 @@ export function ChatThreadView({
                 polish={polish}
                 draftPlain={htmlToText(chatReplyHtml)}
                 context={chatContext}
+              />
+              {/* Appends a paragraph. Safe against the editor because `RichTextEditor`
+                  only syncs `html` into the DOM while it is UNFOCUSED, and clicking this
+                  button is exactly that — so the caret is never yanked mid-typing. */}
+              <DictateButton
+                onText={(text) =>
+                  setChatReplyHtml((h) => `${h}<div>${escapeHtml(text)}</div>`)
+                }
               />
               <Button size="sm" variant="outline" onClick={resetReply}>
                 Cancel

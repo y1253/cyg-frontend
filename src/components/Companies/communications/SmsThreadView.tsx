@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { UntilAction } from '@/api/completeUntil';
 import {
+  Clock,
   ArrowLeft, CheckCheck, CheckCircle2, MailOpen, MessageSquareText, Phone, Printer,
   Reply, Send, X,
 } from 'lucide-react';
@@ -32,8 +34,14 @@ import { useFileDrop } from '@/hooks/useFileDrop';
 import { AttachmentChip } from '../AttachmentPreview';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
+import { ANCHOR_RING } from './anchor-style';
+import { mergePending, type PendingMeta } from './pending-sends';
+import { usePendingSends } from '@/hooks/usePendingSends';
+import { useTranslation } from '@/hooks/useTranslation';
+import { TranslateControl } from './TranslatePanel';
+import { DictateButton } from '../DictateButton';
 import { buildSmsReplyBody, smsQuoteCost, smsReplyBudget } from './sms-reply';
-import { countCompletableUpTo } from './complete-until';
+import { countMarkableUpTo } from './complete-until';
 
 /**
  * A GSM-7 message fits 160 characters, 153 once it is split across segments; any
@@ -84,7 +92,7 @@ export function SmsThreadView({
   callBlockedReason = null,
   onRequestComplete,
   onUncomplete,
-  onCompleteUntil,
+  onMarkUntil,
 }: {
   companyId: number;
   peer: string;
@@ -107,7 +115,11 @@ export function SmsThreadView({
    * only holds inbox rows. It is an estimate for the dialog's wording — the server does
    * the real cut and reports what it actually changed.
    */
-  onCompleteUntil: (itemId: string, count: number) => void;
+  onMarkUntil: (
+    itemId: string,
+    count: number,
+    action: UntilAction,
+  ) => void;
 }) {
   const { data, isLoading } = useSmsThread(companyId, peer, active);
   /**
@@ -126,7 +138,17 @@ export function SmsThreadView({
   const anchorRef = useRef<HTMLDivElement>(null);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
-  const messages: SmsItem[] = data?.messages ?? [];
+  const serverMessages: SmsItem[] = data?.messages ?? [];
+  const sends = usePendingSends<SmsItem>();
+  const translation = useTranslation();
+  /**
+   * What the conversation renders: the server's rows plus anything this browser is still
+   * uploading. The query cache is left alone as the server's truth.
+   */
+  const messages = mergePending(
+    serverMessages,
+    sends.pending.map((p) => p.row),
+  ) as (SmsItem & Partial<PendingMeta>)[];
   // Your own replies stay bright until the customer writes again — see `thread-dim.ts`
   // for why, and for what `ChatThreadView` does instead where a quote exists.
   const isFuture = makeIsFuture(messages, anchorTime);
@@ -201,24 +223,74 @@ export function SmsThreadView({
   // Paste and drag-and-drop, from the same hook the email composers use.
   const { isOver, handlers } = useFileDrop({ onFiles: addFiles });
 
+  /**
+   * Send, showing the message in the conversation IMMEDIATELY.
+   *
+   * The optimistic row is owned here, not written into the query cache — see
+   * `pending-sends.ts` for why that would be wiped by the 15s poll and by SignalWire's
+   * own list lag.
+   *
+   * ⚠️ The composer is cleared on the way IN, not in `onSuccess`. The message is already
+   * on screen as a pending bubble, so leaving the text in the box would show it twice;
+   * and a failed send keeps its bubble with a Retry rather than restoring the draft.
+   */
+  const submit = (body: string, files: File[]) => {
+    const id = sends.add(
+      (pendingId, previews) => ({
+        id: pendingId,
+        kind: 'sms' as const,
+        direction: 'outbound' as const,
+        counterparty: peer,
+        // Not on the provider yet, so there is no SID. Nothing reads it for a pending row —
+        // every action is guarded on `isPendingId` — and the empty string keeps the shape
+        // honest about that rather than inventing something SID-looking.
+        sid: '',
+        supportNumber: data?.supportNumber ?? '',
+        at: new Date().toISOString(),
+        // Outbound is read and complete by construction, the same as a real sent row.
+        isRead: true,
+        isCompleted: true,
+        body,
+        numMedia: files.length,
+        // The provider's word for "accepted, not yet delivered". `DeliveryTicks` and the
+        // row's own styling already say it is in flight; this just keeps the type honest.
+        status: 'queued',
+        errorCode: null,
+        pending: true as const,
+        sendState: 'sending' as const,
+        previews,
+      }),
+      files,
+    );
+
+    sendMutation.mutate(
+      { to: peer, body, attachments: files },
+      {
+        onSuccess: () => sends.drop(id),
+        onError: (err: unknown) =>
+          sends.fail(
+            id,
+            err instanceof Error && err.message
+              ? err.message
+              : 'The message could not be sent.',
+          ),
+      },
+    );
+  };
+
   const handleSend = () => {
     const body = outgoing.trim();
     // A picture with no words is an ordinary message — the text is only required when
     // there is nothing else in it.
     if (!draft.trim() && attached.length === 0) return;
-    sendMutation.mutate(
-      { to: peer, body, attachments: attached },
-      {
-        onSuccess: () => {
-          setDraft('');
-          setAttached([]);
-          setAttachNotice(null);
-          // Back to quoting the anchor, not to nothing: the next message is still a
-          // reply in the same conversation.
-          setQuotePick(undefined);
-        },
-      },
-    );
+    const files = attached;
+    setDraft('');
+    setAttached([]);
+    setAttachNotice(null);
+    // Back to quoting the anchor, not to nothing: the next message is still a reply in
+    // the same conversation.
+    setQuotePick(undefined);
+    submit(body, files);
   };
 
   const handlePrint = () => {
@@ -325,13 +397,31 @@ export function SmsThreadView({
                 message={m}
                 dimmed={isFuture(m)}
                 anchorRef={m.id === anchorMsgId ? anchorRef : undefined}
+                isAnchor={m.id === anchorMsgId}
+                pending={m.pending ? (m as SmsItem & PendingMeta) : undefined}
+                translation={translation}
+                onRetry={() => {
+                  const held = sends.pending.find((p) => p.row.id === m.id);
+                  if (!held) return;
+                  sends.drop(m.id);
+                  submit(held.row.body, held.files);
+                }}
+                onDiscard={() => sends.drop(m.id)}
                 onReply={() => setQuotePick(m)}
                 onCompleteUntil={() =>
-                  onCompleteUntil(
+                  onMarkUntil(
                     m.id,
                     // A text you SENT is completable — the shared table has no
                     // direction — so nothing is marked `isOwn` here.
-                    countCompletableUpTo(messages, m.id),
+                    countMarkableUpTo(messages, m.id, 'isCompleted'),
+                    'complete',
+                  )
+                }
+                onReadUntil={() =>
+                  onMarkUntil(
+                    m.id,
+                    countMarkableUpTo(messages, m.id, 'isRead'),
+                    'read',
                   )
                 }
               />
@@ -422,6 +512,14 @@ export function SmsThreadView({
             {attached.length > 0 && ' · sent as a picture message (MMS)'}
           </span>
           <div className="flex items-center gap-2">
+            {/* Speak instead of type. Appends, so dictating twice adds a second sentence
+                rather than replacing the first. */}
+            <DictateButton
+              disabled={sendMutation.isPending}
+              onText={(text) =>
+                setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text))
+              }
+            />
             <Button
               size="sm"
               className="bg-teal-600 hover:bg-teal-700 text-white gap-1"
@@ -451,18 +549,39 @@ function SmsBubble({
   message: m,
   dimmed,
   anchorRef,
+  isAnchor,
+  pending,
+  onRetry,
+  onDiscard,
+  translation,
   onReply,
   onCompleteUntil,
+  onReadUntil,
 }: {
   message: SmsItem;
   dimmed: boolean;
+  /**
+   * Set while THIS browser is still uploading the message.
+   *
+   * ⚠️ A failed send keeps its bubble rather than disappearing. A text that vanishes on
+   * failure looks exactly like one that was sent, which is the worst outcome available
+   * for a message somebody believes they sent.
+   */
+  pending?: PendingMeta;
+  onRetry: () => void;
+  onDiscard: () => void;
+  translation: ReturnType<typeof useTranslation>;
   anchorRef?: React.Ref<HTMLDivElement>;
+  /** THE message the reader opened. See `ANCHOR_RING`. */
+  isAnchor?: boolean;
   /** Quote this message in the composer. */
   onReply: () => void;
   /** Complete this message and everything above it. */
   onCompleteUntil: () => void;
+  onReadUntil: () => void;
 }) {
   const own = m.direction === 'outbound';
+  const failed = pending?.sendState === 'failed';
   return (
     <div
       ref={anchorRef}
@@ -470,6 +589,9 @@ function SmsBubble({
         'flex flex-col gap-1 transition-opacity',
         own ? 'items-end' : 'items-start',
         dimmed ? 'opacity-50' : '',
+        // Sending is dimmed; FAILED is not — a failure has to be more visible than the
+        // messages around it, not less.
+        pending && !failed ? 'opacity-70' : '',
       ].join(' ')}
     >
       {/* The bubble and its hover action share a row — `ChatBubble`'s shape. Reversed for
@@ -483,6 +605,7 @@ function SmsBubble({
         <div
           className={[
             'flex min-w-0 flex-col gap-2 rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+            isAnchor ? ANCHOR_RING : '',
             own ? 'bg-teal-600 text-white' : 'bg-muted text-foreground',
           ].join(' ')}
         >
@@ -491,6 +614,18 @@ function SmsBubble({
               listing media costs a provider request per message. */}
           {m.media?.map((file) => (
             <SmsAttachment key={file.sid} media={file} messageSid={m.sid} />
+          ))}
+          {/* A message still uploading has no server media to fetch, so it renders from
+              the local file. This is the whole point of the pending row: the picture is
+              on screen the instant Send is pressed, rather than after a multi-megabyte
+              upload and a refetch. */}
+          {pending?.previews.map((url) => (
+            <img
+              key={url}
+              src={url}
+              alt=""
+              className="max-h-48 w-auto rounded-lg object-contain"
+            />
           ))}
           {/* A picture with no words is an ordinary message, so it gets no placeholder
               text. The count is still the fallback when the bytes could not be listed. */}
@@ -501,30 +636,97 @@ function SmsBubble({
                 ? `(${m.numMedia} attachment${m.numMedia === 1 ? '' : 's'})`
                 : '(no text)')}
         </div>
-        <button
-          type="button"
-          title="Reply to this message"
-          aria-label="Reply to this message"
-          onClick={onReply}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
-        >
-          <Reply size={13} />
-        </button>
-        <button
-          type="button"
-          title="Mark everything up to here complete"
-          aria-label="Mark everything up to here complete"
-          onClick={onCompleteUntil}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
-        >
-          <CheckCheck size={13} />
-        </button>
+        {/* ⚠️ Every hover action is hidden while a message is pending. None of them can
+            work on a row the server has never seen: reply quotes it, and the two
+            till-here actions would post a `pending:` id that no route can resolve. */}
+        {!pending && (
+          <button
+            type="button"
+            title="Reply to this message"
+            aria-label="Reply to this message"
+            onClick={onReply}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <Reply size={13} />
+          </button>
+        )}
+        {/* Read, then complete: they read left-to-right in the order somebody does them,
+            and read is the lighter of the two — it changes what is bold, not what is on
+            the worklist. */}
+        {!pending && (
+          <button
+            type="button"
+            title="Mark everything up to here read"
+            aria-label="Mark everything up to here read"
+            onClick={onReadUntil}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <MailOpen size={13} />
+          </button>
+        )}
+        {!pending && (
+          <button
+            type="button"
+            title="Mark everything up to here complete"
+            aria-label="Mark everything up to here complete"
+            onClick={onCompleteUntil}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <CheckCheck size={13} />
+          </button>
+        )}
       </div>
-      <span className="text-[10px] text-muted-foreground">
-        {formatEmailDate(m.at)}
-        {/* A failed text looks identical to a sent one without this. */}
-        {m.errorCode !== null && (
-          <span className="ml-1 text-destructive">· failed ({m.errorCode})</span>
+      {/* Translation is offered on messages the CUSTOMER wrote — our own are already in
+          whatever language we chose to write them in. */}
+      {!own && !pending && (
+        <TranslateControl
+          id={m.id}
+          text={m.body}
+          translation={translation.textFor(m.id)}
+          busy={translation.isBusy(m.id)}
+          error={translation.errorFor(m.id)}
+          shown={translation.isShown(m.id)}
+          onToggle={(id, text) => void translation.toggle(id, text)}
+        />
+      )}
+      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        {pending ? (
+          failed ? (
+            <>
+              <span className="font-medium text-destructive">
+                Not sent{pending.error ? ` — ${pending.error}` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="font-medium text-teal-700 underline-offset-2 hover:underline"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={onDiscard}
+                className="text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Discard
+              </button>
+            </>
+          ) : (
+            <>
+              <Clock size={10} className="shrink-0" />
+              Sending…
+            </>
+          )
+        ) : (
+          <>
+            {formatEmailDate(m.at)}
+            {/* A failed text looks identical to a sent one without this. */}
+            {m.errorCode !== null && (
+              <span className="ml-1 text-destructive">
+                · failed ({m.errorCode})
+              </span>
+            )}
+          </>
         )}
       </span>
     </div>

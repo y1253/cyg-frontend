@@ -1,5 +1,6 @@
 /**
- * How many messages "Complete till here" is about to affect, for the confirm dialog.
+ * How many messages "Complete till here" / "Read till here" is about to affect, for the
+ * confirm dialog.
  *
  * ⚠️ An ESTIMATE, and the dialog says "up to". The server is what decides: it rebuilds the
  * conversation itself and can see messages older than this view's cap, and it skips rows
@@ -20,6 +21,8 @@ export interface CountableMessage {
   at: string;
   /** Already complete — excluded, because completing it again changes nothing. */
   isCompleted?: boolean;
+  /** Already read — excluded from a read count for the same reason. */
+  isRead?: boolean;
   /**
    * A message this user sent. Excluded ONLY where the server excludes it too: WhatsApp
    * refuses to change an outbound row, and an internal message you sent has no recipient
@@ -29,9 +32,19 @@ export interface CountableMessage {
   isOwn?: boolean;
 }
 
-export function countCompletableUpTo(
+/**
+ * Which state is being counted.
+ *
+ * A parameter rather than two functions, because ONLY the field differs: the ordering, the
+ * cut and the `isOwn` exclusion are identical, and the `isOwn` rule holds for read for the
+ * same three reasons its docblock gives for complete.
+ */
+export type MarkableField = 'isCompleted' | 'isRead';
+
+export function countMarkableUpTo(
   messages: readonly CountableMessage[],
   anchorId: string,
+  field: MarkableField = 'isCompleted',
 ): number {
   const ordered = [...messages].sort((a, b) => {
     const at = new Date(a.at).getTime() - new Date(b.at).getTime();
@@ -40,7 +53,5 @@ export function countCompletableUpTo(
   });
   const index = ordered.findIndex((m) => m.id === anchorId);
   if (index === -1) return 0;
-  return ordered
-    .slice(0, index + 1)
-    .filter((m) => !m.isCompleted && !m.isOwn).length;
+  return ordered.slice(0, index + 1).filter((m) => !m[field] && !m.isOwn).length;
 }

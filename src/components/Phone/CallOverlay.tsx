@@ -3,6 +3,7 @@ import {
   CheckCheck,
   Grid3x3,
   Loader2,
+  MessageSquare,
   Mic,
   MicOff,
   Pause,
@@ -18,19 +19,29 @@ import {
   UserMinus,
   Users,
   Volume2,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useDraggable } from '@/hooks/useDraggable';
+import { useIsPhone } from '@/hooks/useMediaQuery';
+import type { ComposerPos } from '@/components/Companies/composer-layout';
+import { readCallPos, writeCallPos } from './call-position';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatE164 } from '@/lib/phone';
 import { useAuth } from '@/context/AuthContext';
-import { completeCall, type ConferenceStatus } from '@/api/phone';
+import {
+  completeCall,
+  declineWithText,
+  type ConferenceStatus,
+} from '@/api/phone';
 import { setInternalCallState } from '@/api/internalCalls';
 import { DTMF_KEYS, dtmfTones } from '@/lib/dtmf';
 import { playDtmfTone, unlockAudio } from '@/lib/notificationSound';
 import {
   useSoftphone,
   useSoftphoneActions,
+  type CompletePromptView,
   type IncomingCallInfo,
   type TransferView,
 } from '@/context/SoftphoneContext';
@@ -70,6 +81,9 @@ import {
  * fonts. So the row is now a 3-column grid, which cannot mis-wrap whatever is added to
  * it: five buttons fill two rows, and Hang up stays outside the grid at full width.
  */
+/** `max-w-sm` in pixels — what `clampPos` needs to keep the card fully on screen. */
+const CARD_WIDTH = 384;
+
 const SECONDARY_BTN =
   'flex w-full flex-col items-center justify-center gap-0.5 ' +
   'rounded-md px-2 py-1.5 text-[11px] font-medium';
@@ -105,6 +119,7 @@ export function CallOverlay() {
     activeCallId,
     audioBlocked,
     dialing,
+    completePrompt,
   } = useSoftphone();
   const {
     answer,
@@ -122,6 +137,7 @@ export function CallOverlay() {
     switchTo,
     answerWaiting,
     declineWaiting,
+    declineActive,
     endAndAnswer,
     retryAudio,
     cancelDialing,
@@ -133,6 +149,41 @@ export function CallOverlay() {
   const [addOpen, setAddOpen] = useState(false);
   const [padOpen, setPadOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
+
+  // ── Dragging the card out of the way ──────────────────────────────────────
+  //
+  // The overlay is non-modal by design so the agent can keep working during a call —
+  // but it lands top-centre, which is exactly where a page's own header and toolbar are.
+  // `useDraggable` is the same hook `DockedComposer` uses; its dep-less `useLayoutEffect`
+  // is not optional here, because this card re-renders EVERY SECOND from the call timer
+  // and without it each tick would yank an in-flight drag back.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<ComposerPos | null>(() => readCallPos());
+  // Dragging a window around a screen the window already fills is not a gesture anybody
+  // wants — the same call `DockedComposer` makes.
+  const canDrag = !useIsPhone();
+  const dragged = canDrag && pos !== null;
+  const dragStyle = dragged
+    ? ({ left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' } as const)
+    : undefined;
+  const resetPosition = () => {
+    setPos(null);
+    writeCallPos(null);
+  };
+  const drag = useDraggable({
+    ref: cardRef,
+    style: dragged
+      ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' }
+      : { left: 'auto', top: 'auto', right: 'auto', bottom: 'auto' },
+    minimized: false,
+    // The card's real width, so `clampPos` cannot leave it hanging off the edge. It is
+    // `max-w-sm`; the composer default it would otherwise clamp against is wider.
+    size: { w: CARD_WIDTH, h: 0 },
+    onCommit: (next) => {
+      setPos(next);
+      writeCallPos(next);
+    },
+  });
 
   /**
    * Hang up AND clear the call off the worklist, in one action.
@@ -175,6 +226,48 @@ export function CallOverlay() {
         void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
       })
       .finally(done);
+  };
+
+  // ── Reply by text instead of answering ─────────────────────────────────────
+  const [repliesOpen, setRepliesOpen] = useState(false);
+  const [replying, setReplying] = useState<number | null>(null);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  /**
+   * Offered only where a text can actually go: a company call, inbound, with replies
+   * configured. An internal call has no support number to send from, and an outbound
+   * call is one we placed.
+   */
+  const quickReplies =
+    info && info.kind !== 'internal' && info.direction !== 'outbound'
+      ? (info.quickReplies ?? [])
+      : [];
+
+  /**
+   * Send the text, then decline — sequenced BY THE SERVER, in one request.
+   *
+   * ⚠️ If the text fails, the call is deliberately left RINGING rather than declined: a
+   * decline is irreversible for every browser holding the call, so the agent has to be
+   * able to fall back to answering it. That is why this surfaces the error in place
+   * instead of dismissing the card.
+   */
+  const sendQuickReply = async (index: number) => {
+    const call = info;
+    if (!call || !token || replying !== null) return;
+    setReplying(index);
+    setReplyError(null);
+    try {
+      await declineWithText(token, call.companyId, call.callSid, index);
+      // The server has redirected the leg; drop our own branch so the card comes down.
+      hangup();
+    } catch (err) {
+      setReplyError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'The reply could not be sent.',
+      );
+    } finally {
+      setReplying(null);
+    }
   };
 
   /**
@@ -243,6 +336,9 @@ export function CallOverlay() {
    * the transition is invisible because this card is deliberately the same shell.
    */
   if (phase === 'idle') {
+    // The offer outlives the call, so it is checked BEFORE the dial card — and before the
+    // early return that would otherwise drop it on the floor.
+    if (completePrompt) return <CompletePromptCard prompt={completePrompt} />;
     if (!dialing) return null;
     const cancelling = dialing.cancelled;
     return (
@@ -338,19 +434,38 @@ export function CallOverlay() {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
       <div
+        ref={cardRef}
+        style={dragStyle}
         className={[
           // A flex column with a viewport cap, because the dial pad can add ~256px and
           // HANG UP IS AT THE BOTTOM — a card taller than the window would push the one
           // control you can never afford to lose off-screen. Only the pad scrolls.
           // `dvh`, not `vh`: a mobile URL bar makes them differ.
+          //
+          // ⚠️ `max-h` and the single `min-h-0 flex-1 overflow-y-auto` child below are
+          // the reason dragging writes `left`/`top` and never a `height`: a fixed height
+          // here would break the one-scroller rule and push Hang up off a short viewport,
+          // which is the failure this card keeps being redesigned to avoid.
           'pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-sm flex-col',
           'rounded-xl border bg-background shadow-2xl',
+          dragged ? 'fixed' : '',
           ringing
             ? 'border-teal-400 ring-2 ring-teal-400/40 animate-pulse'
             : 'border-border',
         ].join(' ')}
       >
-        <div className="flex shrink-0 items-start gap-3 p-4">
+        {/* The drag handle is the HEADER, matching `DockedComposer`. `touch-none` or a
+            touch drag scrolls the page instead; `select-none` or it paints a text
+            selection across the caller's name. `useDraggable` already skips a pointer-down
+            that lands on a button, so the header's own controls keep working. */}
+        <div
+          {...(canDrag ? drag : {})}
+          onDoubleClick={canDrag ? resetPosition : undefined}
+          className={[
+            'flex shrink-0 items-start gap-3 p-4',
+            canDrag ? 'cursor-move touch-none select-none' : '',
+          ].join(' ')}
+        >
           <div
             className={[
               'flex size-10 shrink-0 items-center justify-center rounded-full',
@@ -460,13 +575,56 @@ export function CallOverlay() {
                 <Phone size={14} />
                 Answer
               </button>
+              {/* ⚠️ `declineActive`, not `hangup`. This used to be a local SIP reject,
+                  which ends only THIS browser's branch — every browser shares one SIP
+                  credential, so the caller went on ringing all the others until the dial
+                  timed out, and what the row finally said was left to how SignalWire filed
+                  legs it was told to end. The server redirect sends them to this company's
+                  voicemail and cancels the SIP children, which is UNCONNECTED and so
+                  resolves to MISSED deterministically. It is also exactly what the WAITING
+                  call's Decline has always done — the same word now means one thing. */}
               <button
-                onClick={hangup}
+                onClick={declineActive}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
               >
                 <PhoneOff size={14} />
                 Decline
               </button>
+              {/* ⚠️ Its own full-width row, not a third button sharing this one. Answer is
+                  the control that must never shrink on a ringing card, and three across a
+                  384px card leaves each of them too small to hit in a hurry. */}
+              {quickReplies.length > 0 && (
+                <button
+                  onClick={() => setRepliesOpen((v) => !v)}
+                  disabled={replying !== null}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-60"
+                >
+                  <MessageSquare size={14} />
+                  Reply by text
+                </button>
+              )}
+              {repliesOpen && (
+                <div className="flex w-full flex-col gap-1.5">
+                  {quickReplies.map((text, i) => (
+                    <button
+                      key={text}
+                      disabled={replying !== null}
+                      onClick={() => void sendQuickReply(i)}
+                      className="flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-60"
+                    >
+                      {replying === i ? (
+                        <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin" />
+                      ) : (
+                        <MessageSquare size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="min-w-0">{text}</span>
+                    </button>
+                  ))}
+                  {replyError && (
+                    <span className="text-xs text-destructive">{replyError}</span>
+                  )}
+                </div>
+              )}
             </>
           ) : ringing && outgoing ? (
             // No Answer button on a call we placed — only a way to give up on it.
@@ -587,16 +745,19 @@ export function CallOverlay() {
                 </button>
               )}
               </div>
-              {/* ⚠️ A SPLIT bar, not two buttons sharing the row.
-                  `SECONDARY_BTN`'s docblock above exists because halving Hang up is the
-                  failure this card keeps being redesigned to avoid — it is the one control
-                  that must never shrink, and on a short viewport it is also the one that
-                  must never be pushed off screen. An attached 44px segment costs Hang up
-                  44 pixels rather than half its width, and adds no height at all. */}
-              <div className="flex w-full min-w-[7rem] flex-1 overflow-hidden rounded-md">
+              {/* ⚠️ STACKED, and each one full width.
+                  This was an attached 44px icon-only segment on the SAME red as Hang up,
+                  with its label only in a `title` — which is to say the second most
+                  important action on the card was unreadable and looked like part of the
+                  first. Stacking is what gives it a real label without taking a single
+                  pixel of width off Hang up, which `SECONDARY_BTN`'s docblock above
+                  explains must never shrink. It costs one row of height; the card is a
+                  flex column whose PAD scrolls, so Hang up stays put on a short viewport.
+                  Distinct tone, because two red bars would read as one control again. */}
+              <div className="flex w-full flex-col gap-2">
                 <button
                   onClick={hangup}
-                  className="flex flex-1 items-center justify-center gap-1.5 bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
                 >
                   <PhoneOff size={14} />
                   Hang up
@@ -606,14 +767,14 @@ export function CallOverlay() {
                     onClick={endAndComplete}
                     disabled={completing}
                     title="End the call and mark it complete"
-                    aria-label="End the call and mark it complete"
-                    className="flex w-11 shrink-0 items-center justify-center border-l border-red-500/40 bg-red-600 text-white hover:bg-red-500 disabled:opacity-70"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-md bg-slate-700 px-3 py-2 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-70"
                   >
                     {completing ? (
                       <Loader2 size={15} className="animate-spin" />
                     ) : (
                       <CheckCheck size={15} />
                     )}
+                    End &amp; complete
                   </button>
                 )}
               </div>
@@ -965,6 +1126,75 @@ function DialPad({ onDigit }: { onDigit: (digit: string) => boolean }) {
             {key}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "That call is done" — offered for five seconds after the OTHER side hangs up.
+ *
+ * ── WHY ONLY THAT ENDING ───────────────────────────────────────────────────────
+ * The two endings are not symmetric. An agent who hangs up has "End & complete" under
+ * their cursor at the moment they decide the call is finished. An agent whose caller
+ * hangs up first has the whole card vanish out from under them, and the only route back
+ * to that row is to go and find it in the inbox — which is exactly the friction that
+ * leaves calls sitting uncompleted.
+ *
+ * ⚠️ It dismisses ITSELF. The card it replaces disappeared without being asked to, so a
+ * replacement that demanded a click to get rid of would be a strictly worse trade. The
+ * countdown is shown rather than implied so the five seconds do not feel like a glitch.
+ */
+function CompletePromptCard({ prompt }: { prompt: CompletePromptView }) {
+  const { completeEndedCall, dismissCompletePrompt } = useSoftphoneActions();
+  const [left, setLeft] = useState(() =>
+    Math.max(0, Math.ceil((prompt.until - Date.now()) / 1000)),
+  );
+
+  // Derived from the deadline on every tick rather than decremented, so a throttled
+  // background tab cannot leave the number stuck at 4 over a card that is already gone.
+  useEffect(() => {
+    const id = setInterval(
+      () => setLeft(Math.max(0, Math.ceil((prompt.until - Date.now()) / 1000))),
+      250,
+    );
+    return () => clearInterval(id);
+  }, [prompt.until]);
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[200] w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-background shadow-2xl">
+      <div className="flex items-start gap-3 p-4">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-700">
+          <PhoneOff size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Call ended
+          </p>
+          <p className="truncate text-sm font-semibold">{prompt.peer}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            They hung up. Clear it off the list?
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={dismissCompletePrompt}
+          aria-label="Dismiss"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted"
+        >
+          <X size={15} />
+        </button>
+      </div>
+      <div className="px-4 pb-4">
+        <button
+          type="button"
+          onClick={completeEndedCall}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+        >
+          <CheckCheck size={15} />
+          Mark complete
+          <span className="ml-1 tabular-nums opacity-70">({left})</span>
+        </button>
       </div>
     </div>
   );

@@ -40,6 +40,11 @@ export interface InternalCall {
    * call leaves nothing behind.
    */
   hasRecording: boolean;
+  /**
+   * The AI one-liner, for the row itself. Null until the worker gets to it, and always
+   * null when PHONE_SUMMARIZE_CALLS is off.
+   */
+  summaryLine: string | null;
 }
 
 /** Same four names as `InternalFolder` — one folder chip drives both sources. */

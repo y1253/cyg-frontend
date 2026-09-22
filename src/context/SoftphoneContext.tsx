@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { dialedHere } from '@/lib/dialIntent';
 import { invitePairsWith, type InviteMarkers } from './invite-pairing';
 import {
@@ -37,6 +38,8 @@ import {
   dropConferenceParty,
   fetchConferenceStatus,
   reportCallAnswered,
+  completeCall,
+  hangUpCallOnUnload,
   type AddCallTarget,
   hangUpCall,
   type ConferenceStatus,
@@ -58,7 +61,11 @@ import {
   callNotificationTag,
   closeNotification,
 } from '@/lib/desktopNotification';
+import { setInternalCallState } from '@/api/internalCalls';
+import { canCompleteCall } from '@/components/Phone/call-slots';
+import { setTabRinging } from '@/lib/tab-badge';
 import { useCallNotifier } from '@/context/NotificationContext';
+import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat';
 import { formatE164 } from '@/lib/phone';
 import {
   audioReady,
@@ -149,6 +156,13 @@ export interface IncomingCallInfo {
   direction?: 'inbound' | 'outbound';
   callSid: string;
   at: number;
+  /**
+   * Canned texts the agent can send INSTEAD of answering, resolved for this company and
+   * carried ON THE EVENT — the settings routes are admin-only while the person being rung
+   * usually is not, and the inbound webhook has the resolved settings in hand anyway.
+   * Absent when none are configured, so the control simply does not appear.
+   */
+  quickReplies?: string[];
   /**
    * INTERNAL (staff-to-staff) calls only: the X-Cyg-Call header expected on OUR leg.
    *
@@ -304,6 +318,33 @@ interface SoftphoneState {
    * round trips plus SignalWire forking the INVITE back to us.
    */
   dialing: DialingView | null;
+  /**
+   * The far side hung up, and this call can still be ticked off the worklist.
+   *
+   * A FIELD beside `calls`, for the same reason `dialing` is one: the call is over, so
+   * there is no slot and no phase left to hang it on, and inventing a terminal `CallPhase`
+   * would put a dead call in front of every `phase` check in this file.
+   *
+   * It exists because the two endings are not symmetric. An agent who hangs up has the
+   * "End & complete" button under their cursor at the moment they decide the call is done;
+   * an agent whose caller hangs up first has the card vanish out from under them, and the
+   * only way back to that row is to find it in the inbox. Five seconds is long enough to
+   * take the offer and short enough that it never sits over the next call.
+   */
+  completePrompt: CompletePromptView | null;
+}
+
+/** The "that call is done" offer, shown briefly after the OTHER side hangs up. */
+export interface CompletePromptView {
+  callSid: string;
+  companyId: number;
+  kind: 'company' | 'internal';
+  /** The callee's X-Cyg-Call token on an internal call — see `canCompleteCall`. */
+  token?: string;
+  /** Who the call was with, for the card's one line of context. */
+  peer: string;
+  /** Epoch ms at which it disappears on its own. Drives the countdown. */
+  until: number;
 }
 
 /** What the optimistic card shows while a dial is in flight. */
@@ -344,6 +385,12 @@ export interface DialHandle {
 interface SoftphoneActions {
   answer: () => void;
   hangup: () => void;
+  /** Take the post-call offer: mark the just-ended call complete. */
+  completeEndedCall: () => void;
+  /** Wave the post-call offer away before its five seconds are up. */
+  dismissCompletePrompt: () => void;
+  /** Refuse the call ringing in the card — for everyone holding it, not just here. */
+  declineActive: () => void;
   /**
    * "A call is being placed" — call this synchronously in the click, beside
    * `unlockAudio()`, before the request goes out.
@@ -624,6 +671,16 @@ interface CallSlot {
   /** Our own fork of this call's transfer `<Dial><Sip>`, claimed once and never replaced. */
   takeBackInvite: Invitation | null;
   transferTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * This browser is the one that ended the call.
+   *
+   * Set by every deliberate local teardown — hang up, decline, end-and-answer, transfer —
+   * BEFORE `endSlot` runs, because `endSlot` is also where a remote BYE arrives and the
+   * two are otherwise indistinguishable by the time it is reached. Its only consumer is
+   * the post-call complete prompt, which exists precisely for the ending the agent did
+   * not choose.
+   */
+  endedLocally: boolean;
 }
 
 /** An INVITE that has arrived with no matching event YET. */
@@ -645,6 +702,15 @@ interface HeldInvite {
  */
 const MAX_HELD_INVITES = 8;
 
+/**
+ * How long the post-call "mark complete" offer stays up.
+ *
+ * Long enough to notice and reach, short enough that it is gone before the next call —
+ * and it must be gone on its own, because the card it replaces vanished without being
+ * asked to and a second one that needed dismissing would be worse than none.
+ */
+const COMPLETE_PROMPT_MS = 5_000;
+
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const notifyCall = useCallNotifier();
@@ -663,6 +729,17 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
    */
   const dialingRef = useRef<DialingView | null>(null);
   const dialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [completePrompt, setCompletePrompt] =
+    useState<CompletePromptView | null>(null);
+  const completePromptRef = useRef<CompletePromptView | null>(null);
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const qc = useQueryClient();
+
+  // `calls` rather than `phase`: an agent with one call parked and another live is busy
+  // on both, and `phase` only ever describes the active one.
+  usePresenceHeartbeat(calls.length > 0);
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
@@ -743,6 +820,31 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       stopRinging();
       stopCallWaitingTone();
     }
+
+    /**
+     * The browser TAB, flashing for the same window the ringtone sounds for.
+     *
+     * Derived here rather than owned by a hook, for the reason this function exists: an
+     * imperative "start flashing" / "stop flashing" pair has a failure mode where the
+     * stop is missed and the tab blinks over a live conversation forever. Deriving it
+     * from the same state as the tone makes that unreachable.
+     *
+     * ANY ringing slot, not just the active one — `othersRinging` is a call waiting, and
+     * a second caller is exactly as worth noticing from another tab as the first.
+     *
+     * ⚠️ It could not live in `useTabMissedCallBadge`, which is where the tab's icon was
+     * otherwise managed: that hook is mounted by `NotificationProvider`, which WRAPS
+     * `SoftphoneProvider`, so it cannot read call state without inverting the provider
+     * order. `tab-badge` owns the element and both callers declare state into it.
+     */
+    setTabRinging(
+      slotList().some(
+        (s) =>
+          s.phase === 'ringing' &&
+          !s.answering &&
+          s.info.direction !== 'outbound',
+      ),
+    );
   }, [activeSlot, slotList]);
 
   /**
@@ -778,8 +880,89 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     // A copy, not the ref: the fields are mutated in place, and React would skip a
     // re-render for the same object identity — so pressing Cancel would change nothing.
     setDialing(dialingRef.current ? { ...dialingRef.current } : null);
+    // A copy, for the same reason as `dialing` above.
+    setCompletePrompt(
+      completePromptRef.current ? { ...completePromptRef.current } : null,
+    );
     syncTones();
   }, [slotList, syncTones]);
+
+  /**
+   * A call ended: make every surface that counts it agree, now.
+   *
+   * ── WHY THE SOFTPHONE OF ALL PLACES ───────────────────────────────────────────
+   * This file had no query client at all, and the ONLY call-end invalidation in the whole
+   * client was the "End & complete" button. So an ordinary hang-up — much the commoner
+   * ending — left the agent who was actually on the call staring at their own call still
+   * listed as "In progress" until the next 15s poll landed on a server window that was
+   * itself cached. The browser that hung up is the first thing in the system to KNOW, and
+   * it was the one thing doing nothing about it.
+   *
+   * Company keys are narrowed by id; the internal ones are not keyed by company at all.
+   * `inbox-summary` covers the bell, the dashboard badges and the tab icon.
+   */
+  const refreshAfterCall = useCallback(
+    (info: { companyId: number; kind?: 'company' | 'internal' }) => {
+      const keys: unknown[][] = [
+        ['inbox-summary'],
+        ['internal-calls'],
+        ['internal-call-counts'],
+      ];
+      if (info.kind !== 'internal') {
+        keys.push(
+          ['phone-timeline', info.companyId],
+          ['phone-counts', info.companyId],
+          ['phone-ringing', info.companyId],
+          ['active-call', info.companyId],
+        );
+      }
+      for (const queryKey of keys) void qc.invalidateQueries({ queryKey });
+    },
+    [qc],
+  );
+
+  /**
+   * The page is going away mid-call: end the far leg too.
+   *
+   * ── WHY THIS IS NEEDED AT ALL, AND ONLY FOR COMPANY CALLS ─────────────────────
+   * A reload destroys the WebSocket, the peer connection and the media tracks, and
+   * nothing can restore them — "get the call back" is not achievable and is not what this
+   * does. What it does is stop the OTHER party being left connected to nothing.
+   *
+   * An INTERNAL call already ends both sides on its own, for a structural reason:
+   * `startCall` makes the CALLER's browser the `outbound-api` ROOT, so whichever browser
+   * disappears, the `<Dial>` bridge collapses and takes the other leg with it. A company
+   * call inverts that — the PSTN caller is the root and our browser is the `<Sip>` CHILD —
+   * so our side dying leaves the customer's leg up, and recovery depends on SignalWire
+   * noticing a dead WebSocket, which this codebase has already recorded that it does NOT
+   * reliably do (a leg sat `ringing` for 3.5 hours and could not be ended by any means).
+   *
+   * ⚠️ `pagehide`, not `beforeunload`: `beforeunload` is unreliable on mobile and on a
+   * bfcache restore, and it invites the browser to show a confirmation dialog, which is
+   * the last thing somebody hanging up wants to argue with.
+   *
+   * The documented "call the route BEFORE the local BYE" ordering holds for free here —
+   * there is no BYE on this path at all.
+   */
+  useEffect(() => {
+    const onPageHide = () => {
+      const tok = tokenRef.current;
+      if (!tok) return;
+      for (const slot of slotList()) {
+        if (slot.info.kind === 'internal') continue;
+        hangUpCallOnUnload(tok, slot.info.companyId, slot.info.callSid);
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [slotList]);
+
+  const clearCompletePrompt = useCallback(() => {
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    completeTimerRef.current = null;
+    completePromptRef.current = null;
+    publishRef.current?.();
+  }, []);
 
   useEffect(() => {
     publishRef.current = publish;
@@ -971,14 +1154,54 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       slot.audio.remove();
       slot.takeBackInvite = null;
       slotsRef.current.delete(id);
+
+      /**
+       * The far side hung up on a call that was actually answered: offer to tick it off
+       * before the card disappears for good.
+       *
+       * Four conditions, and each drops a case where the offer would be wrong rather than
+       * merely unnecessary:
+       *  - `!endedLocally`  — an agent who hung up already had the button under their
+       *                       cursor, and re-offering it after the fact is noise.
+       *  - `answeredAt`     — a call nobody picked up is a MISSED call, and completing it
+       *                       ticks off the very thing the team is meant to act on.
+       *  - no conference    — `addCall` gives the second call its own row, so "the call"
+       *                       stops having one answer. Same reason End & complete hides.
+       *  - `canCompleteCall`— an internal caller's write is a guaranteed no-op.
+       */
+      if (
+        !slot.endedLocally &&
+        slot.answeredAt !== null &&
+        !slot.conference &&
+        canCompleteCall(slot.info)
+      ) {
+        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+        completePromptRef.current = {
+          callSid: slot.info.callSid,
+          companyId: slot.info.companyId,
+          kind: slot.info.kind ?? 'company',
+          token: slot.info.token,
+          peer: slot.info.fromName || formatE164(slot.info.from),
+          until: Date.now() + COMPLETE_PROMPT_MS,
+        };
+        completeTimerRef.current = setTimeout(() => {
+          completeTimerRef.current = null;
+          completePromptRef.current = null;
+          publishRef.current?.();
+        }, COMPLETE_PROMPT_MS);
+      }
+
       if (activeIdRef.current === id) {
         activeIdRef.current = null;
         promoteAfterEnd();
       }
       log('call ended', id, reason);
       publish();
+      // The browser that was ON the call is the first thing in the system to know it is
+      // over. Before this it was also the only one doing nothing about it.
+      refreshAfterCall(slot.info);
     },
-    [promoteAfterEnd, publish, releaseSlotMedia],
+    [promoteAfterEnd, publish, refreshAfterCall, releaseSlotMedia],
   );
 
   /** Drop a held INVITE from the list, whatever became of it. */
@@ -1056,6 +1279,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         id,
         invitation: held.invitation,
         info,
+        endedLocally: false,
         phase: 'ringing',
         audio,
         micTrack: null,
@@ -1698,6 +1922,46 @@ Transferred by ${info.transferFrom.name}`
    * touch no company's support number, and so they cannot wedge a line the way an
    * orphaned `<Dial>` child does.
    */
+  /**
+   * Refuse a ringing call — for EVERYONE holding it, not just this browser.
+   *
+   * ⚠️ NOT `invitation.reject()`. Every browser in the firm registers one shared SIP
+   * credential, so a local reject ends this branch alone and the caller goes on ringing
+   * every other one until the `<Dial>` times out. Redirecting the leg server-side sends
+   * them to that company's own voicemail and ends the ring for good — including for an
+   * admin who was watching that company.
+   *
+   * Used by BOTH Declines: the waiting-call banner's, and the active ringing card's. They
+   * used to be different actions — a server redirect on one and a local hang-up on the
+   * other — so the same word meant two different things depending on which call it sat
+   * on, and only one of them reliably produced a MISSED row.
+   *
+   * ⚠️ Internal calls take the local path. The decline route is a company route: it
+   * authorises against a support number, and a staff call's `companyId` is a workspace id
+   * that owns no line. There is no colleague-voicemail to redirect to either.
+   *
+   * A failed request still drops the call here — the agent said no, and a dismissal beats
+   * a stuck card — but then it goes on ringing for whoever else holds it, which is the old
+   * "Ignore" behaviour rather than a new failure.
+   */
+  const declineSlot = useCallback(
+    (callId: string) => {
+      const slot = slotsRef.current.get(callId);
+      const tok = tokenRef.current;
+      if (!slot) return;
+      const { companyId, callSid, kind } = slot.info;
+      if (tok && kind !== 'internal') {
+        void declineCall(tok, companyId, callSid).catch((err: unknown) =>
+          log('decline failed, dismissing locally', err),
+        );
+      }
+      slot.endedLocally = true;
+      if (kind === 'internal') terminateInvitation(slot.invitation);
+      endSlot(callId, 'declined');
+    },
+    [endSlot, terminateInvitation],
+  );
+
   const endCallServerSide = useCallback((slot: CallSlot) => {
     const tok = tokenRef.current;
     if (!tok) return;
@@ -1792,11 +2056,31 @@ Transferred by ${info.transferFrom.name}`
       hangup: () => {
         const slot = activeSlot();
         if (!slot) return;
+        // Marked before the teardown: `endSlot` cannot otherwise tell a deliberate
+        // hang-up from the far side's BYE, and would offer the post-call prompt to an
+        // agent who has the same button under their cursor already.
+        slot.endedLocally = true;
         // Server FIRST, then our own dialog — see `endCallServerSide`.
         endCallServerSide(slot);
         terminateInvitation(slot.invitation);
         endSlot(slot.id, 'hung up');
       },
+      completeEndedCall: () => {
+        const prompt = completePromptRef.current;
+        const tok = tokenRef.current;
+        if (!prompt || !tok) return;
+        clearCompletePrompt();
+        const mark =
+          prompt.kind === 'internal'
+            ? setInternalCallState(tok, prompt.callSid, 'complete')
+            : completeCall(tok, prompt.companyId, prompt.callSid);
+        void mark
+          .catch((err: unknown) => log('post-call complete failed', err))
+          // Whether or not it worked: the counts moved if it did, and a failed mark still
+          // leaves the row where it already was.
+          .finally(() => refreshAfterCall(prompt));
+      },
+      dismissCompletePrompt: clearCompletePrompt,
       switchTo,
       retryAudio: () => {
         const slot = activeSlot();
@@ -1814,28 +2098,17 @@ Transferred by ${info.transferFrom.name}`
         if (target) target.answering = true;
         const current = activeSlot();
         if (current && current.id !== callId) {
+          current.endedLocally = true;
           endCallServerSide(current);
           terminateInvitation(current.invitation);
           endSlot(current.id, 'ended to answer another call');
         }
         answerSlot(callId);
       },
-      declineWaiting: (callId: string) => {
-        const slot = slotsRef.current.get(callId);
-        const tok = tokenRef.current;
-        if (!slot) return;
-        const { companyId, callSid } = slot.info;
-        // The server redirects the leg into voicemail, which ends the ring for EVERY
-        // branch. Rejecting here would only end ours. If it fails we still drop the call
-        // locally — the agent said no, and a dismissal is better than a stuck card — but
-        // then it goes on ringing for whoever else is holding it, which is the old
-        // "Ignore" behaviour rather than a new failure.
-        if (tok) {
-          void declineCall(tok, companyId, callSid).catch((err: unknown) =>
-            log('decline failed, dismissing locally', err),
-          );
-        }
-        endSlot(callId, 'declined');
+      declineWaiting: declineSlot,
+      declineActive: () => {
+        const id = activeIdRef.current;
+        if (id) declineSlot(id);
       },
       blindTransfer: async (targetUserId: number) => {
         const slot = activeSlot();
@@ -2116,9 +2389,12 @@ Transferred by ${info.transferFrom.name}`
       activeSlot,
       answerSlot,
       attachRemoteAudio,
+      declineSlot,
       beginDialing,
+      clearCompletePrompt,
       clearDialing,
       endCallServerSide,
+      refreshAfterCall,
       endSlot,
       holdAllParties,
       holdSlot,
@@ -2172,13 +2448,12 @@ Transferred by ${info.transferFrom.name}`
       }
       if (message.action !== 'decline') return;
 
-      // ⚠️ The overlay's two Declines are NOT the same action, and this mirrors it
-      // rather than picking one. On the ACTIVE ringing call, Decline is a local SIP
-      // reject that leaves the caller ringing everybody else's browser; on a WAITING
-      // call it is a server-side redirect that sends them to voicemail for good.
-      // Collapsing them would silently change what the button means.
-      if (slot.id === activeIdRef.current) actions.hangup();
-      else actions.declineWaiting(slot.id);
+      // ⚠️ ONE action for both, now that the overlay's two Declines are one thing.
+      // They used to differ — a local SIP reject on the active call, a server-side
+      // voicemail redirect on a waiting one — so the same word meant two things and only
+      // one of them reliably ended the ring for the other browsers holding it. See
+      // `declineSlot`.
+      actions.declineWaiting(slot.id);
     };
 
     navigator.serviceWorker.addEventListener('message', onMessage);
@@ -2213,8 +2488,10 @@ Transferred by ${info.transferFrom.name}`
       waitingCallId: waiting?.id ?? null,
       // Not derived from `calls` — it is what stands in the gap BEFORE there is a call.
       dialing,
+      // Nor from `calls` — it is what stands in the gap AFTER the last one.
+      completePrompt,
     };
-  }, [status, calls, activeCallId, hasHeldInvite, dialing]);
+  }, [status, calls, activeCallId, hasHeldInvite, dialing, completePrompt]);
 
   return (
     <ActionsCtx.Provider value={actions}>
@@ -2231,7 +2508,7 @@ Transferred by ${info.transferFrom.name}`
           Mount gated on call state ONLY, never on the route — gating on anything
           route-derived would unmount a live call on navigation.
         */}
-        {calls.length > 0 || dialing
+        {calls.length > 0 || dialing || completePrompt
           ? createPortal(<CallOverlay />, document.body)
           : null}
       </StateCtx.Provider>

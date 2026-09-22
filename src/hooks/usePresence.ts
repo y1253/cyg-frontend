@@ -3,16 +3,24 @@ import { fetchPresence } from '@/api/phone';
 import { useAuth } from '@/context/AuthContext';
 
 /**
- * Which colleagues currently hold an open event stream.
+ * Which colleagues are reachable, and which are on a call.
  *
- * ⚠️ ADVISORY ONLY. Presence here means "has an SSE stream open", and the office
- * TLS-intercepting proxy blackholes SSE entirely — which is why the softphone has a
- * polled `pending` fallback at all. So a colleague sitting at their desk on the office
- * network reports offline. Show it as a hint; never filter a picker on it and never
- * refuse a transfer because of it.
+ * Presence used to mean "has an SSE stream open" alone, which was close to useless here:
+ * the office TLS-intercepting proxy blackholes SSE entirely — the reason the softphone
+ * has a polled `pending` fallback at all — so a colleague at their desk reported offline.
+ * It now also counts a recent posted heartbeat, which is an ordinary request and gets
+ * through, and that heartbeat is the only thing that can report BUSY: an inbound call
+ * rings every browser on one shared SIP credential, so the server is never told which of
+ * them answered.
  *
- * Short `staleTime`: it is only fetched while a picker is open, and being a minute stale
- * about who is at their desk would defeat the point.
+ * ⚠️ STILL ADVISORY ONLY, and more dangerous for looking reliable. Somebody with the app
+ * closed is simply absent, which is indistinguishable here from a heartbeat one second
+ * late. Show it as a hint; never filter a picker on it and never refuse a call or a
+ * transfer because of it.
+ *
+ * Polls rather than merely going stale, because every consumer is a surface that is OPEN
+ * in front of somebody deciding who to ring — a dot that was right when the popover
+ * opened and wrong ten seconds later is worse than no dot.
  */
 export function usePresence(enabled: boolean = true) {
   const { token } = useAuth();
@@ -20,6 +28,7 @@ export function usePresence(enabled: boolean = true) {
     queryKey: ['phone-presence'],
     queryFn: () => fetchPresence(token!),
     enabled: !!token && enabled,
-    staleTime: 15_000,
+    staleTime: 10_000,
+    refetchInterval: enabled ? 15_000 : false,
   });
 }

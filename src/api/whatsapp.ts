@@ -76,6 +76,10 @@ export interface WhatsAppItem {
   body: string | null;
   isVoice: boolean;
   durationSec: number | null;
+  /** What the client said. Absent until somebody asks for it. */
+  transcript?: string;
+  /** ready | skipped | failed. Absent until a transcription has been attempted. */
+  transcriptStatus?: string;
   hasMedia: boolean;
   mediaStatus: WhatsAppMediaStatus | null;
   mimeType: string | null;
@@ -453,61 +457,6 @@ export function fileAcceptsCaption(file: File): boolean {
 }
 
 /**
- * Upload a recorded voice note. XHR rather than fetch for upload progress — the
- * `api/gmail.ts#sendEmail` reason — with the same auth and error handling.
- */
-export function sendWhatsAppVoice(
-  token: string,
-  companyId: number,
-  to: string,
-  recording: Blob,
-  filename: string,
-  onProgress?: (fraction: number) => void,
-): Promise<WhatsAppItem> {
-  const form = new FormData();
-  form.set('to', to);
-  form.set('file', recording, filename);
-  const url = `${API}/whatsapp/companies/${companyId}/messages/voice`;
-
-  return new Promise<WhatsAppItem>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    if (onProgress) {
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
-      };
-    }
-    xhr.onload = () => {
-      if (xhr.status === 401) {
-        handleUnauthorized();
-        reject(new Error('Your session expired'));
-        return;
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText) as WhatsAppItem);
-        } catch {
-          reject(new Error('The voice message was sent, but the reply could not be read'));
-        }
-        return;
-      }
-      let message = 'Failed to send the voice message';
-      try {
-        const body = JSON.parse(xhr.responseText) as { message?: string | string[] };
-        if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
-      } catch {
-        // non-JSON error body (e.g. a proxy page)
-      }
-      if (xhr.status === 413) message = 'The recording is too large to send.';
-      reject(new Error(message));
-    };
-    xhr.onerror = () => reject(new Error('Network error while sending the voice message'));
-    xhr.send(form);
-  });
-}
-
-/**
  * Send an attached file — anything at all; the server decides whether WhatsApp takes it
  * as an image, a video, an audio file or a document.
  *
@@ -672,4 +621,28 @@ export async function generateWhatsAppTemplate(
     throw new Error(body.message ?? 'Could not draft a template');
   }
   return (await res.json()) as GeneratedTemplateDraft;
+}
+
+/**
+ * What a client said in a voice note, as text.
+ *
+ * On demand and then kept server-side, so the second reader pays nothing. Throws with the
+ * server's own sentence — "that voice note has not finished downloading yet" is something
+ * the reader can act on by waiting, and a generic failure is not.
+ */
+export async function transcribeWhatsAppVoice(
+  token: string,
+  companyId: number,
+  messageId: number,
+): Promise<{ transcript: string | null; status: string }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/messages/${messageId}/transcribe`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? 'Could not transcribe that voice note');
+  }
+  return res.json() as Promise<{ transcript: string | null; status: string }>;
 }

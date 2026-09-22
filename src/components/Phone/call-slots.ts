@@ -155,3 +155,25 @@ export function otherCallId(
 export function switcherMaxHeightClass(hasWaiting: boolean): string {
   return hasWaiting ? 'max-h-24' : 'max-h-40';
 }
+
+/**
+ * Is there one unambiguous row to mark complete for this call?
+ *
+ * Shared by the live card's "End & complete" and by the post-call prompt, so the two can
+ * never disagree about whether the action exists.
+ *
+ * The internal-CALLER exclusion is the subtle one: `InternalCallsService.setState` scopes
+ * its write to `calleeId`, so a caller's request is a guaranteed no-op — correctly, since
+ * a call you placed already projects as completed. `token` is present only on the CALLEE's
+ * event, which is the one thing that tells the two apart in the browser.
+ *
+ * Lives here, with the other pure call rules, rather than in `SoftphoneContext`: that file
+ * exports components, and a non-component export there breaks fast refresh for the whole
+ * module — which for the softphone means losing a live call on every edit.
+ */
+export function canCompleteCall(info: {
+  kind?: 'company' | 'internal';
+  token?: string;
+}): boolean {
+  return info.kind !== 'internal' || !!info.token;
+}

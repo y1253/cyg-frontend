@@ -101,16 +101,49 @@ describe('callBlockedReason', () => {
 
 describe('shouldShowActiveBanner', () => {
   it('shows the banner to everyone not on the call', () => {
-    expect(shouldShowActiveBanner(active(), IDLE, 7)).toBe(true);
+    expect(shouldShowActiveBanner(active(), IDLE, 7, false)).toBe(true);
   });
 
   it('hides it in the browser that is on the call, which has the call card', () => {
     const local: LocalCallState = { calls: [{ companyId: 7 }] };
-    expect(shouldShowActiveBanner(active({ isViewer: true }), local, 7)).toBe(false);
+    expect(shouldShowActiveBanner(active({ isViewer: true }), local, 7, false)).toBe(
+      false,
+    );
   });
 
   it('shows nothing when the line is quiet', () => {
-    expect(shouldShowActiveBanner(null, IDLE, 7)).toBe(false);
+    expect(shouldShowActiveBanner(null, IDLE, 7, false)).toBe(false);
+  });
+
+  /**
+   * ⚠️ THE regression test for "a call appears before the call".
+   *
+   * The server marks the line busy in `ringAndDial`, before the LaML it returns has
+   * played a note — and with a greeting configured, LaML plays the whole `<Say>` before
+   * `<Dial>` emits any INVITE. So this banner used to announce an incoming call for the
+   * length of the greeting, offering no way to answer it and no way to end it.
+   */
+  it('hides an inbound ring while no browser here is holding the INVITE', () => {
+    const ringing = active({ direction: 'inbound', state: 'ringing' });
+    expect(shouldShowActiveBanner(ringing, IDLE, 7, false)).toBe(false);
+  });
+
+  it('shows that same ring the moment this browser IS holding one', () => {
+    const ringing = active({ direction: 'inbound', state: 'ringing' });
+    expect(shouldShowActiveBanner(ringing, IDLE, 7, true)).toBe(true);
+  });
+
+  it('still shows an ANSWERED call with no INVITE held', () => {
+    // The gate is only for the ring. A live call is a state that explains why the Call
+    // buttons are disabled, and it was never something the viewer could act on.
+    const live = active({ direction: 'inbound', state: 'active' });
+    expect(shouldShowActiveBanner(live, IDLE, 7, false)).toBe(true);
+  });
+
+  it('still shows an OUTBOUND call that is ringing', () => {
+    // Somebody here placed it; there is no INVITE for anyone else to hold.
+    const out = active({ direction: 'outbound', state: 'ringing' });
+    expect(shouldShowActiveBanner(out, IDLE, 7, false)).toBe(true);
   });
 });
 

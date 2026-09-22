@@ -33,6 +33,13 @@ export interface EffectivePhoneSettings {
   voicemailEnabled: boolean;
   voicemailPrompt: string;
   voicemailMaxSeconds: number;
+  /**
+   * Canned texts offered instead of answering a ringing call.
+   *
+   * Inherited as a WHOLE LIST, like `weeklyHours` — per-entry inheritance is
+   * representable and impossible to explain in a UI.
+   */
+  quickReplies: string[];
 }
 
 /** The per-company row as stored. **`null` means "inherit"**, and is the only absence. */

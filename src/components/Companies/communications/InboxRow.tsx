@@ -314,22 +314,26 @@ function CallDirectionIcon({ item }: { item: CallItem }) {
   // Before the missed branch, because every voicemail is ALSO a miss — that is how it is
   // derived. Checked second and this is dead code.
   if (item.hasVoicemail) {
-    return <Voicemail size={11} className="text-red-500 shrink-0" />;
+    return <Voicemail size={15} strokeWidth={2.25} className="text-red-500 shrink-0" />;
   }
   // ⚠️ Direction BEFORE outcome for outbound. A missed-call glyph depicts a call coming
   // IN, so putting it on a call the agent placed is simply the wrong picture — and the
   // card already says "Outgoing" two lines up, which it then contradicted.
   if (isAlarmingOutcome(item.outcome, item.direction)) {
-    return <PhoneMissed size={11} className="text-red-500 shrink-0" />;
+    return <PhoneMissed size={15} strokeWidth={2.25} className="text-red-500 shrink-0" />;
   }
   const tone =
     item.outcome === 'missed' || item.outcome === 'failed'
       ? 'text-muted-foreground'
       : 'text-green-600';
+  // ⚠️ 15px with a heavier stroke, not 11. These four glyphs differ ONLY in which way a
+  // small arrow points, and at 11px hairline that distinction was not legible at a
+  // glance — which is the only job the icon has on a row that already says the rest in
+  // words.
   return item.direction === 'inbound' ? (
-    <PhoneIncoming size={11} className={`${tone} shrink-0`} />
+    <PhoneIncoming size={15} strokeWidth={2.25} className={`${tone} shrink-0`} />
   ) : (
-    <PhoneOutgoing size={11} className={`${tone} shrink-0`} />
+    <PhoneOutgoing size={15} strokeWidth={2.25} className={`${tone} shrink-0`} />
   );
 }
 
@@ -521,6 +525,16 @@ function CallRowBody({
       >
         {label}
         {suffix}
+        {/* The AI one-liner, on the SAME line rather than a second one: the row is a
+            fixed-height scanning surface, and letting a summary reflow it would make the
+            list jump as summaries land minutes after their calls. Absent until the worker
+            gets to it, and always absent when PHONE_SUMMARIZE_CALLS is off. */}
+        {call.summaryLine ? (
+          <span className="font-normal text-muted-foreground">
+            {' · '}
+            {call.summaryLine}
+          </span>
+        ) : null}
       </span>
       <CallBackButton
         number={call.counterparty}

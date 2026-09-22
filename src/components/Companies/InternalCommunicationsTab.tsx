@@ -4,8 +4,7 @@ import {
   Loader2, MailOpen, Paperclip, Pencil, Phone, Printer, Reply, SendHorizonal, X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { useSoftphone, useSoftphoneActions } from '@/context/SoftphoneContext';
-import { unlockAudio } from '@/lib/notificationSound';
+import { useSoftphone } from '@/context/SoftphoneContext';
 import { callBlockedReason } from './communications/call-busy';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,8 +24,12 @@ import { EmailBodyFrame } from './EmailBodyFrame';
 import { Linkified } from './Linkified';
 import { AttachmentPreview } from './AttachmentPreview';
 import { CompleteConfirmDialog } from './CompleteConfirmDialog';
-import { useCompleteUntil } from '@/hooks/useCompleteUntil';
-import { countCompletableUpTo } from './communications/complete-until';
+import { useMarkUntil } from '@/hooks/useMarkUntil';
+import {
+  countMarkableUpTo,
+  type MarkableField,
+} from './communications/complete-until';
+import type { UntilAction } from '@/api/completeUntil';
 import { InlineComposerPanel } from './InlineComposerPanel';
 import { AdvancedSearchPanel } from './communications/AdvancedSearchPanel';
 import { clampSources } from './communications/inbox-clamp';
@@ -62,7 +65,7 @@ import { useInternalMessage } from '@/hooks/useInternalMessage';
 import { useInternalMessages } from '@/hooks/useInternalMessages';
 import { useInternalCalls, useInternalCallCounts } from '@/hooks/useInternalCalls';
 import { useInternalCallState } from '@/hooks/useInternalCallState';
-import { useStartInternalCall } from '@/hooks/useStartInternalCall';
+import { useInternalDial } from '@/hooks/useInternalDial';
 import { useInternalMessageThread } from '@/hooks/useInternalMessageThread';
 import { useInternalMessageState } from '@/hooks/useInternalMessageState';
 import { useSendInternalMessage } from '@/hooks/useSendInternalMessage';
@@ -283,9 +286,8 @@ export function InternalCommunicationsTab({ active }: Props) {
   const callQuery = useInternalCalls(folder, active && folder !== 'SENT');
   const { data: callCounts } = useInternalCallCounts(active);
   const callStateMutation = useInternalCallState();
-  const startCall = useStartInternalCall();
+  const { dial: internalDial, isPending: dialPending } = useInternalDial();
   const { calls: softphoneCalls } = useSoftphone();
-  const { beginDialing } = useSoftphoneActions();
   const threadQuery = useInternalMessageThread(openThreadId, active);
   const stateMutation = useInternalMessageState();
   const sendMutation = useSendInternalMessage();
@@ -628,19 +630,44 @@ export function InternalCommunicationsTab({ active }: Props) {
     }
   };
 
-  /** "Complete till here" — the range version, with the count its dialog needs. */
+  /** "Complete till here" / "Read till here" — the range versions and their count. */
   const [untilTarget, setUntilTarget] = useState<
-    { messageId: number; count: number } | null
+    { messageId: number; count: number; action: UntilAction } | null
   >(null);
-  const completeUntil = useCompleteUntil();
+  const completeUntil = useMarkUntil('complete');
+  const readUntil = useMarkUntil('read');
+
+  /**
+   * How many rows a range action would touch, for the dialog.
+   *
+   * `isOwn` is excluded because a message YOU sent has no recipient row of your own — the
+   * server's update would not touch it either, so counting it would overstate the result.
+   */
+  const untilCount = (anchorId: number, field: MarkableField) =>
+    countMarkableUpTo(
+      (threadQuery.data?.messages ?? []).map((x) => ({
+        id: String(x.id),
+        at: x.date,
+        isCompleted: x.isCompleted,
+        isRead: x.isRead,
+        isOwn: x.isOwn,
+      })),
+      String(anchorId),
+      field,
+    );
 
   const confirmUntil = () => {
     if (!untilTarget) return;
-    completeUntil.mutate({ kind: 'internal', messageId: untilTarget.messageId });
+    const { messageId, action } = untilTarget;
+    (action === 'read' ? readUntil : completeUntil).mutate({
+      kind: 'internal',
+      messageId,
+    });
     setUntilTarget(null);
-    // Back to the list, matching `confirmComplete`: the thread the person was reading has
-    // just been cleared behind them.
-    closeThread();
+    // ⚠️ Only COMPLETING goes back to the list. Completing clears the thread off the
+    // worklist so staying in it is staying somewhere it no longer belongs; marking read
+    // changes nothing about whether it is still open work.
+    if (action === 'complete') closeThread();
   };
 
   const completeConfirmDialog = (
@@ -662,12 +689,22 @@ export function InternalCommunicationsTab({ active }: Props) {
         onOpenChange={(open) => { if (!open) setUntilTarget(null); }}
         onConfirm={confirmUntil}
         title={
-          untilTarget && untilTarget.count > 1
-            ? `Mark ${untilTarget.count} messages complete?`
-            : 'Mark this message complete?'
+          untilTarget?.action === 'read'
+            ? untilTarget.count > 1
+              ? `Mark ${untilTarget.count} messages read?`
+              : 'Mark this message read?'
+            : untilTarget && untilTarget.count > 1
+              ? `Mark ${untilTarget.count} messages complete?`
+              : 'Mark this message complete?'
         }
-        confirmLabel="Complete till here"
-        description="This message and everything above it in the thread will be marked complete in your inbox."
+        confirmLabel={
+          untilTarget?.action === 'read' ? 'Read till here' : 'Complete till here'
+        }
+        description={
+          untilTarget?.action === 'read'
+            ? 'This message and everything above it in the thread will be marked read in your inbox.'
+            : 'This message and everything above it in the thread will be marked complete in your inbox.'
+        }
       />
     </>
   );
@@ -676,53 +713,24 @@ export function InternalCommunicationsTab({ active }: Props) {
   // The overlay takes over the moment this succeeds — it is mounted above the router, so
   // it follows the user anywhere for the rest of the call.
   /**
-   * ⚠️ `unlockAudio()` runs HERE, synchronously inside the click, before anything async.
-   * It is what buys the browser's permission to play the ringback and the call audio, and
-   * a gesture that has already yielded to a promise no longer counts as one. Every other
-   * dial site in the app does this; this one did NOT — which produces a silent call rather
-   * than an error, the hardest kind of failure to attribute.
+   * The recipe itself lives in `useInternalDial`, shared with the header dialer.
    *
-   * `startingCallRef` is a ref, not `startCall.isPending`, for the reason
-   * `CommunicationsTab` gives: two clicks can both run before React re-renders with the
-   * new mutation state, and each would place its own call. Ringing a colleague twice is
-   * the visible half; the overlay then pairing whichever event arrived last is the worse
-   * one. A LIST of call-back buttons makes a double click more likely, not less.
+   * It used to be inlined here, and this is where the two rules it carries were learned:
+   * `unlockAudio()` synchronously inside the click (this was the one dial site in the app
+   * missing it, and the failure is a SILENT call rather than an error), and an in-flight
+   * REF rather than `startCall.isPending` (two clicks can both land before React
+   * re-renders, and a list of call-back buttons makes that likelier, not less). Both now
+   * live in one place that cannot be forgotten by omission.
    */
-  const startingCallRef = useRef(false);
   const placeCall = (calleeId: number | undefined) => {
-    if (!calleeId || startingCallRef.current) return;
-    startingCallRef.current = true;
-    unlockAudio();
     setDialError(null);
-    // Beside unlockAudio, before the request. A staff call has no company line, so there
-    // is no sid to latch -- the card waits for the INVITE or its own TTL.
-    const dial = beginDialing({
-      // -1, the same sentinel `callBlockedReason` takes below: a staff call sits on no
-      // company's line. The field is never read for `kind: 'internal'` — the server
-      // hangup is company-only — and the real call's event carries each participant's own
-      // workspace id once it pairs.
-      companyId: -1,
-      companyName:
-        directory.find((u) => u.id === calleeId)?.name ?? 'a colleague',
-      to: null,
+    internalDial(calleeId, {
       peerName: directory.find((u) => u.id === calleeId)?.name ?? null,
-      kind: 'internal',
-      cancelled: false,
-    });
-    startCall.mutate(calleeId, {
       onSuccess: () => {
         setDialOpen(false);
         setDialPicked([]);
       },
-      onError: (e: unknown) => {
-        // Nothing will ring, so the optimistic card goes with the error.
-        dial.done();
-        setDialError(e instanceof Error ? e.message : 'Could not place the call');
-      },
-      // Cleared on failure too, so retrying after an error is never swallowed.
-      onSettled: () => {
-        startingCallRef.current = false;
-      },
+      onError: setDialError,
     });
   };
 
@@ -742,7 +750,7 @@ export function InternalCommunicationsTab({ active }: Props) {
       })),
     },
     companyId: -1,
-    starting: startCall.isPending,
+    starting: dialPending,
   });
 
   const dialDialog = (
@@ -771,10 +779,10 @@ export function InternalCommunicationsTab({ active }: Props) {
           </DialogClose>
           <Button
             onClick={() => placeCall(dialPicked[0])}
-            disabled={!dialPicked.length || startCall.isPending}
+            disabled={!dialPicked.length || dialPending}
             className="bg-teal-600 text-white hover:bg-teal-500"
           >
-            {startCall.isPending ? (
+            {dialPending ? (
               <Loader2 size={14} className="mr-1.5 animate-spin" />
             ) : (
               <Phone size={14} className="mr-1.5" />
@@ -1134,7 +1142,22 @@ export function InternalCommunicationsTab({ active }: Props) {
           </button>
           {/* Offered on the anchor too, unlike reply/forward: "everything up to the
               message I opened" is the most likely thing to clear. */}
-          <div className="shrink-0 self-center mr-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="shrink-0 self-center mr-1 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button
+              type="button"
+              title="Mark everything up to here read"
+              aria-label="Mark everything up to here read"
+              onClick={() =>
+                setUntilTarget({
+                  messageId: m.id,
+                  count: untilCount(m.id, 'isRead'),
+                  action: 'read',
+                })
+              }
+              className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <MailOpen size={14} />
+            </button>
             <button
               type="button"
               title="Mark everything up to here complete"
@@ -1142,17 +1165,8 @@ export function InternalCommunicationsTab({ active }: Props) {
               onClick={() =>
                 setUntilTarget({
                   messageId: m.id,
-                  // `isOwn` is excluded because a message YOU sent has no recipient row
-                  // of your own — the server's update would not touch it either.
-                  count: countCompletableUpTo(
-                    (threadQuery.data?.messages ?? []).map((x) => ({
-                      id: String(x.id),
-                      at: x.date,
-                      isCompleted: x.isCompleted,
-                      isOwn: x.isOwn,
-                    })),
-                    String(m.id),
-                  ),
+                  count: untilCount(m.id, 'isCompleted'),
+                  action: 'complete',
                 })
               }
               className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-blue-700"

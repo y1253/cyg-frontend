@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countCompletableUpTo } from './complete-until';
+import { countMarkableUpTo } from './complete-until';
 
 const m = (
   id: string,
@@ -7,7 +7,7 @@ const m = (
   over: { isCompleted?: boolean; isOwn?: boolean } = {},
 ) => ({ id, at, ...over });
 
-describe('countCompletableUpTo', () => {
+describe('countMarkableUpTo', () => {
   const thread = [
     m('a', '2026-09-17T09:00:00.000Z'),
     m('b', '2026-09-17T09:05:00.000Z'),
@@ -15,14 +15,14 @@ describe('countCompletableUpTo', () => {
   ];
 
   it('counts the anchor and everything older', () => {
-    expect(countCompletableUpTo(thread, 'b')).toBe(2);
-    expect(countCompletableUpTo(thread, 'c')).toBe(3);
-    expect(countCompletableUpTo(thread, 'a')).toBe(1);
+    expect(countMarkableUpTo(thread, 'b')).toBe(2);
+    expect(countMarkableUpTo(thread, 'c')).toBe(3);
+    expect(countMarkableUpTo(thread, 'a')).toBe(1);
   });
 
   /** Mirrors `idsUpTo`: the caller's own order must not change the answer. */
   it('does not depend on the order the caller holds the thread in', () => {
-    expect(countCompletableUpTo([...thread].reverse(), 'b')).toBe(2);
+    expect(countMarkableUpTo([...thread].reverse(), 'b')).toBe(2);
   });
 
   /** Completing something already complete changes nothing, so it must not be counted. */
@@ -31,7 +31,7 @@ describe('countCompletableUpTo', () => {
       m('a', '2026-09-17T09:00:00.000Z', { isCompleted: true }),
       m('b', '2026-09-17T09:05:00.000Z'),
     ];
-    expect(countCompletableUpTo(some, 'b')).toBe(1);
+    expect(countMarkableUpTo(some, 'b')).toBe(1);
   });
 
   /**
@@ -44,7 +44,7 @@ describe('countCompletableUpTo', () => {
       m('a', '2026-09-17T09:00:00.000Z', { isOwn: true }),
       m('b', '2026-09-17T09:05:00.000Z'),
     ];
-    expect(countCompletableUpTo(mixed, 'b')).toBe(1);
+    expect(countMarkableUpTo(mixed, 'b')).toBe(1);
   });
 
   it('is stable when several messages share a timestamp', () => {
@@ -53,11 +53,11 @@ describe('countCompletableUpTo', () => {
       m('w2', '2026-09-17T09:00:00.000Z'),
       m('w3', '2026-09-17T09:00:00.000Z'),
     ];
-    expect(countCompletableUpTo(burst, 'w2')).toBe(2);
+    expect(countMarkableUpTo(burst, 'w2')).toBe(2);
   });
 
   it('counts nothing for an anchor that is not in the thread', () => {
-    expect(countCompletableUpTo(thread, 'gone')).toBe(0);
-    expect(countCompletableUpTo([], 'a')).toBe(0);
+    expect(countMarkableUpTo(thread, 'gone')).toBe(0);
+    expect(countMarkableUpTo([], 'a')).toBe(0);
   });
 });

@@ -26,6 +26,7 @@ export function AttachRow({
   cloudLabel,
   accept,
   children,
+  disabledReason,
 }: {
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
@@ -44,6 +45,7 @@ export function AttachRow({
    * for internal messages, which keep every attachment on our own disk.
    */
   cloudLabel: string | null;
+  // (see `disabledReason` below)
   /**
    * The file picker's filter, e.g. `image/png,image/jpeg`.
    *
@@ -54,6 +56,15 @@ export function AttachRow({
   accept?: string;
   /** Form-specific warnings (forward's "not forwarded…", the body-budget notice). */
   children?: ReactNode;
+  /**
+   * Attaching is not possible RIGHT NOW, with the reason.
+   *
+   * ⚠️ Rendered disabled rather than not rendered at all, and that is the whole point of
+   * the prop. A control that is absent reads as a missing FEATURE — "there is no option of
+   * attaching" — while a control that is present and greyed with a reason reads as "not
+   * yet", which is the truth wherever this is used.
+   */
+  disabledReason?: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -76,10 +87,15 @@ export function AttachRow({
         size="sm"
         variant="outline"
         className="w-fit gap-1"
+        disabled={!!disabledReason}
+        title={disabledReason ?? undefined}
         onClick={() => inputRef.current?.click()}
       >
         <Paperclip size={14} /> Attach
       </Button>
+      {disabledReason && (
+        <p className="text-xs text-muted-foreground">{disabledReason}</p>
+      )}
       {notice && <p className="text-xs text-amber-600">{notice}</p>}
       {children}
       <AttachmentChips files={files} setFiles={setFiles} cloudLabel={cloudLabel} />

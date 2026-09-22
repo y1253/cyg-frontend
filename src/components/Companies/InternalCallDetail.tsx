@@ -156,7 +156,9 @@ export function InternalCallDetail({
                   : 'bg-green-100 text-green-700',
             ].join(' ')}
           >
-            <DirectionIcon size={20} />
+            {/* Bigger than the 20 it was, and matched to the rows: these glyphs are
+                distinguished only by which way a small arrow points. */}
+            <DirectionIcon size={24} strokeWidth={2.25} />
           </div>
           <div className="min-w-0">
             <p className="text-lg font-semibold truncate">{call.peer.name}</p>

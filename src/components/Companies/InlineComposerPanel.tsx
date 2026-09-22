@@ -7,6 +7,8 @@ import { RichTextEditor } from './RichTextEditor';
 import { AttachRow } from './AttachRow';
 import { FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import { PolishButton, PolishPanel } from './PolishPanel';
+import { DictateButton } from './DictateButton';
+import { escapeHtml } from './message-utils';
 import type { DraftPolish } from '@/hooks/useDraftPolish';
 import { useFileDrop } from '@/hooks/useFileDrop';
 
@@ -228,6 +230,12 @@ export function InlineComposerPanel({
           polish={polish}
           draftPlain={polishDraftPlain}
           context={polishContext}
+        />
+        {/* Appends a paragraph. `RichTextEditor` only writes `html` into the DOM while it
+            is UNFOCUSED, and clicking this is exactly that, so the caret is safe. */}
+        <DictateButton
+          disabled={isSending}
+          onText={(text) => onBodyChange(`${body}<div>${escapeHtml(text)}</div>`)}
         />
         <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel

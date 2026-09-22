@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { UntilAction } from '@/api/completeUntil';
 import {
   AlertCircle, ArrowLeft, Check, CheckCheck, CheckCircle2, Clock, MailOpen, MessageCircle,
   Mic, Phone, Printer, Reply, Send, X,
@@ -18,7 +19,6 @@ import {
 } from '@/api/whatsapp';
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
-import { useSendWhatsAppVoice } from '@/hooks/useSendWhatsAppVoice';
 import { useSendWhatsAppMedia } from '@/hooks/useSendWhatsAppMedia';
 import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
 import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
@@ -28,10 +28,16 @@ import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { mergeAttachments } from '../message-utils';
 import { escapeHtml, formatEmailDate, openPrintWindow } from '../message-utils';
-import { VoiceRecorder } from './VoiceRecorder';
+import { DictateButton } from '../DictateButton';
 import { TemplatePicker } from './TemplatePicker';
 import { makeIsFuture } from './thread-dim';
-import { countCompletableUpTo } from './complete-until';
+import { ANCHOR_RING } from './anchor-style';
+import { mergePending, type PendingMeta } from './pending-sends';
+import { usePendingSends } from '@/hooks/usePendingSends';
+import { useTranslation } from '@/hooks/useTranslation';
+import { TranslateControl } from './TranslatePanel';
+import { VoiceTranscript } from './VoiceTranscript';
+import { countMarkableUpTo } from './complete-until';
 import type { CompleteTarget, ItemKind } from './types';
 
 /**
@@ -51,7 +57,7 @@ export function WhatsAppThreadView({
   anchorMsgId,
   anchorTime,
   isCompleted,
-  onCompleteUntil,
+  onMarkUntil,
   active,
   onClose,
   onCall,
@@ -74,11 +80,14 @@ export function WhatsAppThreadView({
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: ItemKind, id: string) => void;
   /** "Complete till here" — the anchor's id and how many messages that covers. */
-  onCompleteUntil: (messageId: number, count: number) => void;
+  onMarkUntil: (
+    messageId: number,
+    count: number,
+    action: UntilAction,
+  ) => void;
 }) {
   const { data, isLoading } = useWhatsAppThread(companyId, peer, active);
   const sendText = useSendWhatsApp(companyId);
-  const sendVoice = useSendWhatsAppVoice(companyId);
   const sendFile = useSendWhatsAppMedia(companyId);
   const markUnread = useMarkWhatsAppItem(companyId, 'unread');
 
@@ -98,7 +107,62 @@ export function WhatsAppThreadView({
   const anchorRef = useRef<HTMLDivElement>(null);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
-  const messages: WhatsAppItem[] = data?.messages ?? [];
+  const serverMessages: WhatsAppItem[] = data?.messages ?? [];
+  const sends = usePendingSends<WhatsAppItem>();
+  const translation = useTranslation();
+  /** The server's rows plus whatever this browser is still uploading. */
+  const messages = mergePending(
+    serverMessages,
+    sends.pending.map((p) => p.row),
+  ) as (WhatsAppItem & Partial<PendingMeta>)[];
+
+  /**
+   * Show the message immediately, then send it.
+   *
+   * ⚠️ `messageId` is a NEGATIVE sentinel. The quote map and the till-here anchor both key
+   * off it, and a pending row has no server id yet — a positive one could collide with a
+   * real row, and zero is a plausible id. Negative cannot be either, and every action is
+   * guarded on `isPendingId` anyway.
+   */
+  const addPending = (
+    body: string | null,
+    files: File[],
+    over: Partial<WhatsAppItem> = {},
+  ) =>
+    sends.add(
+      (pendingId, previews) => ({
+        id: pendingId,
+        messageId: -Date.now(),
+        kind: 'whatsapp' as const,
+        direction: 'outbound' as const,
+        peer,
+        peerName: null,
+        type: (files.length ? 'document' : 'text') as WhatsAppItem['type'],
+        body,
+        isVoice: false,
+        durationSec: null,
+        hasMedia: files.length > 0,
+        mediaStatus: null,
+        mimeType: files[0]?.type ?? null,
+        filename: files[0]?.name ?? null,
+        size: files[0]?.size ?? null,
+        // No ticks until Meta says something — `DeliveryTicks` already renders null as
+        // nothing, so a pending bubble simply has no tick rather than a wrong one.
+        status: null,
+        errorCode: null,
+        replyToMessageId: null,
+        at: new Date().toISOString(),
+        // Outbound is written read and complete at creation server-side; matching that
+        // here keeps the optimistic row from flickering when the real one replaces it.
+        isRead: true,
+        isCompleted: true,
+        pending: true as const,
+        sendState: 'sending' as const,
+        previews,
+        ...over,
+      }),
+      files,
+    );
   const peerName = data?.peerName ?? null;
   const title = peerName || formatWhatsAppNumber(peer);
   // Your own replies stay bright until the customer writes again — see `thread-dim.ts`.
@@ -187,15 +251,24 @@ export function WhatsAppThreadView({
   const handleSendFile = () => {
     if (!file) return;
     const caption = captionAllowed ? draft.trim() : '';
+    const id = addPending(caption || null, [file], {
+      replyToMessageId: quoted?.messageId ?? null,
+    });
+    setDraft('');
+    setAttached([]);
+    setAttachNotice(null);
+    setQuotePick(undefined);
     sendFile.mutate(
       { to: peer, file, caption, replyToMessageId: quoted?.messageId },
       {
-        onSuccess: () => {
-          setDraft('');
-          setAttached([]);
-          setAttachNotice(null);
-          setQuotePick(undefined);
-        },
+        onSuccess: () => sends.drop(id),
+        onError: (err: unknown) =>
+          sends.fail(
+            id,
+            err instanceof Error && err.message
+              ? err.message
+              : 'The message could not be sent.',
+          ),
       },
     );
   };
@@ -203,15 +276,25 @@ export function WhatsAppThreadView({
   const handleSend = () => {
     const body = draft.trim();
     if (!body) return;
+    const id = addPending(body, [], {
+      type: 'text',
+      replyToMessageId: quoted?.messageId ?? null,
+    });
+    setDraft('');
+    setQuotePick(undefined);
     sendText.mutate(
       // Unlike SMS this is a NATIVE quote: the id goes on the wire and Meta renders the
       // quoted bubble in the customer's own WhatsApp. Nothing is prepended to the text.
       { to: peer, body, replyToMessageId: quoted?.messageId },
       {
-        onSuccess: () => {
-          setDraft('');
-          setQuotePick(undefined);
-        },
+        onSuccess: () => sends.drop(id),
+        onError: (err: unknown) =>
+          sends.fail(
+            id,
+            err instanceof Error && err.message
+              ? err.message
+              : 'The message could not be sent.',
+          ),
       },
     );
   };
@@ -234,9 +317,7 @@ export function WhatsAppThreadView({
     );
   };
 
-  const sendError = (sendText.error ??
-    sendVoice.error ??
-    sendFile.error) as Error | null;
+  const sendError = (sendText.error ?? sendFile.error) as Error | null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -315,22 +396,51 @@ export function WhatsAppThreadView({
             {messages.map((m) => (
               <WhatsAppBubble
                 key={m.id}
+                companyId={companyId}
                 onReply={() => setQuotePick(m)}
                 onCompleteUntil={() =>
-                  onCompleteUntil(
-                    // The numeric row id — what the server's keyset cut is keyed on.
-                    Number(m.id),
+                  onMarkUntil(
+                    // ⚠️ `m.messageId`, NOT `Number(m.id)`.
+                    //
+                    // `m.id` is the NAMESPACED id, `"wa:42"` — so `Number()` gave `NaN`,
+                    // which `JSON.stringify` writes as `null`, which the DTO's `@IsInt()`
+                    // rejected with a 400. The mutation had no `onError`, so the failure
+                    // was swallowed whole: the dialog showed a correct count (that path
+                    // compares strings and matched), the thread closed on the way out,
+                    // and nothing was marked. The server's keyset cut wants the numeric
+                    // row id, which the DTO carries separately for exactly this reason.
+                    m.messageId,
                     // `isOwn` on outbound: WhatsApp's `setState` refuses to change an
                     // outbound row, so counting it would overstate what happens.
-                    countCompletableUpTo(
+                    countMarkableUpTo(
                       messages.map((x) => ({
                         id: String(x.id),
                         at: x.at,
                         isCompleted: x.isCompleted,
+                        isRead: x.isRead,
                         isOwn: x.direction === 'outbound',
                       })),
                       String(m.id),
+                      'isCompleted',
                     ),
+                    'complete',
+                  )
+                }
+                onReadUntil={() =>
+                  onMarkUntil(
+                    m.messageId,
+                    countMarkableUpTo(
+                      messages.map((x) => ({
+                        id: String(x.id),
+                        at: x.at,
+                        isCompleted: x.isCompleted,
+                        isRead: x.isRead,
+                        isOwn: x.direction === 'outbound',
+                      })),
+                      String(m.id),
+                      'isRead',
+                    ),
+                    'read',
                   )
                 }
                 quotedOf={quotedOf}
@@ -338,6 +448,26 @@ export function WhatsAppThreadView({
                 token={token}
                 dimmed={isFuture(m)}
                 anchorRef={m.id === anchorMsgId ? anchorRef : undefined}
+                isAnchor={m.id === anchorMsgId}
+                pending={
+                  m.pending ? (m as WhatsAppItem & PendingMeta) : undefined
+                }
+                translation={translation}
+                onRetry={() => {
+                  const held = sends.pending.find((p) => p.row.id === m.id);
+                  if (!held) return;
+                  sends.drop(m.id);
+                  if (held.files.length) {
+                    sendFile.mutate({
+                      to: peer,
+                      file: held.files[0],
+                      caption: held.row.body ?? '',
+                    });
+                  } else {
+                    sendText.mutate({ to: peer, body: held.row.body ?? '' });
+                  }
+                }}
+                onDiscard={() => sends.drop(m.id)}
               />
             ))}
           </div>
@@ -494,19 +624,20 @@ export function WhatsAppThreadView({
                 )}
               </span>
               <div className="flex items-start gap-2">
-                {/* The recorder is for when there is nothing else to send — it is a
-                    third way to fill the same message, so it hides as soon as either
-                    of the other two is in play. */}
-                {!draft.trim() && !file && (
-                  <VoiceRecorder
-                    disabled={!canReply}
-                    sending={sendVoice.isPending}
-                    uploadProgress={sendVoice.uploadProgress}
-                    onSend={(recording, filename) =>
-                      sendVoice.mutateAsync({ to: peer, recording, filename })
-                    }
-                  />
-                )}
+                {/* The microphone now produces TEXT, not a voice note.
+
+                    Sending a recording to a client was removed deliberately: it put the
+                    firm's voice in the client's WhatsApp with no record of what was said
+                    that anybody could search, read back or check. Dictation keeps the
+                    convenience — speak instead of type — while what actually leaves is a
+                    message like any other. Inbound voice notes are untouched and still
+                    arrive and play. */}
+                <DictateButton
+                  disabled={!canReply}
+                  onText={(text) =>
+                    setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text))
+                  }
+                />
                 {file && (
                   <Button
                     size="sm"
@@ -573,7 +704,15 @@ function MediaUnavailable({ message: m }: { message: WhatsAppItem }) {
   );
 }
 
-function BubbleContent({ message: m, token }: { message: WhatsAppItem; token: string | null }) {
+function BubbleContent({
+  message: m,
+  token,
+  companyId,
+}: {
+  message: WhatsAppItem;
+  token: string | null;
+  companyId: number;
+}) {
   const ready = m.mediaStatus === 'ready' && !!token;
   const caption = m.body ? <span className="whitespace-pre-wrap break-words">{m.body}</span> : null;
 
@@ -593,6 +732,7 @@ function BubbleContent({ message: m, token }: { message: WhatsAppItem; token: st
             src={whatsappMediaUrl(token, m.messageId, { playback: true })}
             className="h-9 w-full"
           />
+          <VoiceTranscript companyId={companyId} message={m} />
         </div>
       ) : (
         <MediaUnavailable message={m} />
@@ -662,25 +802,45 @@ function whatsappBubblePreview(m: WhatsAppItem): string {
 function WhatsAppBubble({
   message: m,
   token,
+  companyId,
   dimmed,
   anchorRef,
+  isAnchor,
+  pending,
+  onRetry,
+  onDiscard,
+  translation,
   onReply,
   onCompleteUntil,
+  onReadUntil,
   quotedOf,
 }: {
   message: WhatsAppItem;
   token: string | null;
+  companyId: number;
   dimmed: boolean;
   anchorRef?: React.Ref<HTMLDivElement>;
+  /** THE message the reader opened. See `ANCHOR_RING`. */
+  isAnchor?: boolean;
+  /**
+   * Set while THIS browser is still uploading the message. A failed send keeps its
+   * bubble rather than vanishing — see `PendingMeta`.
+   */
+  pending?: PendingMeta;
+  onRetry: () => void;
+  onDiscard: () => void;
+  translation: ReturnType<typeof useTranslation>;
   /** Quote this message in the composer. */
   onReply: () => void;
   /** Complete this message and everything above it. */
   onCompleteUntil: () => void;
+  onReadUntil: () => void;
   /** Resolve `replyToMessageId` against the loaded thread. */
   quotedOf: (m: WhatsAppItem) => WhatsAppItem | null;
 }) {
   const own = m.direction === 'outbound';
   const quoted = quotedOf(m);
+  const failed = pending?.sendState === 'failed';
   return (
     <div
       ref={anchorRef}
@@ -688,6 +848,9 @@ function WhatsAppBubble({
         'flex flex-col gap-1 transition-opacity',
         own ? 'items-end' : 'items-start',
         dimmed ? 'opacity-50' : '',
+        // Sending is dimmed; FAILED is not — a failure must be more visible than the
+        // messages around it, not less.
+        pending && !failed ? 'opacity-70' : '',
       ].join(' ')}
     >
       {/* The bubble and its hover action share a row — `ChatBubble`'s shape. Reversed for
@@ -701,6 +864,7 @@ function WhatsAppBubble({
         <div
           className={[
             'min-w-0 rounded-2xl px-3 py-2 text-sm',
+          isAnchor ? ANCHOR_RING : '',
             own ? 'bg-emerald-100 text-emerald-950' : 'bg-muted text-foreground',
           ].join(' ')}
         >
@@ -723,30 +887,110 @@ function WhatsAppBubble({
               )}
             </div>
           )}
-          <BubbleContent message={m} token={token} />
+          {/* A message still uploading has no server media to fetch, so it renders from
+              the local file — the picture is on screen the instant Send is pressed. */}
+          {pending?.previews.map((url) => (
+            <img
+              key={url}
+              src={url}
+              alt=""
+              className="mb-1 max-h-48 w-auto rounded-lg object-contain"
+            />
+          ))}
+          {pending ? (
+            <span className="whitespace-pre-wrap break-words">
+              {m.body || (m.filename ?? '')}
+            </span>
+          ) : (
+            <BubbleContent message={m} token={token} companyId={companyId} />
+          )}
         </div>
-        <button
-          type="button"
-          title="Reply to this message"
-          aria-label="Reply to this message"
-          onClick={onReply}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
-        >
-          <Reply size={13} />
-        </button>
-        <button
-          type="button"
-          title="Mark everything up to here complete"
-          aria-label="Mark everything up to here complete"
-          onClick={onCompleteUntil}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
-        >
-          <CheckCheck size={13} />
-        </button>
+        {/* ⚠️ Hidden while pending: none of these can act on a row the server has never
+            seen — reply needs a real `messageId`, and the two till-here actions would
+            post an id no route can resolve. */}
+        {!pending && (
+          <button
+            type="button"
+            title="Reply to this message"
+            aria-label="Reply to this message"
+            onClick={onReply}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <Reply size={13} />
+          </button>
+        )}
+        {!pending && (
+          <button
+            type="button"
+            title="Mark everything up to here read"
+            aria-label="Mark everything up to here read"
+            onClick={onReadUntil}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <MailOpen size={13} />
+          </button>
+        )}
+        {!pending && (
+          <button
+            type="button"
+            title="Mark everything up to here complete"
+            aria-label="Mark everything up to here complete"
+            onClick={onCompleteUntil}
+            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-blue-700 focus-visible:opacity-100 group-hover/msg:opacity-100"
+          >
+            <CheckCheck size={13} />
+          </button>
+        )}
       </div>
+      {/* Offered on messages the CUSTOMER wrote — ours are already in the language we
+          chose. A voice note's `body` is null until it is transcribed, and the control
+          hides itself when there is no text, so the two features compose without either
+          knowing about the other. */}
+      {!own && !pending && (
+        <TranslateControl
+          id={m.id}
+          text={m.body ?? ''}
+          translation={translation.textFor(m.id)}
+          busy={translation.isBusy(m.id)}
+          error={translation.errorFor(m.id)}
+          shown={translation.isShown(m.id)}
+          onToggle={(id, text) => void translation.toggle(id, text)}
+        />
+      )}
       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-        {formatEmailDate(m.at)}
-        <DeliveryTicks message={m} />
+        {pending ? (
+          failed ? (
+            <>
+              <span className="font-medium text-destructive">
+                Not sent{pending.error ? ` — ${pending.error}` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="font-medium text-emerald-700 underline-offset-2 hover:underline"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={onDiscard}
+                className="text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Discard
+              </button>
+            </>
+          ) : (
+            <>
+              <Clock size={10} className="shrink-0" />
+              Sending…
+            </>
+          )
+        ) : (
+          <>
+            {formatEmailDate(m.at)}
+            <DeliveryTicks message={m} />
+          </>
+        )}
       </span>
     </div>
   );

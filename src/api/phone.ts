@@ -299,6 +299,13 @@ export interface CallItem extends PhoneItemBase {
   hasVoicemail: boolean;
   /** The leg this is a child of. An outbound call's recording lives on its parent. */
   parentCallSid: string | null;
+  /**
+   * The AI one-liner, for the row itself — so a call can be triaged without opening it.
+   *
+   * Null until the summary worker gets to it (minutes after the call), and always null
+   * when PHONE_SUMMARIZE_CALLS is off, so every consumer has to render without it.
+   */
+  summaryLine?: string | null;
 }
 
 /**
@@ -413,7 +420,12 @@ export interface CallRecording {
  */
 export interface CallSummary {
   status: 'pending' | 'ready' | 'skipped' | 'failed';
+  /** The brief summary: 2-4 sentences. */
   summary: string | null;
+  /** One line, the same text the inbox row shows. */
+  shortSummary: string | null;
+  /** What was actually said, verbatim. Only ever present on a READY summary. */
+  transcript: string | null;
   reason: string | null;
   generatedAt: string | null;
 }
@@ -794,6 +806,41 @@ export async function declineCall(
  * a slow or failing provider must not keep them connected while we wait. A failure
  * degrades to exactly the old behaviour, which is why this resolves rather than throws.
  */
+/**
+ * Hang up while the page is going away — a refresh, a close, a navigation.
+ *
+ * ⚠️ `keepalive`, and that is the entire reason this exists beside `hangUpCall`. A normal
+ * `fetch` is CANCELLED when the document unloads, so the ordinary hang-up issued from a
+ * `pagehide` handler never reaches the server. `keepalive` lets the request outlive the
+ * page (capped at 64 KB, which this is nowhere near).
+ *
+ * `navigator.sendBeacon` would also survive, but it cannot set an `Authorization` header
+ * and this route is JWT-guarded — so a beacon would need the token on the query string,
+ * putting a credential in the access logs for no gain.
+ *
+ * No `await` is possible or wanted: by the time this returns the page is gone.
+ */
+export function hangUpCallOnUnload(
+  token: string,
+  companyId: number,
+  callSid: string,
+): void {
+  try {
+    void fetch(
+      `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(
+        callSid,
+      )}/hangup`,
+      {
+        method: 'POST',
+        headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
+        keepalive: true,
+      },
+    ).catch(() => undefined);
+  } catch {
+    // A page mid-unload is the one place a throw here would be invisible anyway.
+  }
+}
+
 export async function hangUpCall(
   token: string,
   companyId: number,
@@ -887,19 +934,43 @@ export async function fetchTransferStatus(
   return res.json() as Promise<TransferStatus>;
 }
 
+export interface Presence {
+  /** Reachable right now: an open event stream, or a recent heartbeat. */
+  userIds: number[];
+  /** On a call right now. Heartbeat-only — the server is never told who answered. */
+  busyUserIds: number[];
+}
+
 /**
- * Which colleagues have a live event stream open.
+ * Which colleagues are reachable, and which are on a call.
  *
- * ⚠️ ADVISORY ONLY — see the route's own warning. SSE is blackholed by the office TLS
- * proxy, so a perfectly reachable colleague can report offline. Render it, never gate on
- * it.
+ * ⚠️ ADVISORY ONLY — see the route's own warning. It is better than it was (a posted
+ * heartbeat gets through the office TLS proxy where SSE does not), which makes it MORE
+ * tempting to trust: a colleague with the app closed is simply absent, and looks exactly
+ * like one whose heartbeat is a second late. Render it, never gate on it.
  */
-export async function fetchPresence(
-  token: string,
-): Promise<{ userIds: number[] }> {
+export async function fetchPresence(token: string): Promise<Presence> {
   const res = await fetchWithAuth(token, `${API}/phone/presence`);
   if (!res.ok) throw await failure(res, 'Failed to load who is available');
-  return res.json() as Promise<{ userIds: number[] }>;
+  return res.json() as Promise<Presence>;
+}
+
+/**
+ * "I am here, and this is whether I am on a call."
+ *
+ * Deliberately silent on failure: a missed beat means this user looks offline in a
+ * picker for 45 seconds, which must never surface as an error toast over whatever they
+ * were actually doing.
+ */
+export async function postPresence(
+  token: string,
+  busy: boolean,
+): Promise<void> {
+  await fetchWithAuth(token, `${API}/phone/presence`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ busy }),
+  }).catch(() => undefined);
 }
 
 // ─── Conference: add call, hold, swap, merge, drop ───────────────────────────
@@ -1062,4 +1133,35 @@ export async function fetchConferenceStatus(
   );
   if (!res.ok) throw await failure(res, 'Could not check the call');
   return res.json() as Promise<ConferenceStatus>;
+}
+
+/**
+ * Decline a ringing call and text the caller back, in one server action.
+ *
+ * ⚠️ The INDEX of one of the company's configured quick replies, never free text. A route
+ * that took a body would be an "send any SMS from any company's number" primitive
+ * reachable from a ringing call.
+ *
+ * Throws, like `declineCall`: if the text cannot be sent the call is deliberately left
+ * ringing, so the agent can still answer it — and they need to be told why.
+ */
+export async function declineWithText(
+  token: string,
+  companyId: number,
+  callSid: string,
+  index: number,
+): Promise<{ voicemail: boolean; texted: boolean }> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/phone/companies/${companyId}/calls/${encodeURIComponent(
+      callSid,
+    )}/decline-with-text`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ index }),
+    },
+  );
+  if (!res.ok) throw await failure(res, 'Could not send that reply');
+  return res.json() as Promise<{ voicemail: boolean; texted: boolean }>;
 }

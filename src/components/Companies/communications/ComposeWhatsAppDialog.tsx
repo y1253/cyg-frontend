@@ -14,6 +14,7 @@ import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { WHATSAPP_CAPTION_LIMIT, fileAcceptsCaption } from '@/api/whatsapp';
 import { AttachRow } from '../AttachRow';
+import { DictateButton } from '../DictateButton';
 import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
 import { mergeAttachments } from '../message-utils';
 import { formatE164, toE164 } from '@/lib/phone';
@@ -196,12 +197,40 @@ export function ComposeWhatsAppDialog({
             />
           </div>
 
+          {/* ⚠️ The attach control is shown in EVERY state, disabled with its reason in
+              the three where a file cannot be sent. It used to be rendered only inside
+              the `windowOpen` branch, which is correct about what WhatsApp accepts and
+              wrong about what it communicates: before a number is typed, while the lookup
+              settles, and outside the 24-hour window, there was simply no paperclip — so
+              it read as "this dialog cannot attach files" rather than "not yet". */}
           {!peer ? (
-            <p className="text-xs text-muted-foreground">
-              Enter a number to see what you can send it.
-            </p>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                Enter a number to see what you can send it.
+              </p>
+              <AttachRow
+                files={[]}
+                setFiles={setAttached}
+                onPick={addFiles}
+                notice={null}
+                cloudLabel={null}
+                disabledReason="Enter the client's number first."
+              />
+            </div>
           ) : checking ? (
-            <p className="text-xs text-muted-foreground">Checking this number…</p>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                Checking this number…
+              </p>
+              <AttachRow
+                files={[]}
+                setFiles={setAttached}
+                onPick={addFiles}
+                notice={null}
+                cloudLabel={null}
+                disabledReason="Checking whether this number can receive a file…"
+              />
+            </div>
           ) : windowOpen ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="wa-body">Message</Label>
@@ -249,6 +278,14 @@ export function ComposeWhatsAppDialog({
                 enabled={open}
                 onChange={handlePicked}
               />
+              <AttachRow
+                files={[]}
+                setFiles={setAttached}
+                onPick={addFiles}
+                notice={null}
+                cloudLabel={null}
+                disabledReason="A template cannot carry a file. Once they reply, you can send one for 24 hours."
+              />
             </div>
           )}
 
@@ -256,7 +293,20 @@ export function ComposeWhatsAppDialog({
             <p className="text-xs text-destructive">{error ?? sendError}</p>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center justify-end gap-2">
+            {/* Only inside the 24-hour window: outside it the only thing that can be sent
+                is a template, whose wording is fixed by Meta. */}
+            {windowOpen && (
+              <>
+                <DictateButton
+                  disabled={pending}
+                  onText={(text) =>
+                    setBody((b) => (b.trim() ? `${b.trim()} ${text}` : text))
+                  }
+                />
+                <span className="flex-1" />
+              </>
+            )}
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>

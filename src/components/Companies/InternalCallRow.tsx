@@ -168,9 +168,14 @@ export function InternalCallRow({
               // at — did not, so the one action a call log exists to prompt meant a click
               // into the call and a wait for it to load.
               //
-              // ⚠️ `opacity-0 … group-hover:opacity-100 focus-within:opacity-100`, NEVER
-              // `hidden`: `hidden` takes the button out of the tab order, which is the
-              // regression `NotificationPanel` documents on exactly this pattern.
+              // ⚠️ PERMANENTLY VISIBLE, not hover-revealed. It used to be `opacity-0`
+              // until `group-hover`, which meant the one action a call log exists to
+              // prompt was invisible at a glance and unreachable entirely on a touch
+              // screen, where there is no hover at all. The company inbox's own
+              // `CallBackButton` sits in the row body for the same reason.
+              //
+              // Still never `hidden` when disabled: `hidden` takes it out of the tab
+              // order, which is the regression `NotificationPanel` documents.
               <button
                 type="button"
                 title={callBlockedReason ?? `Call ${call.peer.name} back`}
@@ -180,9 +185,9 @@ export function InternalCallRow({
                   e.stopPropagation();
                   onCallBack();
                 }}
-                className="flex items-center justify-center w-5 h-5 rounded-full text-green-700 opacity-0 transition-opacity hover:bg-green-100 focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+                className="flex items-center justify-center w-6 h-6 rounded-full text-green-700 transition-colors hover:bg-green-100 disabled:cursor-not-allowed disabled:text-muted-foreground/40"
               >
-                <PhoneOutgoing size={13} />
+                <PhoneOutgoing size={14} />
               </button>
             )}
             <Badge
@@ -208,8 +213,12 @@ export function InternalCallRow({
             unread ? 'font-semibold' : 'text-foreground/80',
           ].join(' ')}
         >
+          {/* ⚠️ 15px with a heavier stroke. These glyphs differ only in which way a small
+              arrow points, and at 13px hairline that was not legible at a glance — the
+              one job the icon has on a row that says the rest in words. */}
           <Icon
-            size={13}
+            size={15}
+            strokeWidth={2.25}
             className={
               alarming
                 ? 'text-red-600'
@@ -221,6 +230,15 @@ export function InternalCallRow({
           />
           <span className="truncate">
             {own ? 'Outgoing call' : 'Incoming call'} · {duration(call.durationSec)}
+            {/* The AI one-liner, on the SAME line: this row is a fixed-height scanning
+                surface, and a summary that arrives minutes later must not reflow the
+                list under somebody's cursor. */}
+            {call.summaryLine ? (
+              <span className="font-normal text-muted-foreground">
+                {' · '}
+                {call.summaryLine}
+              </span>
+            ) : null}
           </span>
         </span>
 

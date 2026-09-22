@@ -246,9 +246,11 @@ function AppShell() {
           <Badge variant="secondary" className="hidden text-xs md:inline-flex">
             {user?.role}
           </Badge>
-          <span className="hidden md:inline-flex">
-            <SoftphoneStatus />
-          </span>
+          {/* ⚠️ No longer hidden below `md`. It was a status pill, which a phone could
+              afford to drop; it is now also the colleague dialer, and hiding the only
+              way to place a staff call on the device most likely to be placing one is
+              the wrong trade. It sheds its own text below `sm` instead. */}
+          <SoftphoneStatus />
           {/* Everything below `lg`: a phone has no room to centre anything, and a
               tablet's centre is already occupied (see above). */}
           <span className="lg:hidden">

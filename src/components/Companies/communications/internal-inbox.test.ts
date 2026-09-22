@@ -50,6 +50,7 @@ function call(over: Partial<InternalCall> = {}): InternalItem {
       isRead: false,
       isCompleted: false,
       hasRecording: false,
+      summaryLine: null,
       ...over,
     },
   };

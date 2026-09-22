@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useInboxSummary } from '@/hooks/useInboxSummary';
-import { FAVICON_HREF, badgeLabel, drawBadgedFavicon } from '@/lib/tab-badge';
+import { badgeLabel, resetTabBadge, setMissedBadge } from '@/lib/tab-badge';
 
 /**
  * Puts the number of unread missed calls on the browser tab's icon while the user is
@@ -39,65 +39,18 @@ export function useTabMissedCallBadge() {
   // Signed out means no badge, even if a stale summary is still in the query cache.
   const label = token && away ? badgeLabel(missedCallsOwn) : null;
 
+  // Declare the state; `tab-badge` owns the element and resolves it against a ringing
+  // call, which outranks this. Writing `link.href` from here directly — as this used to —
+  // would fight the ring flash, and whichever wrote last would win.
   useEffect(() => {
-    const link = faviconLink();
-    if (!link) return;
-    if (!label) {
-      link.href = FAVICON_HREF;
-      return;
-    }
-    let cancelled = false;
-    void badgedUrl(label).then((url) => {
-      if (!cancelled && url) link.href = url;
-    });
-    return () => {
-      cancelled = true;
-    };
+    setMissedBadge(label);
   }, [label]);
 
   // Leaving the app shell (sign-out unmounts it) must not strand a badge on the tab.
-  useEffect(
-    () => () => {
-      const link = faviconLink();
-      if (link) link.href = FAVICON_HREF;
-    },
-    [],
-  );
+  useEffect(() => () => resetTabBadge(), []);
 }
 
 function isAway(): boolean {
   if (typeof document === 'undefined') return false;
   return document.hidden || !document.hasFocus();
-}
-
-function faviconLink(): HTMLLinkElement | null {
-  return document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-}
-
-// Module-level: the logo is decoded once, and each label is drawn once, however many
-// times the 60s poll hands back the same number.
-let logo: Promise<HTMLImageElement | null> | null = null;
-const rendered = new Map<string, string>();
-
-function loadLogo(): Promise<HTMLImageElement | null> {
-  logo ??= new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => {
-      logo = null; // let a later attempt retry rather than caching the failure
-      resolve(null);
-    };
-    img.src = FAVICON_HREF;
-  });
-  return logo;
-}
-
-async function badgedUrl(label: string): Promise<string | null> {
-  const cached = rendered.get(label);
-  if (cached) return cached;
-  const img = await loadLogo();
-  if (!img) return null;
-  const url = drawBadgedFavicon(img, label);
-  if (url) rendered.set(label, url);
-  return url;
 }

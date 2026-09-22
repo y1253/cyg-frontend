@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DictateButton } from '../DictateButton';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -153,7 +154,14 @@ export function ComposeSmsDialog({
               {error ?? (sendMutation.error as Error)?.message ?? 'Failed to send'}
             </p>
           )}
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center justify-end gap-2">
+            <DictateButton
+              disabled={sendMutation.isPending}
+              onText={(text) =>
+                setBody((b) => (b.trim() ? `${b.trim()} ${text}` : text))
+              }
+            />
+            <span className="flex-1" />
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>

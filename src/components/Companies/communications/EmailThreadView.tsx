@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { UntilAction } from '@/api/completeUntil';
 import { ArrowLeft, CheckCircle2, Forward, MailOpen, Printer, Reply, ReplyAll } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EmailDetail, GmailAccount } from '@/api/gmail';
@@ -24,7 +25,9 @@ import {
   wrapBodyFont,
 } from '../message-utils';
 import { ThreadMessage } from './ThreadMessage';
-import { countCompletableUpTo } from './complete-until';
+import { countMarkableUpTo } from './complete-until';
+import { TranslateControl } from './TranslatePanel';
+import { useTranslation } from '@/hooks/useTranslation';
 import { buildEmailThreadPrintHtml } from './print-html';
 import { FORWARD_BODY_BUDGET, useForwardDraft } from './useForwardDraft';
 import { useProviderDraft } from '@/hooks/useProviderDraft';
@@ -47,7 +50,7 @@ type ReplyForm = { to: string[]; subject: string; body: string; cc: string[]; bc
  * remount and destroy the scroll offset and the expand bookkeeping.
  */
 export function EmailThreadView({
-  onCompleteUntil,
+  onMarkUntil,
   companyId,
   token,
   account,
@@ -85,7 +88,11 @@ export function EmailThreadView({
   onRequestComplete: (target: CompleteTarget) => void;
   onUncomplete: (kind: 'email' | 'chat', id: string) => void;
   /** "Complete till here" — the anchor's id and how many messages that covers. */
-  onCompleteUntil: (messageId: string, count: number) => void;
+  onMarkUntil: (
+    messageId: string,
+    count: number,
+    action: UntilAction,
+  ) => void;
 }) {
   // Ids of the thread messages currently expanded (Gmail-style: older replies
   // collapsed, latest expanded). Click a message header to toggle.
@@ -234,6 +241,7 @@ export function EmailThreadView({
   // opened id isn't in the loaded thread (still loading, or a provider quirk):
   // then nothing dims, but the reply target still resolves to the opened message
   // via `emailDetail` below — it must never drift to a newer one.
+  const translation = useTranslation();
   const anchorIdx = threadEmails.findIndex((m) => m.id === selectedMsgId);
   // Which message to expand before the init effect below has run, so the pane is
   // never all-collapsed — the anchor when we have one, else the newest.
@@ -674,15 +682,51 @@ export function EmailThreadView({
                     hasOthersToReplyTo(m) ? handleNavigateToEmailMessageReplyAll : undefined
                   }
                   onForwardThis={handleNavigateToEmailMessageForward}
+                  translate={
+                    <TranslateControl
+                      id={m.id}
+                      // The plain-text body, not the HTML: the model is being asked to
+                      // translate what was written, and markup would come back as
+                      // markup. Falls back to stripping the HTML when a message has no
+                      // text part, which some senders omit.
+                      text={m.bodyText ?? htmlToText(m.bodyHtml ?? '')}
+                      translation={translation.textFor(m.id)}
+                      busy={translation.isBusy(m.id)}
+                      error={translation.errorFor(m.id)}
+                      shown={translation.isShown(m.id)}
+                      onToggle={(id, text) => void translation.toggle(id, text)}
+                    />
+                  }
                   onCompleteUntil={(msg) =>
-                    onCompleteUntil(
+                    onMarkUntil(
                       msg.id,
                       // An email you SENT is completable — the shared table has no
                       // direction — so nothing is marked `isOwn`.
-                      countCompletableUpTo(
-                        threadEmails.map((x) => ({ id: x.id, at: x.date })),
+                      countMarkableUpTo(
+                        threadEmails.map((x) => ({
+                          id: x.id,
+                          at: x.date,
+                          isRead: x.isRead,
+                        })),
                         msg.id,
+                        'isCompleted',
                       ),
+                      'complete',
+                    )
+                  }
+                  onReadUntil={(msg) =>
+                    onMarkUntil(
+                      msg.id,
+                      countMarkableUpTo(
+                        threadEmails.map((x) => ({
+                          id: x.id,
+                          at: x.date,
+                          isRead: x.isRead,
+                        })),
+                        msg.id,
+                        'isRead',
+                      ),
+                      'read',
                     )
                   }
                 />

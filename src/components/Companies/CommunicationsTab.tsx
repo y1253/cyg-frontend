@@ -57,8 +57,11 @@ import { CommsHeader } from './communications/CommsHeader';
 import { ContactsPanel } from './communications/ContactsPanel';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { readIdForSelection } from '@/components/Layout/unread-feed';
-import { useCompleteUntil } from '@/hooks/useCompleteUntil';
-import type { CompleteUntilTarget } from '@/api/completeUntil';
+import { useMarkUntil } from '@/hooks/useMarkUntil';
+import type {
+  CompleteUntilTarget,
+  UntilAction,
+} from '@/api/completeUntil';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { showListSpinner } from './communications/inbox-loading';
@@ -429,7 +432,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     starting: startCallMutation.isPending,
   });
   const showActive =
-    shouldShowActiveBanner(activeCall, localCall, companyId) &&
+    shouldShowActiveBanner(activeCall, localCall, companyId, hasHeldInvite) &&
     // An admin offered Answer for a ring does not also need "a call is ringing".
     !(showRinging && ringingCall?.callSid === activeCall?.callSid);
 
@@ -962,17 +965,21 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
    * word its dialog. Two small states beat one that means two things.
    */
   const [untilTarget, setUntilTarget] = useState<
-    { target: CompleteUntilTarget; count: number } | null
+    { target: CompleteUntilTarget; count: number; action: UntilAction } | null
   >(null);
-  const completeUntil = useCompleteUntil();
+  const completeUntil = useMarkUntil('complete');
+  const readUntil = useMarkUntil('read');
 
   const confirmUntil = () => {
     if (!untilTarget) return;
-    completeUntil.mutate(untilTarget.target);
+    const { target, action } = untilTarget;
+    (action === 'read' ? readUntil : completeUntil).mutate(target);
     setUntilTarget(null);
-    // Back to the inbox, matching `confirmComplete`: the thread the person was reading
-    // has just been cleared behind them.
-    closeDetail();
+    // ⚠️ Only COMPLETING sends the reader back to the inbox. Completing clears the thread
+    // off the worklist, so staying in it is staying somewhere that no longer belongs
+    // there; marking read changes nothing about whether the conversation is still open
+    // work, and closing it would throw away the reader's place for no reason.
+    if (action === 'complete') closeDetail();
   };
 
   const confirmComplete = () => {
@@ -1038,12 +1045,22 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         onOpenChange={(open) => { if (!open) setUntilTarget(null); }}
         onConfirm={confirmUntil}
         title={
-          untilTarget && untilTarget.count > 1
-            ? `Mark ${untilTarget.count} messages complete?`
-            : 'Mark this message complete?'
+          untilTarget?.action === 'read'
+            ? untilTarget.count > 1
+              ? `Mark ${untilTarget.count} messages read?`
+              : 'Mark this message read?'
+            : untilTarget && untilTarget.count > 1
+              ? `Mark ${untilTarget.count} messages complete?`
+              : 'Mark this message complete?'
         }
-        confirmLabel="Complete till here"
-        description="This message and everything above it in the conversation will be marked complete, with a blue check everyone can see."
+        confirmLabel={
+          untilTarget?.action === 'read' ? 'Read till here' : 'Complete till here'
+        }
+        description={
+          untilTarget?.action === 'read'
+            ? 'This message and everything above it in the conversation will be marked read for everyone.'
+            : 'This message and everything above it in the conversation will be marked complete, with a blue check everyone can see.'
+        }
       />
     </>
   );
@@ -1101,7 +1118,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           openedChatMsgId={selected.msgId}
           openedChatMsgTime={selected.msgTime}
           inboxRow={chatItems.find((m) => m.id === selected.msgId) ?? null}
-          onCompleteUntil={(messageId, count) =>
+          onMarkUntil={(messageId, count, action) =>
             setUntilTarget({
               target: {
                 kind: 'chat',
@@ -1110,6 +1127,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
                 messageId,
               },
               count,
+              action,
             })
           }
           active={active}
@@ -1158,7 +1176,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           onClose={closeDetail}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
-          onCompleteUntil={(messageId, count) =>
+          onMarkUntil={(messageId, count, action) =>
             setUntilTarget({
               target: {
                 kind: 'email',
@@ -1167,6 +1185,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
                 messageId,
               },
               count,
+              action,
             })
           }
         />
@@ -1193,10 +1212,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
-          onCompleteUntil={(itemId, count) =>
+          onMarkUntil={(itemId, count, action) =>
             setUntilTarget({
               target: { kind: 'sms', companyId, peer: selected.peer, itemId },
               count,
+              action,
             })
           }
         />
@@ -1223,10 +1243,11 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           callBlockedReason={callBlocked}
           onRequestComplete={setCompleteTarget}
           onUncomplete={uncomplete}
-          onCompleteUntil={(messageId, count) =>
+          onMarkUntil={(messageId, count, action) =>
             setUntilTarget({
               target: { kind: 'whatsapp', companyId, messageId },
               count,
+              action,
             })
           }
         />

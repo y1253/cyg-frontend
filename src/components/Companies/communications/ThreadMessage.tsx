@@ -1,15 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import {
   CheckCheck,
   ChevronRight,
+  MailOpen,
   Forward,
   Paperclip,
   Reply,
   ReplyAll,
 } from 'lucide-react';
+import { ANCHOR_CARD } from './anchor-style';
 import type { EmailDetail } from '@/api/gmail';
 import { stableEmailAttachmentUrl } from '@/lib/attachment-url';
 import { AttachmentPreview } from '../AttachmentPreview';
+import { AttachmentSummary } from './AttachmentSummary';
 import { EmailBodyFrame } from '../EmailBodyFrame';
 import { Linkified } from '../Linkified';
 import { RecipientDetails } from '../RecipientDetails';
@@ -40,6 +43,8 @@ export function ThreadMessage({
   onReplyAllToThis,
   onForwardThis,
   onCompleteUntil,
+  onReadUntil,
+  translate,
 }: {
   message: EmailDetail;
   isFuture: boolean;
@@ -58,6 +63,12 @@ export function ThreadMessage({
   onForwardThis: (m: EmailDetail) => void;
   /** Complete this message and everything above it in the thread. */
   onCompleteUntil?: (m: EmailDetail) => void;
+  onReadUntil?: (m: EmailDetail) => void;
+  /**
+   * The translate control, assembled by the thread view so the per-message state lives
+   * once there rather than one hook instance per card.
+   */
+  translate?: ReactNode;
 }) {
   const strip = (m.attachments ?? []).filter((a) => !a.isInline);
 
@@ -90,9 +101,13 @@ export function ThreadMessage({
 
   return (
     <div
-      className={`group/msg border rounded-md overflow-hidden transition-opacity ${
-        isFuture ? 'opacity-50' : ''
-      }`}
+      className={[
+        'group/msg border rounded-md overflow-hidden transition-opacity',
+        isFuture ? 'opacity-50' : '',
+        // Expanded-vs-collapsed was the ONLY thing marking the anchor here, which
+        // says nothing at a glance in a thread with several cards open.
+        isAnchor ? ANCHOR_CARD : '',
+      ].join(' ')}
     >
       {/* The arrow is a sibling of the header, not a child — the header is itself
           a <button> and nesting one inside it is invalid HTML. Same reason the
@@ -123,7 +138,18 @@ export function ThreadMessage({
             message I opened" is the most likely thing to clear — so it sits outside the
             reply/forward group, which is deliberately hidden there. */}
         {isAnchor && onCompleteUntil && (
-          <div className="shrink-0 self-center mr-2 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="shrink-0 self-center mr-2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+            {onReadUntil && (
+              <button
+                type="button"
+                title="Mark everything up to here read"
+                aria-label="Mark everything up to here read"
+                onClick={() => onReadUntil(m)}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <MailOpen size={14} />
+              </button>
+            )}
             <button
               type="button"
               title="Mark everything up to here complete"
@@ -261,18 +287,32 @@ export function ThreadMessage({
                   // fix: a stable key keeps the element, but a mutating `src` still
                   // makes the browser re-download and blink. Hence
                   // stableEmailAttachmentUrl.
-                  <AttachmentPreview
+                  <div
                     key={`${m.id}:${att.filename}:${att.size ?? 0}`}
-                    url={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
-                    downloadUrl={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
-                    mimeType={att.mimeType}
-                    filename={att.filename}
-                    size={att.size}
-                  />
+                    className="flex flex-col"
+                  >
+                    <AttachmentPreview
+                      url={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'inline')}
+                      downloadUrl={stableEmailAttachmentUrl(token ?? '', companyId, m.id, att, 'attachment')}
+                      mimeType={att.mimeType}
+                      filename={att.filename}
+                      size={att.size}
+                    />
+                    <AttachmentSummary
+                      companyId={companyId}
+                      messageId={m.id}
+                      attachmentId={att.attachmentId}
+                      filename={att.filename}
+                      size={att.size}
+                    />
+                  </div>
                 ))}
               </div>
             </div>
           )}
+          {/* Translation sits ABOVE the body, so somebody who cannot read the original
+              finds the control before scrolling past what they cannot read. */}
+          {translate}
           <div className="border rounded-md overflow-hidden">
             {bodyHtml ? (
               <EmailBodyFrame html={bodyHtml} />

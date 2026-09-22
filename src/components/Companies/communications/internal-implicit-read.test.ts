@@ -22,6 +22,7 @@ function call(over: Partial<InternalCall> = {}): InternalCall {
     isRead: true,
     isCompleted: false,
     hasRecording: false,
+    summaryLine: null,
     ...over,
   };
 }

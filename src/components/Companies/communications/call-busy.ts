@@ -62,13 +62,34 @@ export function callBlockedReason(input: {
 /**
  * The busy banner is for people NOT on the call. The browser that is on it already has the
  * floating call card, so repeating it there is noise.
+ *
+ * ── WHY A RINGING CALL NEEDS `hasHeldInvite` ──────────────────────────────────
+ * The server marks the company's line busy in `ringAndDial`, which runs BEFORE the LaML
+ * it returns has played a note. When a greeting is configured, LaML runs its verbs in
+ * document order: the caller hears the whole `<Say>` first, and only then does `<Dial>`
+ * emit the SIP INVITE that reaches any browser. So for the length of the greeting this
+ * banner announced "Incoming call ringing" while there was nothing to answer and no way
+ * to end it — the reported "a call comes up before the call, with no option to end".
+ *
+ * Holding an INVITE is exactly "the caller's phone is actually ringing here now", and
+ * every registered browser gets one (they share a SIP credential), so nobody who could
+ * act loses the banner. The actionable `RingingCallBanner` is gated the same way, and
+ * takes over at the same instant.
+ *
+ * ⚠️ Only the RINGING case is gated. An answered call stays visible to everyone: it is a
+ * state that explains why the Call buttons are disabled, and it is not something the
+ * viewer was ever offered a way to act on.
  */
 export function shouldShowActiveBanner(
   activeCall: ActiveCall | null | undefined,
   local: LocalCallState,
   companyId: number,
+  hasHeldInvite: boolean,
 ): activeCall is ActiveCall {
-  return !!activeCall && !isOnThisCompanysCall(local, companyId);
+  if (!activeCall || isOnThisCompanysCall(local, companyId)) return false;
+  const ringingIn =
+    activeCall.direction === 'inbound' && activeCall.state === 'ringing';
+  return ringingIn ? hasHeldInvite : true;
 }
 
 /** 65 → "01:05", 3725 → "1:02:05". */

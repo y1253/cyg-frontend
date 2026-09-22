@@ -1,5 +1,7 @@
-import { CheckCheck, Reply } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { CheckCheck, MailOpen, Reply } from 'lucide-react';
 import type { ChatMessage } from '@/api/gmail';
+import { ANCHOR_RING } from './anchor-style';
 import { chatAttachmentUrl } from '@/api/gmail';
 import { AttachmentPreview } from '../AttachmentPreview';
 import { Linkified } from '../Linkified';
@@ -25,6 +27,8 @@ export function ChatBubble({
   token,
   onNavigateToMessage,
   onCompleteUntil,
+  onReadUntil,
+  translate,
 }: {
   message: ChatMessage;
   /** The loaded thread, used to resolve a quoted message into a preview. */
@@ -37,6 +41,15 @@ export function ChatBubble({
   surfaced?: boolean;
   /** Complete this message and everything above it in the space. */
   onCompleteUntil?: (message: ChatMessage) => void;
+  onReadUntil?: (message: ChatMessage) => void;
+  /**
+   * The translate control for this message, assembled by the thread view.
+   *
+   * Passed in rather than built here so the per-message translation STATE lives once, in
+   * the view, instead of one hook instance per bubble — which would re-request on every
+   * poll-driven remount.
+   */
+  translate?: ReactNode;
   companyId: number;
   token: string | null;
   onNavigateToMessage: (m: ChatMessage) => void;
@@ -66,7 +79,7 @@ export function ChatBubble({
         <div
           className={`max-w-[75%] rounded-md px-3 py-2 text-sm whitespace-pre-wrap ${
             m.isOwn ? 'bg-teal-600 text-white' : 'ml-8 bg-background border'
-          } ${isAnchor ? 'ring-2 ring-purple-400 ring-offset-1' : ''} ${
+          } ${isAnchor ? ANCHOR_RING : ''} ${
             surfaced ? 'border-l-4 border-l-teal-300' : ''
           }`}
         >
@@ -151,6 +164,17 @@ export function ChatBubble({
         )}
         {/* Unlike Reply, offered on the ANCHOR too: "everything up to the message I
             opened" is the most likely thing somebody wants to clear. */}
+        {onReadUntil && !surfaced && (
+          <button
+            type="button"
+            title="Mark everything up to here read"
+            aria-label="Mark everything up to here read"
+            onClick={() => onReadUntil(m)}
+            className="shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+          >
+            <MailOpen size={14} />
+          </button>
+        )}
         {onCompleteUntil && !surfaced && (
           <button
             type="button"
@@ -163,6 +187,9 @@ export function ChatBubble({
           </button>
         )}
       </div>
+      {/* Under the bubble, not in the hover row: the panel expands, and a hover-only
+          control that grows would push the conversation about under the cursor. */}
+      {!m.isOwn && !surfaced && translate}
     </div>
   );
 }

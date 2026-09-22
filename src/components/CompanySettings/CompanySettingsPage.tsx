@@ -16,6 +16,7 @@ import { usePhoneDefaults, useUpdatePhoneDefaults } from '@/hooks/usePhoneSettin
 import type { EffectivePhoneSettings } from '@/api/phoneSettings';
 import { PhoneHoursEditor } from './PhoneHoursEditor';
 import { MessageField } from './MessageField';
+import { QuickRepliesEditor } from './QuickRepliesEditor';
 import { AudioLibrary } from './AudioLibrary';
 import { SignatureDefaultsCard } from './SignatureDefaultsCard';
 import { SignatureImageLibrary } from './SignatureImageLibrary';
@@ -371,6 +372,18 @@ export function CompanySettingsPage() {
                 placeholders={placeholders}
                 preview={previewVars}
                 disabled={!draft.voicemailEnabled}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-sm font-medium">Quick replies</Label>
+              <p className="-mt-1 text-xs text-muted-foreground">
+                Offered on a ringing call instead of answering. Picking one texts the
+                caller and sends the call to voicemail.
+              </p>
+              <QuickRepliesEditor
+                value={draft.quickReplies}
+                onChange={(v) => set('quickReplies', v)}
               />
             </div>
 

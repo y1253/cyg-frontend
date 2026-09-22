@@ -18,8 +18,20 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
  * server may see messages older than the client's cap, and it skips rows already complete.
  */
 export interface CompleteUntilResult {
+  /** Rows the write actually changed. Named for the shape, not the verb — see below. */
   completed: number;
 }
+
+/**
+ * Which state "till here" writes.
+ *
+ * ⚠️ Read and complete are SEPARATE routes on the server, not one route with a parameter,
+ * because each channel stores the two in a different place — chat and texts share
+ * `ChatMessageReadState`, WhatsApp has a column, internal has a per-recipient row, and a
+ * mailbox has no local read store AT ALL (it is the provider's `UNREAD` label). Only the
+ * anchor and the response shape are common, which is exactly what this union carries.
+ */
+export type UntilAction = 'complete' | 'read';
 
 /** What a caller has to name, per channel. */
 export type CompleteUntilTarget =
@@ -29,19 +41,20 @@ export type CompleteUntilTarget =
   | { kind: 'whatsapp'; companyId: number; messageId: number }
   | { kind: 'internal'; messageId: number };
 
-function urlFor(target: CompleteUntilTarget): string {
+function urlFor(target: CompleteUntilTarget, action: UntilAction): string {
   const base = `${API}/communications`;
+  const verb = action === 'read' ? 'read-until' : 'complete-until';
   switch (target.kind) {
     case 'email':
-      return `${base}/companies/${target.companyId}/emails/complete-until`;
+      return `${base}/companies/${target.companyId}/emails/${verb}`;
     case 'chat':
-      return `${base}/companies/${target.companyId}/chats/complete-until`;
+      return `${base}/companies/${target.companyId}/chats/${verb}`;
     case 'sms':
-      return `${base}/companies/${target.companyId}/sms/complete-until`;
+      return `${base}/companies/${target.companyId}/sms/${verb}`;
     case 'whatsapp':
-      return `${base}/companies/${target.companyId}/whatsapp/complete-until`;
+      return `${base}/companies/${target.companyId}/whatsapp/${verb}`;
     case 'internal':
-      return `${base}/internal-messages/complete-until`;
+      return `${base}/internal-messages/${verb}`;
   }
 }
 
@@ -60,11 +73,12 @@ function bodyFor(target: CompleteUntilTarget): Record<string, unknown> {
   }
 }
 
-export async function completeUntil(
+export async function markUntil(
   token: string,
   target: CompleteUntilTarget,
+  action: UntilAction,
 ): Promise<CompleteUntilResult> {
-  const res = await fetchWithAuth(token, urlFor(target), {
+  const res = await fetchWithAuth(token, urlFor(target, action), {
     method: 'PATCH',
     headers: JSON_HEADERS,
     body: JSON.stringify(bodyFor(target)),
@@ -76,7 +90,10 @@ export async function completeUntil(
     const message = Array.isArray(body.message)
       ? body.message.join(', ')
       : body.message;
-    throw new Error(message ?? 'Could not complete these messages');
+    throw new Error(
+      message ??
+        `Could not mark these messages ${action === 'read' ? 'read' : 'complete'}`,
+    );
   }
   return res.json() as Promise<CompleteUntilResult>;
 }
