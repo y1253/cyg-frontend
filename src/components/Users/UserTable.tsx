@@ -1,5 +1,6 @@
 import { Camera } from 'lucide-react';
 import { roleBadgeVariant, type AppUser } from '../../api/users';
+import { formatE164 } from '@/lib/phone';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,6 +29,7 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
+            <TableHead>Phone</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Face</TableHead>
             <TableHead>Created</TableHead>
@@ -37,13 +39,13 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                 Loading...
               </TableCell>
             </TableRow>
           ) : users.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                 {emptyMessage ?? 'No users found.'}
               </TableCell>
             </TableRow>
@@ -56,6 +58,9 @@ export function UserTable({ users, isLoading, emptyMessage, onView, onEdit, onDe
               >
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                <TableCell className="text-muted-foreground whitespace-nowrap">
+                  {u.phoneE164 ? formatE164(u.phoneE164) : '—'}
+                </TableCell>
                 <TableCell>
                   <Badge variant={roleBadgeVariant(u.role)}>
                     {u.role}

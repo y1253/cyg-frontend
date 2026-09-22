@@ -219,6 +219,26 @@ export function PhoneSettingsSection({ companyId }: { companyId: number }) {
             </OverrideField>
 
             <OverrideField
+              label="Also ring the assignee's mobile"
+              inherited={defaults.ringMobiles}
+              value={draft.ringMobiles}
+              onChange={(v) => set('ringMobiles', v)}
+              renderInherited={(v) => (v ? 'On' : 'Off — browsers only')}
+              hint="Rings the assigned user's own phone alongside every open browser. They hear who is calling and press 1 to accept, so a carrier voicemail can never pick the call up — voicemail is always taken here, never on their phone."
+            >
+              {(value, setValue) => (
+                <SegmentedChoice
+                  value={value}
+                  onChange={setValue}
+                  options={[
+                    { value: false, label: 'Off' },
+                    { value: true, label: 'On' },
+                  ]}
+                />
+              )}
+            </OverrideField>
+
+            <OverrideField
               label="Hold music"
               inherited={defaults.holdAudioId}
               value={draft.holdAudioId}

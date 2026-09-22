@@ -13,6 +13,16 @@ export interface AppUser {
   faceEnrolled?: boolean;
   faceEnrolledAt?: string | null;
   role: string;
+  /**
+   * The staff member's own phone, E.164, or null when they have none on file.
+   *
+   * Optional (`?`) like the face flags, and for the same reason: the server can deploy
+   * ahead of the client.
+   *
+   * An inbound call for a company this user is assigned to also rings this number, when
+   * that company's "Also ring the assignee's mobile" setting is on.
+   */
+  phoneE164?: string | null;
   createdAt: string;
 }
 
@@ -20,6 +30,8 @@ export interface CreateUserData {
   name: string;
   email: string;
   role: string;
+  /** E.164, or omitted. The server validates strictly — this number gets DIALLED. */
+  phoneE164?: string;
 }
 
 /** `ADMIN` → `Admin`. Roles come from the Prisma enum, so they arrive SHOUTING. */
@@ -88,6 +100,8 @@ export interface UpdateUserData {
   name?: string;
   email?: string;
   role?: string;
+  /** `null` CLEARS the number; an absent key leaves it alone. */
+  phoneE164?: string | null;
 }
 
 export async function updateUser(token: string, id: number, data: UpdateUserData): Promise<AppUser> {

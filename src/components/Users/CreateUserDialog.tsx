@@ -20,14 +20,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { maskPhoneInput, phoneErrorFor, phoneForSubmit } from './user-phone';
 
 interface FormState {
   name: string;
   email: string;
   role: string | null;
+  phone: string;
 }
 
-const EMPTY_FORM: FormState = { name: '', email: '', role: null };
+const EMPTY_FORM: FormState = { name: '', email: '', role: null, phone: '' };
 
 interface Props {
   open: boolean;
@@ -37,6 +39,7 @@ interface Props {
 export function CreateUserDialog({ open, onOpenChange }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [newUserId, setNewUserId] = useState<number | null>(null);
   const [newUserName, setNewUserName] = useState('');
   const { data: roles = [] } = useRoles();
@@ -56,8 +59,19 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.role) return;
+    // Native validation cannot express E.164, and this form is plain useState with no zod,
+    // so the check is manual -- the LoginPage pattern.
+    const err = phoneErrorFor(form.phone);
+    setPhoneError(err);
+    if (err) return;
+    const phoneE164 = phoneForSubmit(form.phone);
     createMutation.mutate(
-      { name: form.name, email: form.email, role: form.role },
+      {
+        name: form.name,
+        email: form.email,
+        role: form.role,
+        ...(phoneE164 ? { phoneE164 } : {}),
+      },
       {
         onSuccess: (user) => {
           setNewUserId(user.id);
@@ -100,6 +114,27 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
                 placeholder="jane@cygfinance.com"
                 required
               />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="phone">Phone (optional)</Label>
+              <Input
+                id="phone"
+                type="tel"
+                value={form.phone}
+                onChange={e => {
+                  setForm(f => ({ ...f, phone: maskPhoneInput(e.target.value) }));
+                  setPhoneError(null);
+                }}
+                placeholder="514-555-0123"
+              />
+              <p className="text-xs text-muted-foreground">
+                Rings alongside their browser when a call comes in for a company they are
+                assigned to. They press 1 to accept.
+              </p>
+              {phoneError && (
+                <p className="text-sm text-destructive">{phoneError}</p>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">

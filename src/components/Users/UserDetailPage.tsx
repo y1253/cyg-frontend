@@ -6,9 +6,11 @@ import {
   Camera,
   CheckCircle2,
   Mail,
+  Phone,
   Shield,
   User,
 } from "lucide-react";
+import { formatE164 } from '@/lib/phone';
 import { Badge } from "@/components/ui/badge";
 import { roleBadgeVariant } from "@/api/users";
 import { Button } from "@/components/ui/button";
@@ -199,6 +201,18 @@ export function UserDetailPage() {
               <Mail size={10} /> Email
             </p>
             <p className="text-sm font-medium break-all">{user.email}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5 flex items-center gap-1">
+              <Phone size={10} /> Phone
+            </p>
+            <p className="text-sm font-medium">
+              {user.phoneE164 ? (
+                formatE164(user.phoneE164)
+              ) : (
+                <span className="text-muted-foreground">Browser only</span>
+              )}
+            </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-0.5">Role</p>

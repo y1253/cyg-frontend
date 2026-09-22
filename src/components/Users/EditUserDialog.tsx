@@ -19,11 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { formatE164 } from '@/lib/phone';
+import { maskPhoneInput, phoneErrorFor, phoneForSubmit } from './user-phone';
 
 interface FormState {
   name: string;
   email: string;
   role: string | null;
+  phone: string;
 }
 
 interface Props {
@@ -32,13 +35,27 @@ interface Props {
 }
 
 export function EditUserDialog({ user, onOpenChange }: Props) {
-  const [form, setForm] = useState<FormState>({ name: '', email: '', role: null });
+  const [form, setForm] = useState<FormState>({
+    name: '',
+    email: '',
+    role: null,
+    phone: '',
+  });
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const { data: roles = [] } = useRoles();
   const updateMutation = useUpdateUser();
 
   useEffect(() => {
     if (user) {
-      setForm({ name: user.name, email: user.email, role: user.role });
+      setForm({
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        // Seeded READABLE, not raw E.164 -- `toE164` on submit puts it back. Showing
+        // `+15145550123` in an editable box invites somebody to "tidy" the plus away.
+        phone: formatE164(user.phoneE164),
+      });
+      setPhoneError(null);
       updateMutation.reset();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,8 +68,22 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user || !form.role) return;
+    const err = phoneErrorFor(form.phone);
+    setPhoneError(err);
+    if (err) return;
     updateMutation.mutate(
-      { id: user.id, data: { name: form.name, email: form.email, role: form.role } },
+      {
+        id: user.id,
+        data: {
+          name: form.name,
+          email: form.email,
+          role: form.role,
+          // ALWAYS sent, and `null` when the box is empty -- that is what clears the
+          // number. Omitting the key would mean "leave it alone", so an admin could never
+          // remove a mobile once it was saved.
+          phoneE164: phoneForSubmit(form.phone),
+        },
+      },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
@@ -83,6 +114,25 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               required
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-phone">Phone (optional)</Label>
+            <Input
+              id="edit-phone"
+              type="tel"
+              value={form.phone}
+              onChange={e => {
+                setForm(f => ({ ...f, phone: maskPhoneInput(e.target.value) }));
+                setPhoneError(null);
+              }}
+              placeholder="514-555-0123"
+            />
+            <p className="text-xs text-muted-foreground">
+              Rings alongside their browser for companies they are assigned to. Leave blank
+              to ring their browser only.
+            </p>
+            {phoneError && <p className="text-sm text-destructive">{phoneError}</p>}
           </div>
 
           <div className="flex flex-col gap-1.5">
