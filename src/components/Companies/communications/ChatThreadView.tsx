@@ -15,7 +15,7 @@ import { PolishButton, PolishPanel } from '../PolishPanel';
 import { DictateButton } from '../DictateButton';
 import { TranslateControl } from './TranslatePanel';
 import { useTranslation } from '@/hooks/useTranslation';
-import { escapeHtml } from '../message-utils';
+import { appendToDraftBody, escapeHtml } from '../message-utils';
 import { htmlToText, openPrintWindow, textToHtml } from '../message-utils';
 import { ChatBubble } from './ChatBubble';
 import { countMarkableUpTo } from './complete-until';
@@ -548,12 +548,16 @@ export function ChatThreadView({
                 draftPlain={htmlToText(chatReplyHtml)}
                 context={chatContext}
               />
-              {/* Appends a paragraph. Safe against the editor because `RichTextEditor`
-                  only syncs `html` into the DOM while it is UNFOCUSED, and clicking this
-                  button is exactly that — so the caret is never yanked mid-typing. */}
+              {/* A chat draft carries no signature and no quoted block, so this is a
+                  plain append — but it goes through the same helper as the email and
+                  internal composers so there is ONE insert path rather than two that can
+                  drift. Safe against the editor: `RichTextEditor` only syncs `html` into
+                  the DOM while UNFOCUSED, and clicking this button is exactly that. */}
               <DictateButton
                 onText={(text) =>
-                  setChatReplyHtml((h) => `${h}<div>${escapeHtml(text)}</div>`)
+                  setChatReplyHtml((h) =>
+                    appendToDraftBody(h, `<div>${escapeHtml(text)}</div>`),
+                  )
                 }
               />
               <Button size="sm" variant="outline" onClick={resetReply}>

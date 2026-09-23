@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DictateButton } from '../DictateButton';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -160,6 +161,11 @@ function ContactForm({
           onChange={(e) => setNote(e.target.value)}
           placeholder="Prefers a call after 2pm"
           rows={2}
+        />
+        <DictateButton
+          onText={(text) =>
+            setNote((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+          }
         />
       </div>
       {(localError || error) && (

@@ -261,6 +261,38 @@ export function joinPolishedBody(polished: string, sig: string): string {
 }
 
 /**
+ * Add a block to a draft — ABOVE the signature and any quoted original.
+ *
+ * ── WHY THIS IS NOT A PLAIN CONCATENATION ─────────────────────────────────────
+ * Dictation used to append to the end of the whole body. A reply's body is seeded with
+ * the signature, and a forward's with the quoted original below it, so what somebody had
+ * just spoken landed UNDER both — past the sign-off, inside the quoted mail. The polish
+ * button on the same row already avoided that by cutting at `splitSignature`, and this
+ * reuses the very same boundary rather than deriving a second one: the two controls sit
+ * together and have to agree about where the user's own prose ends.
+ *
+ * ⚠️ The trailing blank lines are stripped and re-added from `SIGNATURE_LEAD` rather
+ * than left where they were. `body` ends with that lead, so appending after it would put
+ * the gap ABOVE the new text and glue the new text to the signature — and each further
+ * dictation would eat the gap again. Same trap `joinPolishedBody` documents; re-adding the
+ * canonical lead is what makes repeating this idempotent.
+ *
+ * `addition` is trusted HTML the caller has already built — escape anything user-supplied
+ * before passing it in.
+ */
+export function appendToDraftBody(html: string, addition: string): string {
+  const { body, sig } = splitSignature(html);
+  if (!sig) return body.trim() ? `${body}${addition}` : addition;
+  // Whatever blank-line run the lead left behind, in whichever shape the editor
+  // normalised it to.
+  const prose = body.replace(
+    /(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>|<br\s*\/?>|\s)+$/i,
+    '',
+  );
+  return `${prose}${addition}${SIGNATURE_LEAD}${sig}`;
+}
+
+/**
  * Scrub untrusted message HTML before it is seeded into the RichTextEditor.
  *
  * Detail views render bodies inside a sandboxed <iframe srcDoc>, but the editor

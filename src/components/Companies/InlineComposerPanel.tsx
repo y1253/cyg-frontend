@@ -8,7 +8,7 @@ import { AttachRow } from './AttachRow';
 import { FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import { PolishButton, PolishPanel } from './PolishPanel';
 import { DictateButton } from './DictateButton';
-import { escapeHtml } from './message-utils';
+import { appendToDraftBody, escapeHtml } from './message-utils';
 import type { DraftPolish } from '@/hooks/useDraftPolish';
 import { useFileDrop } from '@/hooks/useFileDrop';
 
@@ -231,11 +231,21 @@ export function InlineComposerPanel({
           draftPlain={polishDraftPlain}
           context={polishContext}
         />
-        {/* Appends a paragraph. `RichTextEditor` only writes `html` into the DOM while it
-            is UNFOCUSED, and clicking this is exactly that, so the caret is safe. */}
+        {/* ⚠️ `appendToDraftBody`, never a plain concatenation onto `body`.
+
+            This is a reply or a forward, so `body` is seeded with the signature and, on a
+            forward, the quoted original below it — appending to the end put what somebody
+            had just spoken UNDER the sign-off, inside the quoted mail. The polish button
+            beside this one already cut at `splitSignature`; the helper reuses that exact
+            boundary so the two cannot disagree about where the draft ends.
+
+            `RichTextEditor` only writes `html` into the DOM while UNFOCUSED, and clicking
+            this is exactly that, so the caret is never yanked mid-typing. */}
         <DictateButton
           disabled={isSending}
-          onText={(text) => onBodyChange(`${body}<div>${escapeHtml(text)}</div>`)}
+          onText={(text) =>
+            onBodyChange(appendToDraftBody(body, `<div>${escapeHtml(text)}</div>`))
+          }
         />
         <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel

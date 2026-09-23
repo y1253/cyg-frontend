@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  appendToDraftBody,
   displayName,
   joinPolishedBody,
   SIGNATURE_LEAD,
@@ -197,5 +198,52 @@ describe('joinPolishedBody', () => {
     expect(joinPolishedBody('see below', quote)).toBe(
       `see below${SIGNATURE_LEAD}${quote}`,
     );
+  });
+});
+
+
+describe('appendToDraftBody', () => {
+  const SIG = '<div data-cyg-signature="1">Regards, Chaim</div>';
+  const QUOTE = '<div data-cyg-forward="1">On Monday, they wrote:</div>';
+  const ADD = '<div>spoken words</div>';
+
+  /**
+   * THE case this exists for. Dictation used to concatenate onto the end of the whole
+   * body, which on a reply put the spoken text below the sign-off.
+   */
+  it('puts the new text ABOVE a signature, not after it', () => {
+    const out = appendToDraftBody(`<div>typed</div>${SIGNATURE_LEAD}${SIG}`, ADD);
+    expect(out.indexOf(ADD)).toBeLessThan(out.indexOf(SIG));
+    expect(out).toContain('<div>typed</div>');
+    expect(out).toContain(SIG);
+  });
+
+  /** On a forward, `splitSignature` cuts at the quote, so the same rule protects it. */
+  it('puts the new text ABOVE a forwarded quote', () => {
+    const out = appendToDraftBody(`<div>typed</div>${SIGNATURE_LEAD}${QUOTE}`, ADD);
+    expect(out.indexOf(ADD)).toBeLessThan(out.indexOf(QUOTE));
+  });
+
+  it('is a plain append when there is neither — a chat or internal draft', () => {
+    expect(appendToDraftBody('<div>typed</div>', ADD)).toBe(`<div>typed</div>${ADD}`);
+  });
+
+  it('does not lead an empty draft with stray markup', () => {
+    expect(appendToDraftBody('', ADD)).toBe(ADD);
+  });
+
+  /**
+   * The gap above the signature comes from SIGNATURE_LEAD each time rather than from
+   * whatever survived in the body, so dictating repeatedly cannot shrink it — the same
+   * property `joinPolishedBody` was written to hold.
+   */
+  it('keeps the gap above the signature the same size however often it runs', () => {
+    const start = `<div>typed</div>${SIGNATURE_LEAD}${SIG}`;
+    const once = appendToDraftBody(start, ADD);
+    const twice = appendToDraftBody(once, ADD);
+    const gapOf = (html: string) =>
+      html.slice(html.lastIndexOf(ADD) + ADD.length, html.indexOf(SIG));
+    expect(gapOf(twice)).toBe(gapOf(once));
+    expect(gapOf(once)).toBe(SIGNATURE_LEAD);
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DictateButton } from './DictateButton';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -267,6 +268,11 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                 placeholder="Company-specific reminder for this task…"
                 rows={2}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+              />
+              <DictateButton
+                onText={(text) =>
+                  setScheduleNote((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+                }
               />
             </div>
           </div>

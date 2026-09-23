@@ -25,12 +25,15 @@ import { PolishButton, PolishPanel } from './PolishPanel';
 import { AttachmentChips, FileDropOverlay, UploadProgressBar } from './ComposerBits';
 import {
   SIGNATURE_LEAD,
+  appendToDraftBody,
+  escapeHtml,
   htmlToText,
   joinPolishedBody,
   mergeAttachments,
   splitSignature,
   wrapBodyFont,
 } from './message-utils';
+import { DictateButton } from './DictateButton';
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { useDraggable } from '@/hooks/useDraggable';
 import { useResizable } from '@/hooks/useResizable';
@@ -774,6 +777,14 @@ function EmailComposerBody({
           draftPlain={draftPlain}
           context={polishContext}
         />
+        {/* ⚠️ Above the signature, via `appendToDraftBody` — a NEW email is seeded with
+            one, and reopening a saved Draft can bring a quoted block back with it. */}
+        <DictateButton
+          disabled={sendMutation.isPending}
+          onText={(text: string) =>
+            setBody((b) => appendToDraftBody(b, `<div>${escapeHtml(text)}</div>`))
+          }
+        />
         {/* The ONLY control that deletes a draft from the mailbox. Hidden until there
             is something to delete, so a brand-new empty composer isn't offering it. */}
         {(providerDraft.draftId || dirty) && (
@@ -1000,6 +1011,14 @@ function InternalComposerBody({
           polish={polish}
           draftPlain={bodyText}
           context={INTERNAL_POLISH_CONTEXT}
+        />
+        {/* An internal message structurally cannot carry a signature, so the helper is a
+            plain append here — used anyway so every composer inserts the same way. */}
+        <DictateButton
+          disabled={sendMutation.isPending}
+          onText={(text: string) =>
+            setBody((b) => appendToDraftBody(b, `<div>${escapeHtml(text)}</div>`))
+          }
         />
         <Button
           size="sm"

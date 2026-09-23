@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { DictateButton } from './DictateButton';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, GripVertical, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
@@ -992,13 +993,21 @@ function CompanyNotesSection({
               rows={3}
               className="w-full text-sm rounded border border-amber-300 bg-white px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Button size="sm" className="h-7 text-xs" onClick={submitAdd} disabled={createNote.isPending || !newContent.trim()}>
                 Save
               </Button>
               <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelAdd}>
                 Cancel
               </Button>
+              {/* Plain text, so a space-join — there is no signature or quote to stay
+                  above, which is what the rich-text composers need the helper for. */}
+              <DictateButton
+                disabled={createNote.isPending}
+                onText={(text) =>
+                  setNewContent((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+                }
+              />
             </div>
           </div>
         )}
@@ -1018,13 +1027,19 @@ function CompanyNotesSection({
                   rows={3}
                   className="w-full text-sm rounded border border-amber-300 bg-white px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-400"
                 />
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <Button size="sm" className="h-7 text-xs" onClick={submitEdit} disabled={updateNote.isPending || !editContent.trim()}>
                     Save
                   </Button>
                   <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelEditNote}>
                     Cancel
                   </Button>
+                  <DictateButton
+                    disabled={updateNote.isPending}
+                    onText={(text) =>
+                      setEditContent((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+                    }
+                  />
                 </div>
               </div>
             ) : deleteConfirmId === note.id ? (
@@ -1388,6 +1403,11 @@ function LinksSection({ companyId }: { companyId: number }) {
               placeholder="Optional"
               rows={2}
             />
+            <DictateButton
+              onText={(text) =>
+                setAddNote((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+              }
+            />
           </div>
           {createMutation.isError && (
             <p className="text-xs text-destructive">
@@ -1443,6 +1463,11 @@ function LinksSection({ companyId }: { companyId: number }) {
               <div className="flex flex-col gap-1.5">
                 <Label>Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
                 <Textarea value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Optional" rows={2} />
+                <DictateButton
+                  onText={(text) =>
+                    setEditNote((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+                  }
+                />
               </div>
               {updateMutation.isError && (
                 <p className="text-xs text-destructive">
@@ -1803,6 +1828,11 @@ function SchedulesSection({
                 placeholder="Company-specific note (optional)…"
                 className="text-xs min-h-[4.5rem]"
               />
+              <DictateButton
+                onText={(text) =>
+                  setEditNote((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+                }
+              />
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs text-muted-foreground">Start date (optional)</span>
                 <div className="flex items-center gap-1.5">
@@ -1952,6 +1982,14 @@ function SchedulesSection({
                     autoFocus
                   />
                   <div className="flex items-center gap-2">
+                    <DictateButton
+                      disabled={updateUserNoteMutation.isPending}
+                      onText={(text) =>
+                        setUserNoteInput((c) =>
+                          c.trim() ? `${c.trim()} ${text}` : text,
+                        )
+                      }
+                    />
                     <Button
                       size="sm"
                       className="h-7 text-xs px-2"

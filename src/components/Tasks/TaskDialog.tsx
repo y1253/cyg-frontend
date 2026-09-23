@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DictateButton } from '../Companies/DictateButton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -122,6 +123,11 @@ export function TaskDialog({ open, onOpenChange, task }: Props) {
               placeholder="Optional notes or instructions…"
               rows={3}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+            />
+            <DictateButton
+              onText={(text) =>
+                setDescription((c) => (c.trim() ? `${c.trim()} ${text}` : text))
+              }
             />
           </div>
 
