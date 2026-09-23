@@ -312,28 +312,6 @@ export function CompanySettingsPage() {
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <Label className="text-sm font-medium">
-                  Also ring the assignee's mobile
-                </Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Rings the assigned user's own phone alongside every open browser. They
-                  hear who is calling and press 1 to accept, so a carrier voicemail can
-                  never pick the call up. Voicemail is always taken here, never on their
-                  phone. Costs per-minute call charges.
-                </p>
-              </div>
-              <SegmentedChoice
-                value={draft.ringMobiles}
-                onChange={(v) => set('ringMobiles', v)}
-                options={[
-                  { value: false, label: 'Off' },
-                  { value: true, label: 'On' },
-                ]}
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
                 <Label className="text-sm font-medium">Hold music</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Played on a loop when an agent puts a caller on hold.

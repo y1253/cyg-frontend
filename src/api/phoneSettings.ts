@@ -26,14 +26,6 @@ export interface EffectivePhoneSettings {
   afterHoursHangUp: boolean;
   hoursEnabled: boolean;
   ringTimeoutSeconds: number;
-  /**
-   * Does an inbound call also ring the ASSIGNED user's own phone?
-   *
-   * Off adds nothing to the `<Dial>`, so the call flow is byte-identical to what shipped
-   * before the feature. Never applies when nobody is assigned — an unrouted call falls back
-   * to admins' browsers only.
-   */
-  ringMobiles: boolean;
   /** `''` means "no voice attribute — take the provider default". */
   voice: string;
   /** PhoneAudio id played while a caller is on hold. `0` means none — silence. */
