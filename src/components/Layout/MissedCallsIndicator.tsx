@@ -58,7 +58,7 @@ export function MissedCallsIndicator({
    */
   const note =
     rows.length < missedCallsOwn
-      ? `Showing ${rows.length} of ${missedCallsOwn} — open a company's Missed calls folder for the rest.`
+      ? `Showing ${rows.length} of ${missedCallsOwn} — open the company to see the rest.`
       : undefined;
 
   const handleOpen = (item: UnreadFeedItem) => {

@@ -75,8 +75,6 @@ export function InboxView({
   chatItemCount,
   unreadCount,
   uncompletedCount,
-  missedCount,
-  hasPhone,
   newEmailBanner,
   onDismissNewEmailBanner,
   stateError,
@@ -142,8 +140,6 @@ export function InboxView({
   chatItemCount: number;
   unreadCount: number;
   uncompletedCount: number;
-  missedCount: number;
-  hasPhone: boolean;
   newEmailBanner: boolean;
   onDismissNewEmailBanner: () => void;
   stateError: string | null;
@@ -315,8 +311,6 @@ export function InboxView({
         onSelectFolder={onSelectFolder}
         unreadCount={unreadCount}
         uncompletedCount={uncompletedCount}
-        missedCount={missedCount}
-        hasPhone={hasPhone}
       />
 
       {/* Search + filter toolbar. Search works in every folder; the kind filter and
@@ -451,9 +445,7 @@ export function InboxView({
                     ? 'No uncompleted messages'
                     : selectedLabel === 'UNREAD'
                       ? 'No unread messages'
-                      : selectedLabel === 'MISSED'
-                        ? 'No unread missed calls'
-                        : 'Inbox is empty'
+                      : 'Inbox is empty'
                 : activeSearch
                   ? 'No messages match your search'
                   : isDrafts

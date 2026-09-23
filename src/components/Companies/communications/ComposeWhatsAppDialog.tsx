@@ -14,6 +14,13 @@ import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { WHATSAPP_CAPTION_LIMIT, fileAcceptsCaption } from '@/api/whatsapp';
 import { AttachRow } from '../AttachRow';
+import {
+  PolishBudgetToggle,
+  PolishButton,
+  PolishPanel,
+} from '../PolishPanel';
+import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { whatsappBudget } from './polish-budget';
 import { DictateButton } from '../DictateButton';
 import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
 import { mergeAttachments } from '../message-utils';
@@ -95,6 +102,13 @@ export function ComposeWhatsAppDialog({
    */
   const file = windowOpen ? (attached[0] ?? null) : null;
   const captionAllowed = file ? fileAcceptsCaption(file) : true;
+  const polish = useDraftPolish('whatsapp');
+  const [keepShort, setKeepShort] = useState(true);
+  // Recomputed per render: attaching a file drops the cap to Meta's caption limit.
+  const polishBudget = whatsappBudget(keepShort, !!file && captionAllowed);
+  // No thread to read from in a NEW message -- the static-context precedent.
+  const POLISH_CONTEXT =
+    'A new WhatsApp message to a client of a bookkeeping firm.';
 
   /** One file per message — WhatsApp has no multi-attachment message. */
   const addFiles = (incoming: FileList | File[] | null) => {
@@ -293,11 +307,36 @@ export function ComposeWhatsAppDialog({
             <p className="text-xs text-destructive">{error ?? sendError}</p>
           )}
 
+          {windowOpen && (
+            <PolishPanel
+              polish={polish}
+              context={POLISH_CONTEXT}
+              budget={polishBudget}
+              onAccept={setBody}
+            />
+          )}
           <div className="flex items-center justify-end gap-2">
             {/* Only inside the 24-hour window: outside it the only thing that can be sent
                 is a template, whose wording is fixed by Meta. */}
             {windowOpen && (
               <>
+                {/* Gated with Dictate, and for the same reason: outside the window the
+                    only thing sendable is a template, whose wording Meta fixes. */}
+                <PolishButton
+                  polish={polish}
+                  draftPlain={body}
+                  context={POLISH_CONTEXT}
+                  budget={polishBudget}
+                >
+                  {polishBudget && (
+                    <PolishBudgetToggle
+                      polish={polish}
+                      budget={polishBudget}
+                      onChange={setKeepShort}
+                      disabled={pending}
+                    />
+                  )}
+                </PolishButton>
                 <DictateButton
                   disabled={pending}
                   onText={(text) =>

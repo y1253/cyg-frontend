@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  PolishBudgetToggle,
+  PolishButton,
+  PolishPanel,
+} from '../PolishPanel';
+import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { smsBudget } from './polish-budget';
 import { DictateButton } from '../DictateButton';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -47,6 +54,14 @@ export function ComposeSmsDialog({
   const [attached, setAttached] = useState<File[]>([]);
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const sendMutation = useSendSms(companyId);
+  const polish = useDraftPolish('sms');
+  // Default ON: every text is billed by the segment.
+  const [keepShort, setKeepShort] = useState(true);
+  const polishBudget = smsBudget(keepShort);
+  // A new message has no thread to read, so the context is a static sentence -- the
+  // `INTERNAL_POLISH_CONTEXT` precedent. `context` is @IsNotEmpty() server-side, so it
+  // cannot simply be omitted.
+  const POLISH_CONTEXT = 'A new text message to a client of a bookkeeping firm.';
 
   /** Same funnel as the reply composer: paperclip, paste and drop, one set of limits. */
   const addFiles = (picked: FileList | File[] | null) => {
@@ -154,7 +169,27 @@ export function ComposeSmsDialog({
               {error ?? (sendMutation.error as Error)?.message ?? 'Failed to send'}
             </p>
           )}
+          <PolishPanel
+            polish={polish}
+            context={POLISH_CONTEXT}
+            budget={polishBudget}
+            onAccept={setBody}
+          />
           <div className="flex items-center justify-end gap-2">
+            {/* Plain text both ways -- see SmsThreadView. */}
+            <PolishButton
+              polish={polish}
+              draftPlain={body}
+              context={POLISH_CONTEXT}
+              budget={polishBudget}
+            >
+              <PolishBudgetToggle
+                polish={polish}
+                budget={polishBudget}
+                onChange={setKeepShort}
+                disabled={sendMutation.isPending}
+              />
+            </PolishButton>
             <DictateButton
               disabled={sendMutation.isPending}
               onText={(text) =>

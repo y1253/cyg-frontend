@@ -1,4 +1,4 @@
-import { FOLDERS, MAILBOX_ONLY_FOLDERS, PHONE_ONLY_FOLDERS } from './types';
+import { FOLDERS, MAILBOX_ONLY_FOLDERS } from './types';
 
 /**
  * The folder strip along the top of the Communications tab.
@@ -14,8 +14,6 @@ export function FolderTabs({
   onSelectFolder,
   unreadCount,
   uncompletedCount,
-  missedCount,
-  hasPhone,
 }: {
   /** Null when no mailbox is connected, which hides the mail-only folders. */
   account: unknown;
@@ -23,10 +21,6 @@ export function FolderTabs({
   onSelectFolder: (id: string) => void;
   unreadCount: number;
   uncompletedCount: number;
-  /** Unread missed calls, voicemails included. */
-  missedCount: number;
-  /** False when the company has no support number, which hides Missed calls. */
-  hasPhone: boolean;
 }) {
   return (
     // Scrolls sideways rather than wrapping: a wrapped folder row changes height as
@@ -36,19 +30,14 @@ export function FolderTabs({
       {FOLDERS.filter(
         // Sent / Spam / Trash are mailbox folders. With no mailbox they would render
         // as tabs that are permanently empty and can never fill.
-        // Missed calls is the phone twin: a company with no number could never fill it.
-        (f) =>
-          (account || !MAILBOX_ONLY_FOLDERS.includes(f.id)) &&
-          (hasPhone || !PHONE_ONLY_FOLDERS.includes(f.id)),
+        (f) => account || !MAILBOX_ONLY_FOLDERS.includes(f.id),
       ).map(({ id, label, icon: Icon }) => {
         const badge =
           id === 'UNCOMPLETED'
             ? uncompletedCount
             : id === 'UNREAD'
               ? unreadCount
-              : id === 'MISSED'
-                ? missedCount
-                : 0;
+              : 0;
         return (
           <button
             key={id}

@@ -39,6 +39,13 @@ import { mergePending, type PendingMeta } from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TranslateControl } from './TranslatePanel';
+import {
+  PolishBudgetToggle,
+  PolishButton,
+  PolishPanel,
+} from '../PolishPanel';
+import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { smsBudget, threadPolishContext } from './polish-budget';
 import { DictateButton } from '../DictateButton';
 import { buildSmsReplyBody, smsQuoteCost, smsReplyBudget } from './sms-reply';
 import { countMarkableUpTo } from './complete-until';
@@ -135,6 +142,9 @@ export function SmsThreadView({
   const markUnread = useMarkPhoneItem(companyId, 'unread');
 
   const [draft, setDraft] = useState('');
+  const polish = useDraftPolish('sms');
+  // Default ON: a text is billed per segment, so shortening is nearly always wanted.
+  const [keepShort, setKeepShort] = useState(true);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
@@ -188,6 +198,28 @@ export function SmsThreadView({
   // quote is part of the message the customer receives, and it is billed as such.
   const outgoing = buildSmsReplyBody(quoted?.body, draft);
   const { segments, unicode } = segmentsFor(outgoing);
+
+  /**
+   * ⚠️ A preview belongs to the conversation it was written for.
+   *
+   * This view is NOT keyed on `peer`, so switching conversations reuses the same
+   * instance. Without this, a polished reply for one customer would still be sitting
+   * there when the next thread opened, one Accept away from being pasted into it.
+   */
+  useEffect(() => {
+    polish.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peer]);
+
+  const polishBudget = smsBudget(keepShort);
+  const polishContext = threadPolishContext(
+    messages.map((m) => ({
+      isOwn: m.direction === 'outbound',
+      from: m.counterpartyName ?? peer,
+      text: m.body ?? '',
+    })),
+    'A text message conversation with a client.',
+  );
 
   /**
    * Pictures and clips to send with this text.
@@ -500,6 +532,13 @@ export function SmsThreadView({
           accept={MMS_ACCEPT}
         />
 
+        <PolishPanel
+          polish={polish}
+          context={polishContext}
+          budget={polishBudget}
+          onAccept={setDraft}
+        />
+
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">
             {outgoing.length} characters
@@ -512,6 +551,24 @@ export function SmsThreadView({
             {attached.length > 0 && ' · sent as a picture message (MMS)'}
           </span>
           <div className="flex items-center gap-2">
+            {/* ⚠️ `draft`, NEVER `outgoing`. `outgoing` has the quoted message prepended,
+                so polishing that would have the model rewrite the customer's own words
+                back at them. Plain text in, plain text out: no splitSignature and no
+                joinPolishedBody, which would write literal <br> into a text SignalWire
+                sends verbatim. */}
+            <PolishButton
+              polish={polish}
+              draftPlain={draft}
+              context={polishContext}
+              budget={polishBudget}
+            >
+              <PolishBudgetToggle
+                polish={polish}
+                budget={polishBudget}
+                onChange={setKeepShort}
+                disabled={sendMutation.isPending}
+              />
+            </PolishButton>
             {/* Speak instead of type. Appends, so dictating twice adds a second sentence
                 rather than replacing the first. */}
             <DictateButton

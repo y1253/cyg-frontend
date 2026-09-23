@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CallItem, SmsItem } from '@/api/phone';
-import {
-  ALL_LABELS,
-  INBOX_TABS,
-  PHONE_ONLY_FOLDERS,
-  isUnreadMissedCall,
-  type UnifiedItem,
-} from './types';
+import { ALL_LABELS, isUnreadMissedCall, type UnifiedItem } from './types';
 
 const call = (over: Partial<CallItem> = {}): UnifiedItem => ({
   kind: 'call',
@@ -46,16 +40,22 @@ describe('isUnreadMissedCall', () => {
   });
 });
 
-describe('the MISSED folder', () => {
-  it('is an inbox-backed tab, so it renders the merged list rather than a mail folder', () => {
-    expect(INBOX_TABS).toContain('MISSED');
-  });
-
-  it('survives a reload — the restore check accepts it', () => {
-    expect(ALL_LABELS).toContain('MISSED');
-  });
-
-  it('is hidden for a company with no support number', () => {
-    expect(PHONE_ONLY_FOLDERS).toContain('MISSED');
+describe('the MISSED folder, now removed', () => {
+  /**
+   * ⚠️ This is the assertion that makes the removal safe, and it is worth keeping rather
+   * than deleting with the tab.
+   *
+   * `ALL_LABELS` is derived from `FOLDERS` and is the whitelist the restore check in
+   * `CommunicationsTab` runs against the persisted `cmp-comm-{id}` blob. Because the
+   * entry is gone from `FOLDERS`, a stored `"MISSED"` now fails that check and falls back
+   * to Inbox on its own -- which is why no version bump or migration was needed.
+   *
+   * Had it been removed from the tab strip but LEFT in `FOLDERS`, the stored value would
+   * still have validated, the user would have restored onto an invisible tab, and
+   * `emailLabel` would have fallen through to asking Gmail for a label literally named
+   * MISSED on every open.
+   */
+  it('is no longer a label the restore check will accept', () => {
+    expect(ALL_LABELS).not.toContain('MISSED');
   });
 });

@@ -28,6 +28,13 @@ import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
 import { useFileDrop } from '@/hooks/useFileDrop';
 import { mergeAttachments } from '../message-utils';
 import { escapeHtml, formatEmailDate, openPrintWindow } from '../message-utils';
+import {
+  PolishBudgetToggle,
+  PolishButton,
+  PolishPanel,
+} from '../PolishPanel';
+import { useDraftPolish } from '@/hooks/useDraftPolish';
+import { threadPolishContext, whatsappBudget } from './polish-budget';
 import { DictateButton } from '../DictateButton';
 import { TemplatePicker } from './TemplatePicker';
 import { makeIsFuture } from './thread-dim';
@@ -92,6 +99,9 @@ export function WhatsAppThreadView({
   const markUnread = useMarkWhatsAppItem(companyId, 'unread');
 
   const [draft, setDraft] = useState('');
+  const polish = useDraftPolish('whatsapp');
+  // Default ON, though it only has anything to constrain once a caption limit applies.
+  const [keepShort, setKeepShort] = useState(true);
   // The closed-window branch: a template is the only thing Meta will accept there.
   const sendTemplate = useSendWhatsAppTemplate(companyId);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -231,6 +241,33 @@ export function WhatsAppThreadView({
   // the field says so rather than letting somebody type a sentence that never arrives.
   const captionAllowed = file ? fileAcceptsCaption(file) : true;
   const captionLimit = file ? WHATSAPP_CAPTION_LIMIT : 4096;
+
+  /**
+   * ⚠️ Recomputed per render because the budget CHANGES while the composer is open:
+   * attaching a file drops the cap from 4096 to Meta's 1024-character caption limit. A
+   * budget captured once would keep asking for the wrong length after a paperclip.
+   */
+  const polishBudget = whatsappBudget(keepShort, !!file && captionAllowed);
+
+  const polishContext = threadPolishContext(
+    messages.map((m) => ({
+      isOwn: m.direction === 'outbound',
+      from: m.peerName ?? m.peer,
+      // A voice note has no body; its transcript is what the client actually said, and
+      // it is what a reply has to answer.
+      text: m.body ?? m.transcript ?? '',
+    })),
+    'A WhatsApp conversation with a client.',
+  );
+
+  /**
+   * ⚠️ A preview belongs to the conversation it was written for — see the twin comment in
+   * `SmsThreadView`. This view is not keyed on `peer` either.
+   */
+  useEffect(() => {
+    polish.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peer]);
 
   /** The paperclip, a paste and a drop all land here — one set of limits, one notice. */
   const addFiles = (picked: FileList | File[] | null) => {
@@ -616,6 +653,13 @@ export function WhatsAppThreadView({
               cloudLabel={null}
             />
 
+            <PolishPanel
+              polish={polish}
+              context={polishContext}
+              budget={polishBudget}
+              onAccept={setDraft}
+            />
+
             <div className="flex items-start justify-between gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">
                 {draft.length} / {captionLimit}
@@ -624,6 +668,25 @@ export function WhatsAppThreadView({
                 )}
               </span>
               <div className="flex items-start gap-2">
+                {/* Plain text in, plain text out — no splitSignature, no
+                    joinPolishedBody: WhatsApp formatting is its own markup and HTML
+                    would be sent literally. The quote is a native replyToMessageId, so
+                    it is not in the draft and cannot be rewritten. */}
+                <PolishButton
+                  polish={polish}
+                  draftPlain={draft}
+                  context={polishContext}
+                  budget={polishBudget}
+                >
+                  {polishBudget && (
+                    <PolishBudgetToggle
+                      polish={polish}
+                      budget={polishBudget}
+                      onChange={setKeepShort}
+                      disabled={!canReply}
+                    />
+                  )}
+                </PolishButton>
                 {/* The microphone now produces TEXT, not a voice note.
 
                     Sending a recording to a client was removed deliberately: it put the

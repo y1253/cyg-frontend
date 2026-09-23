@@ -2,12 +2,23 @@ import { fetchWithAuth } from './client';
 
 const API = '/api';
 
+/** Mirrors `POLISH_KINDS` in the server's `polish-reply.dto.ts`. */
+export type PolishKind = 'email' | 'chat' | 'sms' | 'whatsapp';
+
 export interface PolishReplyPayload {
-  kind: 'email' | 'chat';
+  kind: PolishKind;
   // The user's rough draft (plain text).
   draft: string;
   // The whole email / whole conversation, assembled by the caller.
   context: string;
+  /**
+   * Ask for a reply under this many characters. Omitted unless the user ticked the
+   * "keep it short" toggle — see `PolishBudget`.
+   *
+   * ⚠️ ADVISORY. The server puts it in the prompt and does not truncate, so the model can
+   * overshoot. `PolishPanel` re-checks the preview against the same budget.
+   */
+  maxChars?: number;
 }
 
 // Ask the AI to polish a draft reply. Returns the polished plain text.

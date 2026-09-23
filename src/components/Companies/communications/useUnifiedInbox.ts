@@ -10,7 +10,6 @@ import { dedupeById } from '../message-utils';
 import { clampSources } from './inbox-clamp';
 import {
   getItemTimestamp,
-  isUnreadMissedCall,
   matchesKindFilter,
   type KindFilter,
   type SourceKind,
@@ -307,7 +306,6 @@ export function useUnifiedInbox({
         // Tab-forced state filter: UNCOMPLETED hides completed, UNREAD hides read.
         if (selectedLabel === 'UNCOMPLETED' && it.data.isCompleted) return false;
         if (selectedLabel === 'UNREAD' && it.data.isRead) return false;
-        if (selectedLabel === 'MISSED' && !isUnreadMissedCall(it)) return false;
         return true;
       }),
     [unifiedItems, filter, selectedLabel],
@@ -323,9 +321,7 @@ export function useUnifiedInbox({
           ? !it.data.isRead
           : selectedLabel === 'UNCOMPLETED'
             ? !it.data.isCompleted
-            : selectedLabel === 'MISSED'
-              ? isUnreadMissedCall(it)
-              : false,
+            : false,
       ).length,
     [unifiedItems, selectedLabel],
   );
