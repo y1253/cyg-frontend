@@ -21,6 +21,7 @@ import {
   type Session,
 } from 'sip.js';
 import { useAuth } from '@/context/AuthContext';
+import { useRealtime } from '@/hooks/useRealtime';
 import {
   fetchHoldAudio,
   fetchPendingCalls,
@@ -913,7 +914,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           ['phone-timeline', info.companyId],
           ['phone-counts', info.companyId],
           ['phone-ringing', info.companyId],
-          ['active-call', info.companyId],
+          // ⚠️ `phone-active-call`, NOT `active-call`. `useActiveCall` registers under
+          // the prefixed key (and so does `useStartCall`), so the bare one matched no
+          // query at all — hanging up refreshed everything here EXCEPT the one thing the
+          // agent is looking at, and "On a call · «name»" sat there until the 4s poll
+          // happened to land. A wrong key is not a type error and fails in silence.
+          ['phone-active-call', info.companyId],
         );
       }
       for (const queryKey of keys) void qc.invalidateQueries({ queryKey });
@@ -1589,6 +1595,20 @@ Transferred by ${info.transferFrom.name}`
       regRef.current = null;
     };
   }, [token]);
+
+  // ── The real-time channel ─────────────────────────────────────────────────
+  //
+  // Mounted HERE rather than in `NotificationProvider` (which is where the
+  // internal-message stream lives) for one reason: `NotificationProvider` wraps this
+  // provider, so it cannot reach `pushEvent`. This is the inner one, so it can do both
+  // jobs off a single connection — hand ringing calls to the pairing logic, and
+  // invalidate every communications query for everything else.
+  //
+  // It does NOT replace the SSE stream below or the `/pending-calls` burst in
+  // `onInvite`. All three feed the same de-duped `pushEvent`, and each covers a case the
+  // others do not: SSE is instant where it works, the burst needs no channel at all, and
+  // this one is the only one that crosses the office TLS filter.
+  useRealtime(pushEvent);
 
   // ── SSE: which call belongs to whom ───────────────────────────────────────
   useEffect(() => {
