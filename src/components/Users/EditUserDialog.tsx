@@ -129,7 +129,8 @@ export function EditUserDialog({ user, onOpenChange }: Props) {
               placeholder="514-555-0123"
             />
             <p className="text-xs text-muted-foreground">
-              For the staff directory. Calls are not routed to it.
+              Rings alongside their browser for companies they are assigned to. Leave blank
+              to ring their browser only.
             </p>
             {phoneError && <p className="text-sm text-destructive">{phoneError}</p>}
           </div>

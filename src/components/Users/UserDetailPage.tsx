@@ -210,7 +210,7 @@ export function UserDetailPage() {
               {user.phoneE164 ? (
                 formatE164(user.phoneE164)
               ) : (
-                <span className="text-muted-foreground">—</span>
+                <span className="text-muted-foreground">Browser only</span>
               )}
             </p>
           </div>

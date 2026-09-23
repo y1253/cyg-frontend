@@ -35,7 +35,7 @@ import { AttachmentChip } from '../AttachmentPreview';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
 import { ANCHOR_RING } from './anchor-style';
-import { mergePending, type PendingMeta } from './pending-sends';
+import { isPendingId, mergePending, type PendingMeta } from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TranslateControl } from './TranslatePanel';
@@ -91,6 +91,7 @@ export function SmsThreadView({
   peer,
   anchorMsgId,
   anchorTime,
+  onAnchorChange,
   supportNumber,
   isCompleted,
   active,
@@ -106,6 +107,14 @@ export function SmsThreadView({
   /** The clicked message. Empty when the thread was opened by sending a new text. */
   anchorMsgId: string;
   anchorTime: string;
+  /**
+   * Move the thread's anchor to an earlier message — the "go to this message" path.
+   *
+   * ⚠️ REQUIRED, not optional. This whole view was missing the behaviour precisely
+   * because `ChatThreadView` was given the prop and this one silently was not; making it
+   * required turns the same omission into a compile error next time.
+   */
+  onAnchorChange: (m: { id: string; at: string }) => void;
   supportNumber: string | null;
   isCompleted: boolean;
   active: boolean;
@@ -163,14 +172,47 @@ export function SmsThreadView({
   // for why, and for what `ChatThreadView` does instead where a quote exists.
   const isFuture = makeIsFuture(messages, anchorTime);
 
-  // Jump to the clicked message once the thread paints. Depends on the loaded count
-  // so it re-runs when the messages actually arrive, not merely on mount.
+  /**
+   * Jump to the anchor message — on open, and again whenever the anchor MOVES.
+   *
+   * ⚠️ `anchorMsgId` in the deps is what makes "go to this message" work at all. Without
+   * it, re-anchoring re-points `anchorRef` at the new bubble and moves the ring and the
+   * dimming, and scrolls nothing — which looks exactly like the feature not existing.
+   *
+   * ⚠️ `scrolledFor` is not an optimisation. `messages` carries optimistic pending rows
+   * (see `mergePending` above), so `messages.length` changes when you SEND — and again
+   * when the poll brings the real row back. Without the latch, sending a reply yanks the
+   * view back up to the anchor you were replying to, twice. The count has to stay in the
+   * deps regardless: the anchor node does not exist until the thread query resolves.
+   *
+   * `ChatThreadView` solves the same problem by scrolling to the BOTTOM after a send
+   * (it owns a `max-h` scroll box). Here the composer is already at the bottom of the
+   * page container, so the right answer is to not scroll at all.
+   */
+  const scrolledFor = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!active || messages.length === 0) return;
-    anchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [active, messages.length]);
+    // Re-arm while hidden: the node has no layout box then, so scrollIntoView is a no-op
+    // and the recorded id would be a lie.
+    if (!active) {
+      scrolledFor.current = null;
+      return;
+    }
+    if (!anchorMsgId || messages.length === 0) return;
+    const el = anchorRef.current;
+    // ⚠️ Before the write, never after. On the first render the anchor is not mounted
+    // yet; recording the id here would consume the one chance to make the real jump.
+    if (!el) return;
+    if (scrolledFor.current === anchorMsgId) return;
+    scrolledFor.current = anchorMsgId;
+    el.scrollIntoView({ block: 'end' });
+  }, [active, anchorMsgId, messages.length]);
 
   // Drives the "Back to message" affordance — only useful once it is off screen.
+  //
+  // ⚠️ `anchorMsgId` in the deps, or the observer goes on watching the OLD node after a
+  // re-anchor: that bubble is still mounted (only the ref moved), so `anchorVisible`
+  // tracks a message nobody is looking at and the pill appears and vanishes at random
+  // while its click correctly scrolls somewhere else.
   useEffect(() => {
     const el = anchorRef.current;
     if (!el) return;
@@ -179,7 +221,7 @@ export function SmsThreadView({
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [messages.length]);
+  }, [anchorMsgId, messages.length]);
 
   /**
    * The message this reply quotes.
@@ -191,6 +233,28 @@ export function SmsThreadView({
    * anchor again and the X would do nothing.
    */
   const [quotePick, setQuotePick] = useState<SmsItem | null | undefined>(undefined);
+
+  /**
+   * Go to an earlier message — the same move `ChatThreadView.navigateToMessage` makes.
+   *
+   * The anchor moves, so the thread scrolls to it, the ring follows it and everything
+   * newer dims. The composer then quotes it for free, because `quotePick: undefined`
+   * resolves to the anchor.
+   *
+   * ⚠️ `setQuotePick(undefined)`, NOT `setQuotePick(m)`. Both would DISPLAY the same
+   * message, but pinning `m` stores a row object the 15s poll is about to replace, and
+   * it silently desynchronises the quote from the anchor afterwards. `undefined` also
+   * keeps the three-state rule below intact — the chip's X can still write `null`.
+   *
+   * ⚠️ Deliberately does NOT clear `draft`, the attachments or the polish preview, even
+   * though Chat's `resetReply()` clears its own. Chat's reply box is a transient panel
+   * opened per reply; this composer is always open and holds work the user has typed.
+   */
+  const navigateToMessage = (m: SmsItem) => {
+    if (isPendingId(m.id)) return;
+    onAnchorChange({ id: m.id, at: m.at });
+    setQuotePick(undefined);
+  };
   const anchorMessage = messages.find((m) => m.id === anchorMsgId) ?? null;
   const quoted = quotePick === undefined ? anchorMessage : quotePick;
 
@@ -439,7 +503,7 @@ export function SmsThreadView({
                   submit(held.row.body, held.files);
                 }}
                 onDiscard={() => sends.drop(m.id)}
-                onReply={() => setQuotePick(m)}
+                onReply={() => navigateToMessage(m)}
                 onCompleteUntil={() =>
                   onMarkUntil(
                     m.id,
@@ -631,7 +695,7 @@ function SmsBubble({
   anchorRef?: React.Ref<HTMLDivElement>;
   /** THE message the reader opened. See `ANCHOR_RING`. */
   isAnchor?: boolean;
-  /** Quote this message in the composer. */
+  /** Go to this message: it becomes the anchor, and the composer quotes it. */
   onReply: () => void;
   /** Complete this message and everything above it. */
   onCompleteUntil: () => void;

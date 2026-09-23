@@ -315,3 +315,56 @@ export async function fetchInternalConferenceStatus(
   await throwOnError(res, 'Could not check the call');
   return res.json() as Promise<ConferenceStatus>;
 }
+
+/**
+ * Tell the server how the internal call this browser was on ended.
+ *
+ * ── WHY THE BROWSER REPORTS AT ALL ─────────────────────────────────────────────
+ * Nothing else does. `endCallServerSide` skips internal calls (the `<Dial>` bridge
+ * collapses on its own, so there is no leg to hang up), and every provider-driven path
+ * that could settle the row declines on this ending — SignalWire does not request the
+ * `<Dial action>` URL when the caller hangs up, and the child-leg backstop waits five
+ * minutes. Until something writes a status the row reads "In progress".
+ *
+ * Fire-and-forget: the call is already over and the card is already gone, so a failed
+ * report must never surface as an error. The server's own backstops still run.
+ */
+export function reportInternalCallEnded(
+  token: string,
+  sid: string,
+  body: { answered: boolean; durationSec: number },
+): void {
+  void fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/ended`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    },
+  ).catch(() => undefined);
+}
+
+/**
+ * The same report, from a page that is going away.
+ *
+ * ⚠️ `keepalive`, or the request is cancelled the moment the document unloads — the same
+ * rule `hangUpCallOnUnload` follows. `sendBeacon` would survive too but cannot set an
+ * Authorization header, and this route is JWT-guarded.
+ */
+export function reportInternalCallEndedOnUnload(
+  token: string,
+  sid: string,
+  body: { answered: boolean; durationSec: number },
+): void {
+  try {
+    void fetch(`${API}/internal-calls/${encodeURIComponent(sid)}/ended`, {
+      method: 'POST',
+      headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // A page mid-unload is the one place a throw here would be invisible anyway.
+  }
+}

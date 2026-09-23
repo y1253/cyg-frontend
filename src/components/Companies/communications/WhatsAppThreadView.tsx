@@ -39,7 +39,7 @@ import { DictateButton } from '../DictateButton';
 import { TemplatePicker } from './TemplatePicker';
 import { makeIsFuture } from './thread-dim';
 import { ANCHOR_RING } from './anchor-style';
-import { mergePending, type PendingMeta } from './pending-sends';
+import { isPendingId, mergePending, type PendingMeta } from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TranslateControl } from './TranslatePanel';
@@ -63,6 +63,7 @@ export function WhatsAppThreadView({
   peer,
   anchorMsgId,
   anchorTime,
+  onAnchorChange,
   isCompleted,
   onMarkUntil,
   active,
@@ -78,6 +79,14 @@ export function WhatsAppThreadView({
   /** The clicked message. Empty when opened without one (the thread opens at its end). */
   anchorMsgId: string;
   anchorTime: string;
+  /**
+   * Move the thread's anchor to an earlier message — the "go to this message" path,
+   * shared by the per-message Reply arrow and the quoted-message preview.
+   *
+   * ⚠️ REQUIRED, not optional. This view was missing the behaviour precisely because
+   * `ChatThreadView` was given the prop and this one silently was not.
+   */
+  onAnchorChange: (m: { id: string; at: string }) => void;
   isCompleted: boolean;
   active: boolean;
   onClose: () => void;
@@ -190,11 +199,32 @@ export function WhatsAppThreadView({
     !!data?.windowOpenUntil && new Date(data.windowOpenUntil).getTime() > now;
   const canReply = !!data?.connected && windowOpen;
 
+  /**
+   * Jump to the anchor message — on open, and again whenever the anchor MOVES.
+   *
+   * See the twin in `SmsThreadView` for the full reasoning. In short: `anchorMsgId` in
+   * the deps is what makes "go to this message" work at all, and `scrolledFor` is what
+   * stops an optimistic pending row (which changes `messages.length` on send) from
+   * yanking the view back up to the message you were replying to.
+   */
+  const scrolledFor = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!active || messages.length === 0) return;
-    anchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [active, messages.length]);
+    if (!active) {
+      scrolledFor.current = null;
+      return;
+    }
+    if (!anchorMsgId || messages.length === 0) return;
+    const el = anchorRef.current;
+    // Before the write, never after — on the first render the anchor is not mounted yet.
+    if (!el) return;
+    if (scrolledFor.current === anchorMsgId) return;
+    scrolledFor.current = anchorMsgId;
+    el.scrollIntoView({ block: 'end' });
+  }, [active, anchorMsgId, messages.length]);
 
+  // ⚠️ `anchorMsgId` in the deps, or after a re-anchor the observer keeps watching the
+  // OLD node — still mounted, only the ref moved — and the "Back to message" pill tracks
+  // a message nobody is looking at.
   useEffect(() => {
     const el = anchorRef.current;
     if (!el) return;
@@ -203,7 +233,7 @@ export function WhatsAppThreadView({
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [messages.length]);
+  }, [anchorMsgId, messages.length]);
 
   /**
    * The message this reply quotes — `undefined` = not chosen, so it falls back to the
@@ -215,6 +245,27 @@ export function WhatsAppThreadView({
   );
   const anchorMessage = messages.find((m) => m.id === anchorMsgId) ?? null;
   const quoted = quotePick === undefined ? anchorMessage : quotePick;
+
+  /**
+   * Go to an earlier message — the same move `ChatThreadView.navigateToMessage` makes,
+   * shared by the Reply arrow and the quoted-message preview exactly as Chat shares it.
+   *
+   * ⚠️ `setQuotePick(undefined)`, NOT `setQuotePick(m)`: `undefined` resolves to the
+   * anchor through the live `messages` lookup above, so it cannot pin a row object the
+   * 15s poll is about to replace — which matters here more than in SMS, because
+   * `handleSend` puts `quoted?.messageId` on the wire. It also preserves the three-state
+   * rule, so the chip's X still clears to a plain send.
+   *
+   * ⚠️ The pending guard is not belt-and-braces on the quote path. `byMessageId` is
+   * built from `messages`, which includes optimistic rows carrying a synthetic negative
+   * `messageId`, so a quote CAN resolve to one — and `Selection` is persisted, so a
+   * `pending:` anchor would survive a reload pointing at a row that never existed.
+   */
+  const navigateToMessage = (m: WhatsAppItem) => {
+    if (isPendingId(m.id)) return;
+    onAnchorChange({ id: m.id, at: m.at });
+    setQuotePick(undefined);
+  };
 
   // The server resolves a quote to OUR id when the original is in the same page; this
   // turns that id back into the message so a bubble can show it. Built once per render
@@ -434,7 +485,7 @@ export function WhatsAppThreadView({
               <WhatsAppBubble
                 key={m.id}
                 companyId={companyId}
-                onReply={() => setQuotePick(m)}
+                onReply={() => navigateToMessage(m)}
                 onCompleteUntil={() =>
                   onMarkUntil(
                     // ⚠️ `m.messageId`, NOT `Number(m.id)`.
@@ -481,6 +532,7 @@ export function WhatsAppThreadView({
                   )
                 }
                 quotedOf={quotedOf}
+                onNavigateToMessage={navigateToMessage}
                 message={m}
                 token={token}
                 dimmed={isFuture(m)}
@@ -877,6 +929,7 @@ function WhatsAppBubble({
   onCompleteUntil,
   onReadUntil,
   quotedOf,
+  onNavigateToMessage,
 }: {
   message: WhatsAppItem;
   token: string | null;
@@ -893,16 +946,21 @@ function WhatsAppBubble({
   onRetry: () => void;
   onDiscard: () => void;
   translation: ReturnType<typeof useTranslation>;
-  /** Quote this message in the composer. */
+  /** Go to this message: it becomes the anchor, and the composer quotes it. */
   onReply: () => void;
   /** Complete this message and everything above it. */
   onCompleteUntil: () => void;
   onReadUntil: () => void;
   /** Resolve `replyToMessageId` against the loaded thread. */
   quotedOf: (m: WhatsAppItem) => WhatsAppItem | null;
+  /** Go to the quoted original. Same path the Reply arrow takes, as in `ChatBubble`. */
+  onNavigateToMessage: (m: WhatsAppItem) => void;
 }) {
   const own = m.direction === 'outbound';
   const quoted = quotedOf(m);
+  // Resolved, and real: an optimistic row carries a synthetic id that must never be
+  // written to the persisted anchor.
+  const canJumpToQuoted = !!quoted && !isPendingId(quoted.id);
   const failed = pending?.sendState === 'failed';
   return (
     <div
@@ -936,9 +994,18 @@ function WhatsAppBubble({
               costing a lookup per bubble, the same trade `ChatBubble` makes. */}
           {m.replyToMessageId !== null && (
             <div
+              // Click to go to the original, exactly as `ChatBubble` does. Inert when the
+              // target is outside the loaded page (nothing to jump to) or is an optimistic
+              // row — a `pending:` id must never reach the anchor, which is persisted.
+              role={canJumpToQuoted ? 'button' : undefined}
+              title={canJumpToQuoted ? 'Go to this message' : undefined}
+              onClick={
+                canJumpToQuoted ? () => onNavigateToMessage(quoted) : undefined
+              }
               className={[
                 'mb-1.5 border-l-2 pl-2 text-xs',
                 own ? 'border-emerald-500/60' : 'border-muted-foreground/40',
+                canJumpToQuoted ? 'cursor-pointer hover:opacity-80' : '',
               ].join(' ')}
             >
               {quoted ? (

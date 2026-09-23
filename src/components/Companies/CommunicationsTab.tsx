@@ -1192,6 +1192,22 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           peer={selected.peer}
           anchorMsgId={selected.msgId}
           anchorTime={selected.msgTime}
+          // Go to an earlier message, the same way `ChatThreadView` does above. `peer`
+          // is carried through because re-anchoring moves WITHIN one conversation — the
+          // same reasoning as chat keeping its `spaceId`.
+          //
+          // ⚠️ `m.at`, not `m.createTime`: a phone item's timestamp field is `at`
+          // (`getItemTimestamp`). Copying chat's line verbatim yields `msgTime:
+          // undefined`, which breaks the dim boundary rather than the scroll — a thread
+          // that looks subtly wrong instead of an error.
+          onAnchorChange={(m) =>
+            setSelected({
+              kind: 'sms',
+              peer: selected.peer,
+              msgId: m.id,
+              msgTime: m.at,
+            })
+          }
           supportNumber={supportNumber}
           isCompleted={row?.isCompleted ?? false}
           active={active}
@@ -1224,6 +1240,15 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
           peer={selected.peer}
           anchorMsgId={selected.msgId}
           anchorTime={selected.msgTime}
+          // As above — also reached by clicking a quoted message inside a bubble.
+          onAnchorChange={(m) =>
+            setSelected({
+              kind: 'whatsapp',
+              peer: selected.peer,
+              msgId: m.id,
+              msgTime: m.at,
+            })
+          }
           isCompleted={row?.isCompleted ?? false}
           active={active}
           onClose={closeDetail}

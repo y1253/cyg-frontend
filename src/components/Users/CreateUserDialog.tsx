@@ -129,7 +129,8 @@ export function CreateUserDialog({ open, onOpenChange }: Props) {
                 placeholder="514-555-0123"
               />
               <p className="text-xs text-muted-foreground">
-                For the staff directory. Calls are not routed to it.
+                Rings alongside their browser when a call comes in for a company they are
+                assigned to. They press 1 to accept.
               </p>
               {phoneError && (
                 <p className="text-sm text-destructive">{phoneError}</p>

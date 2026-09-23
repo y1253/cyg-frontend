@@ -62,7 +62,11 @@ import {
   callNotificationTag,
   closeNotification,
 } from '@/lib/desktopNotification';
-import { setInternalCallState } from '@/api/internalCalls';
+import {
+  reportInternalCallEnded,
+  reportInternalCallEndedOnUnload,
+  setInternalCallState,
+} from '@/api/internalCalls';
 import { canCompleteCall } from '@/components/Phone/call-slots';
 import { setTabRinging } from '@/lib/tab-badge';
 import { useCallNotifier } from '@/context/NotificationContext';
@@ -712,6 +716,32 @@ const MAX_HELD_INVITES = 8;
  */
 const COMPLETE_PROMPT_MS = 5_000;
 
+/**
+ * What this browser knows about how its internal call ended.
+ *
+ * `answeredAt` is stamped at Established and is null while ringing, so it answers both
+ * halves at once: whether the call was ever picked up, and how long it ran. The server
+ * rounds nothing and trusts nothing beyond this — it refuses the report unless the sender
+ * is a participant and the outcome is still unknown.
+ *
+ * ⚠️ Derived at TEARDOWN, not from `publish`'s `seconds`. That value is recomputed on a
+ * 1s timer for display; reading it here would round a 9.8s call to whatever the last tick
+ * happened to say.
+ */
+function endedReportFor(slot: CallSlot): {
+  answered: boolean;
+  durationSec: number;
+} {
+  if (slot.answeredAt === null) return { answered: false, durationSec: 0 };
+  return {
+    answered: true,
+    durationSec: Math.max(
+      0,
+      Math.round((Date.now() - slot.answeredAt) / 1000),
+    ),
+  };
+}
+
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const notifyCall = useCallNotifier();
@@ -955,7 +985,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       const tok = tokenRef.current;
       if (!tok) return;
       for (const slot of slotList()) {
-        if (slot.info.kind === 'internal') continue;
+        // Internal still needs no hang-up (the bridge collapses with this page), but it
+        // does still need the outcome reported, or the row is left reading "In progress"
+        // until the server's five-minute backstop.
+        if (slot.info.kind === 'internal') {
+          if (slot.info.callSid) {
+            reportInternalCallEndedOnUnload(
+              tok,
+              slot.info.callSid,
+              endedReportFor(slot),
+            );
+          }
+          continue;
+        }
         hangUpCallOnUnload(tok, slot.info.companyId, slot.info.callSid);
       }
     };
@@ -1151,6 +1193,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     (id: string, reason: string) => {
       const slot = slotsRef.current.get(id);
       if (!slot) return;
+
+      // ⚠️ CAPTURED FIRST. `releaseSlotMedia` below sets `answeredAt = null`, so reading
+      // this after the teardown reports `answered: false` for every call — filing a real
+      // conversation as MISSED, which is the very mislabelling this whole change exists
+      // to stop.
+      const endedReport = endedReportFor(slot);
+
       // Declined, hung up, rang out, or CANCELled because another tab or another agent
       // answered — every one of those funnels through here. It carries
       // `requireInteraction`, so an unclosed one outlives the call indefinitely.
@@ -1160,6 +1209,24 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       slot.audio.remove();
       slot.takeBackInvite = null;
       slotsRef.current.delete(id);
+
+      /**
+       * Tell the server how an INTERNAL call ended.
+       *
+       * ⚠️ Here rather than in `endCallServerSide`, because that only runs when THIS
+       * browser hangs up. Every other ending — the colleague hanging up first, a decline,
+       * a call that rang out — reaches the server through this function and nothing else,
+       * and until a status is written the row reads "In progress" for up to five minutes.
+       *
+       * Safe to send more than once and from both participants: the server takes it only
+       * while the outcome is still unknown, and only from a participant.
+       */
+      if (slot.info.kind === 'internal' && slot.info.callSid) {
+        const tok = tokenRef.current;
+        if (tok) {
+          reportInternalCallEnded(tok, slot.info.callSid, endedReport);
+        }
+      }
 
       /**
        * The far side hung up on a call that was actually answered: offer to tick it off
@@ -1986,7 +2053,12 @@ Transferred by ${info.transferFrom.name}`
     const tok = tokenRef.current;
     if (!tok) return;
     const { kind, companyId, callSid } = slot.info;
-    if (kind === 'internal' || !callSid) return;
+    if (!callSid) return;
+
+    // An internal call needs no server hang-up — both legs are browsers, so the `<Dial>`
+    // bridge collapses on its own. Telling the server it ENDED is handled in `endSlot`
+    // instead, which runs on every ending rather than only a deliberate one.
+    if (kind === 'internal') return;
     void hangUpCall(tok, companyId, callSid);
   }, []);
 
