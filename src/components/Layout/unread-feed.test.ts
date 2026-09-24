@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adjustMissedForDismissed,
   badgeLabel,
   feedRowChrome,
   isMissedCallRow,
@@ -323,5 +324,108 @@ describe('returnCallTarget', () => {
     for (const item of ITEMS.filter((i) => i.kind !== 'call')) {
       expect(returnCallTarget(item)).toBeNull();
     }
+  });
+});
+
+/**
+ * The header NUMBER, not just the row.
+ *
+ * `unreadFeedDismiss` hides a row; it cannot touch a server scalar. So marking a missed
+ * call read left the pill and the browser-tab badge showing the old figure until a
+ * refetch landed — "Showing 0 of 1", with the pill still lit.
+ */
+describe('adjustMissedForDismissed', () => {
+  const missedCall = (over: Partial<UnreadFeedItem> = {}): UnreadFeedItem =>
+    ({
+      ...base,
+      id: 'swcall:m1',
+      scope: 'company',
+      kind: 'call',
+      sid: 'm1',
+      itemId: 'swcall:m1',
+      peer: '+14385551212',
+      isVoicemail: false,
+      isMissed: true,
+      ...over,
+    }) as UnreadFeedItem;
+
+  const run = (
+    rawUnread: UnreadFeedItem[],
+    dismissed: string[],
+    missedCalls: Record<number, number> | undefined,
+    missedCallsOwn: number,
+  ) =>
+    adjustMissedForDismissed({
+      rawUnread,
+      missedCalls,
+      missedCallsOwn,
+      dismissed: new Set(dismissed),
+    });
+
+  it('decrements both the company entry and the own-total', () => {
+    const out = run([missedCall()], ['swcall:m1'], { 4: 3 }, 3);
+    expect(out.missedCalls).toEqual({ 4: 2 });
+    expect(out.missedCallsOwn).toBe(2);
+  });
+
+  it('ignores a dismissed row that is not a missed call', () => {
+    const answered = missedCall({ id: 'swcall:a1', isMissed: false });
+    const out = run([answered], ['swcall:a1'], { 4: 3 }, 3);
+    expect(out.missedCalls).toEqual({ 4: 3 });
+    expect(out.missedCallsOwn).toBe(3);
+  });
+
+  it('handles an internal missed call the same way', () => {
+    // The reported case: a staff call marked read from the pill itself.
+    const internal = missedCall({
+      id: 'intcall:c9',
+      scope: 'internal',
+      companyId: 77,
+    });
+    const out = run([internal], ['intcall:c9'], { 77: 1 }, 1);
+    expect(out.missedCalls).toEqual({ 77: 0 });
+    expect(out.missedCallsOwn).toBe(0);
+  });
+
+  it('does NOT create a company key the server never reported', () => {
+    // Absent means UNKNOWN, deliberately distinct from 0 — CompanyRow renders no badge
+    // for a missing key, and inventing a 0 would assert something the server did not.
+    const out = run([missedCall()], ['swcall:m1'], { 9: 2 }, 5);
+    expect(out.missedCalls).toEqual({ 9: 2 });
+    expect('4' in (out.missedCalls ?? {})).toBe(false);
+    expect(out.missedCallsOwn).toBe(4);
+  });
+
+  it('clamps at zero rather than rendering a negative badge', () => {
+    const out = run(
+      [missedCall(), missedCall({ id: 'swcall:m2' })],
+      ['swcall:m1', 'swcall:m2'],
+      { 4: 1 },
+      1,
+    );
+    expect(out.missedCalls).toEqual({ 4: 0 });
+    expect(out.missedCallsOwn).toBe(0);
+  });
+
+  it('⚠️ stops adjusting once the server has dropped the row — never double-subtracts', () => {
+    // THE property the whole design rests on. The adjustment is derived from rows still
+    // present in the payload, so a caught-up server (row gone, count already 2) is left
+    // exactly as it is, even though the id is still in the dismiss store for 5 minutes.
+    const out = run([], ['swcall:m1'], { 4: 2 }, 2);
+    expect(out.missedCalls).toEqual({ 4: 2 });
+    expect(out.missedCallsOwn).toBe(2);
+  });
+
+  it('is a no-op when nothing is dismissed, and keeps the same object', () => {
+    const missedCalls = { 4: 3 };
+    const out = run([missedCall()], [], missedCalls, 3);
+    expect(out.missedCalls).toBe(missedCalls);
+    expect(out.missedCallsOwn).toBe(3);
+  });
+
+  it('survives an undefined map — absent is not zero', () => {
+    const out = run([missedCall()], ['swcall:m1'], undefined, 1);
+    expect(out.missedCalls).toBeUndefined();
+    expect(out.missedCallsOwn).toBe(0);
   });
 });

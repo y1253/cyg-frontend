@@ -72,7 +72,13 @@ export function useInternalCallState() {
         },
       );
     },
-    onError: () => {
+    onError: (_err, { sid, action }) => {
+      // ⚠️ Undo the dismissal, or a FAILED mark leaves the row hidden from the bell for
+      // the store's whole 5-minute TTL while the count correctly stays high — a mismatch
+      // nothing clears. Both sibling hooks (`useMarkFeedItemRead`, `useMarkPhoneItem`)
+      // already restore; this one did not.
+      if (action === 'read') restoreUnreadFeedItem(`intcall:${sid}`);
+      if (action === 'unread') dismissUnreadFeedItem(`intcall:${sid}`);
       void qc.invalidateQueries({ queryKey: ['internal-calls'] });
     },
     onSettled: () => {

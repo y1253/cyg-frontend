@@ -42,6 +42,15 @@ export function useMarkFeedItemRead() {
         void qc.invalidateQueries({ queryKey: ['internal-messages'] });
         void qc.invalidateQueries({ queryKey: ['internal-calls'] });
         void qc.invalidateQueries({ queryKey: ['internal-unread-count'] });
+        // ⚠️ These two are why an internal missed call marked read FROM THE TOP left the
+        // header number untouched for the whole 60s poll. The early return below made the
+        // `['inbox-summary']` invalidation in the company branch unreachable, and
+        // `internal-unread-count` is the MESSAGE counter, not the call one — so nothing
+        // this hook invalidated fed `missedCallsOwn` or the workspace's call chips. The
+        // same click from inside the workspace goes through `useInternalCallState`, which
+        // does invalidate the summary, which is what made it look intermittent.
+        void qc.invalidateQueries({ queryKey: ['internal-call-counts'] });
+        void qc.invalidateQueries({ queryKey: ['inbox-summary'] });
         return;
       }
       switch (item.kind) {

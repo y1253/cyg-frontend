@@ -239,3 +239,57 @@ export function badgeLabel(count: number, truncated: boolean): string {
   if (count > 99) return '99+';
   return truncated ? `${count}+` : String(count);
 }
+
+/**
+ * The missed-call numbers, with rows the user has just read already taken off.
+ *
+ * ── WHY A COUNT NEEDS THIS AT ALL ──────────────────────────────────────────────
+ * `unreadFeedDismiss` hides a ROW; it structurally cannot change a NUMBER. So marking a
+ * missed call read made it vanish from the bell instantly while the header pill and the
+ * browser-tab badge kept the old figure until a refetch of the heaviest endpoint in the
+ * app came back — long enough that `MissedCallsIndicator` renders "Showing 0 of 1", and
+ * if the count was 1 the pill does not even disappear.
+ *
+ * ⚠️ **This can never double-subtract, and that is the whole design.** The adjustment is
+ * derived from rows STILL PRESENT in the server's payload. The moment a refetch drops a
+ * row, there is nothing left to match and its adjustment disappears on its own — so a
+ * server that has already caught up is never decremented twice. No expiry, no
+ * reconciliation, no state of its own.
+ *
+ * ⚠️ An ABSENT company key is left absent, never created. Absent means *unknown*,
+ * deliberately distinct from 0 — `CompanyRow` renders no badge for a missing key, and
+ * subtracting into a new one would invent a zero the server never asserted.
+ */
+export function adjustMissedForDismissed(input: {
+  /** The raw feed as the server sent it, BEFORE the dismiss filter. */
+  rawUnread: readonly UnreadFeedItem[];
+  missedCalls: Record<number, number> | undefined;
+  missedCallsOwn: number;
+  dismissed: ReadonlySet<string>;
+}): { missedCalls: Record<number, number> | undefined; missedCallsOwn: number } {
+  const { rawUnread, missedCalls, missedCallsOwn, dismissed } = input;
+  if (dismissed.size === 0) return { missedCalls, missedCallsOwn };
+
+  let ownDrop = 0;
+  const perCompany = new Map<number, number>();
+  for (const item of rawUnread) {
+    if (!dismissed.has(item.id) || !isMissedCallRow(item)) continue;
+    perCompany.set(item.companyId, (perCompany.get(item.companyId) ?? 0) + 1);
+    ownDrop += 1;
+  }
+  if (ownDrop === 0) return { missedCalls, missedCallsOwn };
+
+  let nextMap = missedCalls;
+  if (missedCalls) {
+    nextMap = { ...missedCalls };
+    for (const [companyId, n] of perCompany) {
+      // Only touch what the server actually reported a number for.
+      if (!(companyId in nextMap)) continue;
+      nextMap[companyId] = Math.max(0, nextMap[companyId] - n);
+    }
+  }
+
+  // ⚠️ Clamped. A dismissal can land while a refetch is in flight, and a negative here
+  // would render as a literal "-1" on the tab badge.
+  return { missedCalls: nextMap, missedCallsOwn: Math.max(0, missedCallsOwn - ownDrop) };
+}

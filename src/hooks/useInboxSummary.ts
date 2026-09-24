@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchInboxSummary } from '@/api/gmail';
 import { useDismissedIds } from '@/lib/unreadFeedDismiss';
+import { adjustMissedForDismissed } from '@/components/Layout/unread-feed';
 
 /**
  * Both cross-company surfaces from ONE request: the dashboard's uncompleted badge map
@@ -43,14 +44,34 @@ export function useInboxSummary() {
     [query.data, dismissed],
   );
 
+  /**
+   * The same dismissal, applied to the NUMBERS.
+   *
+   * Filtering `unread` above only fixes what the bell LISTS. The header pill, the browser
+   * tab badge and the dashboard's per-company badge all read server scalars, which no
+   * amount of row-hiding can move — so marking a missed call read used to leave them
+   * showing the old figure until a refetch landed. See `adjustMissedForDismissed` for why
+   * this cannot double-subtract once the server catches up.
+   */
+  const missed = useMemo(
+    () =>
+      adjustMissedForDismissed({
+        rawUnread: query.data?.unread ?? [],
+        missedCalls: query.data?.missedCalls,
+        missedCallsOwn: query.data?.missedCallsOwn ?? 0,
+        dismissed,
+      }),
+    [query.data, dismissed],
+  );
+
   return {
     ...query,
     /** GLOBAL — every company. Absent key means unknown, NOT zero. */
     uncompleted: query.data?.uncompleted,
     /** GLOBAL unread missed calls per company. Absent key means unknown, NOT zero. */
-    missedCalls: query.data?.missedCalls,
+    missedCalls: missed.missedCalls,
     /** ASSIGNMENT-SCOPED total of the same — the red number on the browser tab. */
-    missedCallsOwn: query.data?.missedCallsOwn ?? 0,
+    missedCallsOwn: missed.missedCallsOwn,
     /** ASSIGNMENT-SCOPED — only companies this user is responsible for. */
     unread,
     /** The bell's badge. One source with the list, so they can never disagree. */
