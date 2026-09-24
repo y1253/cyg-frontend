@@ -973,6 +973,30 @@ export async function postPresence(
   }).catch(() => undefined);
 }
 
+/**
+ * "I am signing out" — forget me now, rather than in five minutes.
+ *
+ * ⚠️ `keepalive`, and NOT awaited. `logout()` clears the token and the idle-timeout path
+ * follows it with `window.location.href = '/login'`, so an ordinary fetch would be
+ * cancelled by the navigation. `sendBeacon` would survive too but cannot set an
+ * Authorization header, and this route is JWT-guarded — the same trade `hangUpCallOnUnload`
+ * makes.
+ *
+ * Silent on failure, like the beat above: the user is signing out either way, and the
+ * server's five-minute TTL is still there as the backstop.
+ */
+export function clearPresence(token: string): void {
+  try {
+    void fetch(`${API}/phone/presence`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // Signing out must not be blockable by anything that happens here.
+  }
+}
+
 // ─── Conference: add call, hold, swap, merge, drop ───────────────────────────
 
 /**

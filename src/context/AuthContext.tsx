@@ -1,6 +1,13 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../api/auth';
+import { clearPresence } from '../api/phone';
 
 // How long the app sits idle before signing the user out. Read in two places
 // that must agree: the live idle timer below, and the cold-start check against
@@ -58,11 +65,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function logout() {
+  /**
+   * ⚠️ `useCallback` over `token`, because `clearPresence` made this CAPTURE it.
+   *
+   * The idle timer below calls `logout()` from inside an effect keyed on `token`. While
+   * this function closed over nothing reactive, leaving it out of that effect's deps was
+   * sound; reading `token` makes a stale closure a real possibility, and it is the token
+   * that authorises the sign-out request. Identity changes exactly when `token` does, so
+   * the effect gains no extra runs.
+   */
+  const logout = useCallback(function logout() {
+    /**
+     * Tell the server BEFORE the token is cleared — it is the credential the route needs.
+     *
+     * Stopping the 20s heartbeat is not the same as going away: the ring window keeps an
+     * entry for five minutes on purpose, so a BACKGROUNDED tab does not read as "gone
+     * home". Without this, somebody who signed out went on being dialled on their personal
+     * mobile for the rest of that window — and, since the in-hours voicemail fix, went on
+     * keeping customers out of voicemail too.
+     *
+     * Fire-and-forget with `keepalive`: the idle-timeout caller navigates away immediately
+     * afterwards, and signing out must never be blocked by a phone route.
+     */
+    if (token) clearPresence(token);
     setUserState(null);
     setTokenState(null);
     clearSession();
-  }
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -86,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       events.forEach(e => window.removeEventListener(e, resetTimer));
     };
-  }, [token]);
+  }, [token, logout]);
 
   return (
     <AuthContext.Provider value={{ user, token, setUser, setToken, logout }}>
