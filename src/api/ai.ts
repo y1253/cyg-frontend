@@ -43,6 +43,12 @@ export interface AiConfig {
   assist: boolean;
   /** Transcribing voice notes a client sent us — its own switch. */
   transcribeInbound: boolean;
+  /**
+   * May the browser show live text while dictating? Its own switch too, because the
+   * preview is the Web Speech API and Chrome routes that to Google — a different third
+   * party from the OpenAI egress `assist` covers.
+   */
+  dictationLive: boolean;
 }
 
 /**

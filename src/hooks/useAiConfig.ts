@@ -22,5 +22,6 @@ export function useAiConfig() {
   return {
     assist: data?.assist ?? false,
     transcribeInbound: data?.transcribeInbound ?? false,
+    dictationLive: data?.dictationLive ?? false,
   };
 }
