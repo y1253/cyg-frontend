@@ -3,6 +3,7 @@ import { LoginPage } from '../components/Login/LoginPage';
 import { DashboardPage } from '../components/Dashboard/DashboardPage';
 import { UsersPage } from '../components/Users/UsersPage';
 import { UserDetailPage } from '../components/Users/UserDetailPage';
+import { ProfilePage } from '../components/Profile/ProfilePage';
 import { RegisterPage } from '../components/Register/RegisterPage';
 import { CompanyDetailPage } from '../components/Companies/CompanyDetailPage';
 import { TasksPage } from '../components/Tasks/TasksPage';
@@ -77,6 +78,9 @@ export const router = createBrowserRouter([
         children: [
           { path: '/dashboard', element: <DashboardPage /> },
           { path: '/companies/:id', element: <CompanyDetailPage /> },
+          // Every role, so it sits OUTSIDE AdminRoute. Nothing on it is privileged:
+          // the server takes the id from the JWT, so it can only ever be your own.
+          { path: '/profile', element: <ProfilePage /> },
           {
             element: <AdminRoute />,
             children: [

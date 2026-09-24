@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { dialedHere } from '@/lib/dialIntent';
 import { invitePairsWith, type InviteMarkers } from './invite-pairing';
+import { endedReportFor } from './ended-report';
 import {
   Invitation,
   Registerer,
@@ -63,6 +64,7 @@ import {
   closeNotification,
 } from '@/lib/desktopNotification';
 import {
+  hangUpInternalCall,
   reportInternalCallEnded,
   reportInternalCallEndedOnUnload,
   setInternalCallState,
@@ -544,6 +546,28 @@ const EVENT_STALE_MS = 60_000;
  */
 const PAIR_WINDOW_MS = 33_000;
 
+/**
+ * How long an INTERNAL call may sit ringing on this screen before the card gives up.
+ *
+ * A paired slot had no deadline of any kind: `pair()` clears the `PAIR_WINDOW_MS` timer as
+ * its first act and nothing replaced it, so a ringing card depended entirely on a SIP
+ * CANCEL arriving. When SignalWire fails to honour `<Dial timeout>` — which it
+ * demonstrably does — that CANCEL never comes and the phone rings indefinitely.
+ *
+ * ⚠️ INTERNAL ONLY. A company call's ring length is the per-company
+ * `ringTimeoutSeconds`, so a hard-coded deadline here would cut off a company that
+ * deliberately configured a longer ring.
+ *
+ * ⚠️ Purely LOCAL — it takes this card down and does not report anything. It is safe
+ * precisely because of `ended-report.ts`: a callee slot that never answered reports
+ * nothing, so expiring here cannot file the call as missed while another tab is talking.
+ * The server's own sweep is what actually cancels the legs.
+ *
+ * Matched to the server's `MAX_RING_MS` (`RING_TIMEOUT` + 15s), so the two agree about
+ * when a ring has overrun.
+ */
+const INTERNAL_RING_DEADLINE_MS = 45_000;
+
 /** How often the transferring agent's card asks whether the colleague picked up. */
 /**
  * How long to wait before re-checking a leg we rejected mid-`Establishing`.
@@ -676,6 +700,8 @@ interface CallSlot {
   /** Our own fork of this call's transfer `<Dial><Sip>`, claimed once and never replaced. */
   takeBackInvite: Invitation | null;
   transferTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Internal calls only — see `INTERNAL_RING_DEADLINE_MS`. Cleared once answered. */
+  ringTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * This browser is the one that ended the call.
    *
@@ -715,32 +741,6 @@ const MAX_HELD_INVITES = 8;
  * asked to and a second one that needed dismissing would be worse than none.
  */
 const COMPLETE_PROMPT_MS = 5_000;
-
-/**
- * What this browser knows about how its internal call ended.
- *
- * `answeredAt` is stamped at Established and is null while ringing, so it answers both
- * halves at once: whether the call was ever picked up, and how long it ran. The server
- * rounds nothing and trusts nothing beyond this — it refuses the report unless the sender
- * is a participant and the outcome is still unknown.
- *
- * ⚠️ Derived at TEARDOWN, not from `publish`'s `seconds`. That value is recomputed on a
- * 1s timer for display; reading it here would round a 9.8s call to whatever the last tick
- * happened to say.
- */
-function endedReportFor(slot: CallSlot): {
-  answered: boolean;
-  durationSec: number;
-} {
-  if (slot.answeredAt === null) return { answered: false, durationSec: 0 };
-  return {
-    answered: true,
-    durationSec: Math.max(
-      0,
-      Math.round((Date.now() - slot.answeredAt) / 1000),
-    ),
-  };
-}
 
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
@@ -989,12 +989,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // does still need the outcome reported, or the row is left reading "In progress"
         // until the server's five-minute backstop.
         if (slot.info.kind === 'internal') {
-          if (slot.info.callSid) {
-            reportInternalCallEndedOnUnload(
-              tok,
-              slot.info.callSid,
-              endedReportFor(slot),
-            );
+          // ⚠️ `null` means this branch has nothing worth saying — a callee tab that was
+          // ringing and never picked up. Closing it must not report the call missed while
+          // another tab is mid-conversation.
+          const report = endedReportFor(slot);
+          if (slot.info.callSid && report) {
+            reportInternalCallEndedOnUnload(tok, slot.info.callSid, report);
           }
           continue;
         }
@@ -1205,6 +1205,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       // `requireInteraction`, so an unclosed one outlives the call indefinitely.
       void closeNotification(callNotificationTag(slot.info.callSid));
       clearTimeout(slot.transferTimer);
+      clearTimeout(slot.ringTimer);
       releaseSlotMedia(slot);
       slot.audio.remove();
       slot.takeBackInvite = null;
@@ -1220,8 +1221,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
        *
        * Safe to send more than once and from both participants: the server takes it only
        * while the outcome is still unknown, and only from a participant.
+       *
+       * ⚠️ `endedReport` is NULL when this browser has no standing to speak — a callee
+       * tab CANCELled because the user answered on another one. Sending from there is the
+       * reported bug: it stamped `no-answer` at the exact moment of the answer, and that
+       * counted as settled, so the tab that really answered was refused. See
+       * `ended-report.ts` for who may say what.
        */
-      if (slot.info.kind === 'internal' && slot.info.callSid) {
+      if (slot.info.kind === 'internal' && slot.info.callSid && endedReport) {
         const tok = tokenRef.current;
         if (tok) {
           reportInternalCallEnded(tok, slot.info.callSid, endedReport);
@@ -1369,6 +1376,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         transfer: null,
         takeBackInvite: null,
         transferTimer: undefined,
+        ringTimer: undefined,
       };
       slotsRef.current.set(id, slot);
       // The first call in hand becomes the active one; a later call is WAITING until the
@@ -1391,8 +1399,30 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           .catch(() => endSlot(id, 'outbound accept failed'));
       }
 
+      /**
+       * The ring deadline. Nothing else bounds a paired ringing slot: `pair` has just
+       * cleared the `PAIR_WINDOW_MS` timer, so without this the card depends entirely on a
+       * SIP CANCEL — which a provider that dropped `<Dial timeout>` never sends.
+       *
+       * Internal only, and purely local. See `INTERNAL_RING_DEADLINE_MS`.
+       */
+      if (info.kind === 'internal') {
+        slot.ringTimer = setTimeout(() => {
+          const live = slotsRef.current.get(id);
+          if (!live || live.phase !== 'ringing') return;
+          log('internal ring deadline elapsed', id);
+          // Reject our own branch too, or this browser keeps a SIP dialog open for a
+          // call it has stopped showing.
+          terminateInvitation(live.invitation);
+          endSlot(id, 'ring deadline');
+        }, INTERNAL_RING_DEADLINE_MS);
+      }
+
       held.invitation.stateChange.addListener((state) => {
         if (state === SessionState.Established) {
+          // Answered — the deadline was about the RING, and there is no longer one.
+          clearTimeout(slot.ringTimer);
+          slot.ringTimer = undefined;
           slot.answeredAt = Date.now();
           slot.phase = 'active';
           attachRemoteAudio(slot);
@@ -1450,7 +1480,15 @@ Transferred by ${info.transferFrom.name}`
         });
       }
     },
-    [attachRemoteAudio, endSlot, notifyCall, publish, releaseInvite, releaseSlotMedia],
+    [
+      attachRemoteAudio,
+      endSlot,
+      notifyCall,
+      publish,
+      releaseInvite,
+      releaseSlotMedia,
+      terminateInvitation,
+    ],
   );
 
   /**
@@ -2055,10 +2093,21 @@ Transferred by ${info.transferFrom.name}`
     const { kind, companyId, callSid } = slot.info;
     if (!callSid) return;
 
-    // An internal call needs no server hang-up — both legs are browsers, so the `<Dial>`
-    // bridge collapses on its own. Telling the server it ENDED is handled in `endSlot`
-    // instead, which runs on every ending rather than only a deliberate one.
-    if (kind === 'internal') return;
+    /**
+     * ⚠️ Internal calls used to RETURN here, on the grounds that "both legs are browsers,
+     * so the `<Dial>` bridge collapses on its own". That holds once a leg is ESTABLISHED
+     * and fails while one is still RINGING: SignalWire does not reliably honour
+     * `<Dial timeout>` (a child leg has been observed stuck at `ringing` for hours), and
+     * a browser's own BYE ends only ITS branch of a forked `<Dial>`. So Hang up mid-ring
+     * used to leave the colleague's phone ringing with nothing able to stop it.
+     *
+     * Reporting how the call ended (`endSlot`) is a different job and still happens
+     * there — that runs on every ending, where this runs only on a deliberate one.
+     */
+    if (kind === 'internal') {
+      hangUpInternalCall(tok, callSid);
+      return;
+    }
     void hangUpCall(tok, companyId, callSid);
   }, []);
 
@@ -2106,8 +2155,12 @@ Transferred by ${info.transferFrom.name}`
           // names — the request was already accepted and somebody's phone is ringing.
           if (live.cancelled) {
             const tok = tokenRef.current;
-            if (tok && live.kind === 'company') {
-              void hangUpCall(tok, live.companyId, callSid);
+            // ⚠️ Internal too. This used to gate on `kind === 'company'`, so cancelling
+            // an internal "Calling…" card hung up NOTHING — the colleague's phone went on
+            // ringing for a call the caller had already given up on.
+            if (tok) {
+              if (live.kind === 'internal') hangUpInternalCall(tok, callSid);
+              else void hangUpCall(tok, live.companyId, callSid);
             }
             clearDialing();
             return;
@@ -2134,8 +2187,12 @@ Transferred by ${info.transferFrom.name}`
         live.cancelled = true;
         if (live.callSid) {
           const tok = tokenRef.current;
-          if (tok && live.kind === 'company') {
-            void hangUpCall(tok, live.companyId, live.callSid);
+          if (tok) {
+            if (live.kind === 'internal') {
+              hangUpInternalCall(tok, live.callSid);
+            } else {
+              void hangUpCall(tok, live.companyId, live.callSid);
+            }
           }
           clearDialing();
           return;

@@ -317,14 +317,40 @@ export async function fetchInternalConferenceStatus(
 }
 
 /**
+ * End a staff call at the PROVIDER — cancel the legs, not just this browser's dialog.
+ *
+ * ⚠️ Distinct from `reportInternalCallEnded` below, and both are needed. That one is
+ * bookkeeping: it records how the call finished. This one actually stops the ringing.
+ * Internal calls used to do only the first, on the grounds that "the `<Dial>` bridge
+ * collapses on its own" — true once a leg is established, false while one is still
+ * RINGING, because SignalWire does not reliably honour `<Dial timeout>`. So pressing Hang
+ * up mid-ring sent one local SIP BYE and left the colleague's phone ringing.
+ *
+ * ⚠️ Called BEFORE the local BYE, like its company twin: the server asks the provider
+ * which legs are live, and after the BYE there are none.
+ *
+ * Fire-and-forget. The card comes down either way — a bookkeeping or control failure must
+ * never leave somebody staring at a call they have visibly hung up on.
+ */
+export function hangUpInternalCall(token: string, sid: string): void {
+  void fetchWithAuth(
+    token,
+    `${API}/internal-calls/${encodeURIComponent(sid)}/hangup`,
+    { method: 'POST', headers: JSON_HEADERS },
+  ).catch(() => undefined);
+}
+
+/**
  * Tell the server how the internal call this browser was on ended.
  *
  * ── WHY THE BROWSER REPORTS AT ALL ─────────────────────────────────────────────
- * Nothing else does. `endCallServerSide` skips internal calls (the `<Dial>` bridge
- * collapses on its own, so there is no leg to hang up), and every provider-driven path
- * that could settle the row declines on this ending — SignalWire does not request the
+ * No provider-driven path settles this row promptly: SignalWire does not request the
  * `<Dial action>` URL when the caller hangs up, and the child-leg backstop waits five
  * minutes. Until something writes a status the row reads "In progress".
+ *
+ * ⚠️ Not every browser may send this. A callee tab CANCELled because the user answered on
+ * another one has nothing to report — see `context/ended-report.ts`, which returns null
+ * for exactly that case and is the reason this is not simply called from every teardown.
  *
  * Fire-and-forget: the call is already over and the card is already gone, so a failed
  * report must never surface as an error. The server's own backstops still run.

@@ -83,6 +83,49 @@ export async function fetchUser(token: string, id: number): Promise<AppUserDetai
   return res.json() as Promise<AppUserDetail>;
 }
 
+/**
+ * The caller's own profile.
+ *
+ * Same shape as `fetchUser`, because the server reuses `findOne` for it — so the profile
+ * page and the admin detail page render from one type and cannot drift. The id is taken
+ * from the JWT server-side; there is deliberately none to pass.
+ */
+export async function fetchMyProfile(token: string): Promise<AppUserDetail> {
+  const res = await fetchWithAuth(token, `${API}/users/me`, { headers: JSON_HEADERS });
+  if (!res.ok) throw new Error('Failed to fetch your profile');
+  return res.json() as Promise<AppUserDetail>;
+}
+
+/**
+ * The one field a user may change about themselves.
+ *
+ * `null` CLEARS the number; the server's `!== undefined` gate is what makes that distinct
+ * from "leave it alone", so the key is always sent. There is no `name`/`email`/`role` here
+ * and there must not be — the server's DTO would drop them anyway, and a parameter that
+ * silently does nothing is worse than one that does not exist.
+ *
+ * ⚠️ Resolves to `AppUser`, NOT `AppUserDetail`: the server answers from `update()`, whose
+ * `USER_SELECT` projection carries no `companies`. So the caller must INVALIDATE `['me']`
+ * rather than write this straight into that cache, or the profile's company list blanks
+ * itself as a side effect of saving a phone number — the same failure `USER_SELECT`'s own
+ * docblock describes for `enrollFace`.
+ */
+export async function updateMyPhone(
+  token: string,
+  phoneE164: string | null,
+): Promise<AppUser> {
+  const res = await fetchWithAuth(token, `${API}/users/me`, {
+    method: 'PATCH',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ phoneE164 }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(body.message ?? 'Failed to save your phone number');
+  }
+  return res.json() as Promise<AppUserDetail>;
+}
+
 export async function createUser(token: string, data: CreateUserData): Promise<AppUser> {
   const res = await fetchWithAuth(token, `${API}/users`, {
     method: 'POST',

@@ -7,6 +7,7 @@ import {
   LogOut,
   Menu,
   Settings,
+  User,
   Users2,
   X,
 } from 'lucide-react';
@@ -72,6 +73,15 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Archived',
     short: 'Archive',
     tier: 'admin',
+  },
+  // No `tier`, deliberately: this is the one entry every role sees. It is also the only
+  // route here whose page is scoped by the JWT rather than by a guard, so there is
+  // nothing for a tier to protect.
+  {
+    to: '/profile',
+    icon: <User size={16} />,
+    label: 'My Profile',
+    short: 'Me',
   },
 ];
 
@@ -242,7 +252,15 @@ function AppShell() {
           {/* Identity moves into the drawer on a phone — the name, the role badge and a
               full "Sign out" button cannot share 390px with the bell and still leave the
               bell a 44px target. */}
-          <span className="hidden text-sm font-medium md:inline">{user?.name}</span>
+          {/* The name is the second way to your own profile, beside the nav entry — the
+              place people reach for first. A NavLink rather than a menu: there is no
+              dropdown primitive in components/ui, and one item does not need one. */}
+          <NavLink
+            to="/profile"
+            className="hidden rounded px-1 text-sm font-medium hover:underline md:inline"
+          >
+            {user?.name}
+          </NavLink>
           <Badge variant="secondary" className="hidden text-xs md:inline-flex">
             {user?.role}
           </Badge>
@@ -343,7 +361,16 @@ function AppShell() {
                 {initials}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{user?.name}</p>
+                {/* Only the NAME is the link, not the whole row: `SoftphoneStatus`
+                    below is a popover trigger, and nesting a button inside an anchor
+                    is invalid and swallows its clicks. */}
+                <NavLink
+                  to="/profile"
+                  onClick={closeDrawer}
+                  className="block truncate text-sm font-medium hover:underline"
+                >
+                  {user?.name}
+                </NavLink>
                 <div className="mt-0.5 flex items-center gap-1.5">
                   <Badge variant="secondary" className="text-[10px]">
                     {user?.role}
