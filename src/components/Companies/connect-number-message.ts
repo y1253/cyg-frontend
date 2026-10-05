@@ -29,6 +29,12 @@ export interface EmptyResultInput {
   country: 'USA' | 'CANADA';
   /** Blank when the admin searched without one. */
   areaCode: string;
+  /**
+   * True when the server gives these numbers SMS through the A2P 10DLC campaign (a US
+   * search with a campaign configured). The bar was then VOICE only, so a rejected number
+   * is one that cannot take calls — and blaming 10DLC would be false.
+   */
+  smsViaCampaign?: boolean;
 }
 
 /**
@@ -36,7 +42,8 @@ export interface EmptyResultInput {
  * run yet). Null rather than an empty string so the caller renders no box at all.
  */
 export function emptyResultMessage(input: EmptyResultInput): string | null {
-  const { outcome, totalFound, eligibleCount, country, areaCode } = input;
+  const { outcome, totalFound, eligibleCount, country, areaCode, smsViaCampaign } =
+    input;
 
   // A FAILED request is not an empty result and gets no explanation from here — the
   // dialog already renders the provider's own error, which says more than anything this
@@ -55,12 +62,20 @@ export function emptyResultMessage(input: EmptyResultInput): string | null {
   }
 
   const count = `${totalFound} number${totalFound === 1 ? '' : 's'}`;
+
+  if (smsViaCampaign) {
+    return `${count} ${totalFound === 1 ? 'is' : 'are'} available in ${where}, but ${
+      totalFound === 1 ? 'it cannot' : 'none of them can'
+    } take calls. Try a different area code.`;
+  }
+
   const found = `${count} ${totalFound === 1 ? 'is' : 'are'} available in ${where}, but ${
     totalFound === 1 ? 'it cannot' : 'none of them can'
   } send texts.`;
 
   // The ONLY branch that may cite A2P 10DLC: numbers genuinely exist and were genuinely
-  // rejected for lacking SMS, on a US search, which is exactly what that rule explains.
+  // rejected for lacking SMS, on a US search with NO campaign configured on the server
+  // (`smsViaCampaign` false), which is exactly what that rule explains.
   return country === 'USA'
     ? `${found} US numbers stay voice-only until your A2P 10DLC registration completes. Canadian numbers are unaffected.`
     : `${found} A support number has to do both, so none of these can be used.`;

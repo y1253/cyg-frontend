@@ -77,4 +77,20 @@ describe('emptyResultMessage', () => {
     );
     expect(msg({ totalFound: 0 })).toContain('available in that area');
   });
+
+  /**
+   * With the 10DLC campaign configured the server's bar on a US search is VOICE only —
+   * SMS comes from the campaign assignment. A rejection then means "cannot take calls",
+   * and citing 10DLC would send the admin waiting for a registration that already passed.
+   */
+  it('does not blame A2P 10DLC once the campaign gives US numbers SMS', () => {
+    const text = msg({
+      country: 'USA',
+      areaCode: '201',
+      totalFound: 3,
+      smsViaCampaign: true,
+    })!;
+    expect(text).not.toContain('10DLC');
+    expect(text).toContain('take calls');
+  });
 });

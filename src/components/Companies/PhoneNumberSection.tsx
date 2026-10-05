@@ -18,6 +18,32 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * The A2P 10DLC campaign line under a US number, or null when there is nothing to say
+ * (a Canadian number, or an older server that does not report the state).
+ *
+ * The state is the provider's RAW order state — its vocabulary beyond `pending` is
+ * undocumented — so anything unrecognised is shown verbatim rather than guessed at.
+ */
+function campaignLine(
+  country: string | null | undefined,
+  state: string | null | undefined,
+): { text: string; tone: 'muted' | 'ok' | 'error' } | null {
+  if (country !== 'US') return null;
+  const s = (state ?? '').toLowerCase();
+  if (s === '') return { text: '10DLC: queued for assignment', tone: 'muted' };
+  if (s === 'failed') {
+    return { text: '10DLC assignment failed — retrying automatically', tone: 'error' };
+  }
+  if (['pending', 'processing', 'in_progress', 'submitted'].includes(s)) {
+    return { text: '10DLC: assignment pending — texting starts once approved', tone: 'muted' };
+  }
+  if (['assigned', 'completed', 'complete', 'success', 'processed'].includes(s)) {
+    return { text: '10DLC: assigned — texting enabled', tone: 'ok' };
+  }
+  return { text: `10DLC: ${state}`, tone: 'muted' };
+}
+
+/**
  * Admin management of a company's SignalWire support number.
  *
  * Lives in the Details tab rather than Communications: that tab is gated on a connected
@@ -76,6 +102,25 @@ export function PhoneNumberSection({
                   connected {new Date(number.createdAt).toLocaleDateString()}
                 </span>
               </div>
+              {(() => {
+                const line = campaignLine(number.country, number.campaignState);
+                if (!line) return null;
+                return (
+                  <span
+                    title={number.campaignError ?? undefined}
+                    className={[
+                      'text-xs',
+                      line.tone === 'error'
+                        ? 'text-destructive'
+                        : line.tone === 'ok'
+                          ? 'text-teal-700'
+                          : 'text-muted-foreground',
+                    ].join(' ')}
+                  >
+                    {line.text}
+                  </span>
+                );
+              })()}
             </div>
             <Button
               variant="destructive"

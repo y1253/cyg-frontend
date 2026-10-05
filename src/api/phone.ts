@@ -11,6 +11,15 @@ export interface SupportNumber {
   phoneNumber: string;
   sid: string;
   region: string | null;
+  /** 'US' | 'CA', or null on rows bought before the column existed. */
+  country?: string | null;
+  /**
+   * A2P 10DLC campaign assignment, US numbers only. Null = not applicable / not yet
+   * submitted; otherwise the provider's raw order state, or `FAILED` / `ASSIGNED`.
+   * Optional so an older server's response still type-checks.
+   */
+  campaignState?: string | null;
+  campaignError?: string | null;
   createdAt: string;
   releasedAt: string | null;
 }
@@ -66,6 +75,12 @@ export interface NumberSearchResult {
   numbers: AvailableNumber[];
   totalFound: number;
   searched: { country: 'US' | 'CA'; areaCode: string | null; regions: string[] };
+  /**
+   * True when these numbers get SMS from the 10DLC campaign assignment made after
+   * purchase, not from the search's own SMS flag (which stays false on US inventory).
+   * Optional: absent on an older server.
+   */
+  smsViaCampaign?: boolean;
 }
 
 export async function searchAvailableNumbers(
@@ -107,7 +122,7 @@ export async function searchAvailableNumbers(
 export async function attachSupportNumber(
   token: string,
   companyId: number,
-  data: { phoneNumber: string; region?: string | null },
+  data: { phoneNumber: string; region?: string | null; country?: string },
 ): Promise<SupportNumber> {
   const res = await fetchWithAuth(
     token,
@@ -118,6 +133,7 @@ export async function attachSupportNumber(
       body: JSON.stringify({
         phoneNumber: data.phoneNumber,
         ...(data.region ? { region: data.region } : {}),
+        ...(data.country ? { country: data.country } : {}),
       }),
     },
   );

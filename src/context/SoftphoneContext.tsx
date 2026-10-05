@@ -57,7 +57,11 @@ import {
   dropInternalConferenceParty,
   fetchInternalConferenceStatus,
 } from '@/api/internalCalls';
-import { startHoldMusic, type HoldMusic } from '@/lib/hold-music';
+import {
+  primeHoldAudio,
+  startHoldMusic,
+  type HoldMusic,
+} from '@/lib/hold-music';
 import {
   SW_MESSAGE_SOURCE,
   callNotificationTag,
@@ -1051,9 +1055,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const teardownHold = useCallback((slot: CallSlot, sender?: RTCRtpSender) => {
     const mic = slot.micTrack;
     if (mic) {
-      // Re-enabled because a silent hold disables the track in place rather than
-      // replacing it; a no-op when music was used.
-      mic.enabled = true;
+      // Hold disables the track in place (with or without music), so it comes back on —
+      // unless the agent muted while held, which must survive the resume.
+      mic.enabled = !slot.muted;
       if (sender) void sender.replaceTrack(mic).catch(() => undefined);
     }
     slot.micTrack = null;
@@ -1113,31 +1117,39 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       const tok = tokenRef.current;
       const call = slot.info;
 
-      if (tok) await setCallHold(tok, call.companyId, call.callSid, true);
-
+      // The caller must stop hearing the agent THE MOMENT Hold is pressed, not after two
+      // round trips. The microphone is disabled in place first; `micTrack` keeps it so
+      // `teardownHold` re-enables it whichever way the hold ends.
       slot.micTrack = sender.track ?? null;
+      if (sender.track) sender.track.enabled = false;
       slot.audio.muted = true;
 
-      let music: HoldMusic | null = null;
-      if (tok) {
-        try {
-          const { audioId } = await fetchHoldAudio(tok, call.companyId);
-          if (audioId !== null) {
-            music = await startHoldMusic(phoneAudioUrl(tok, audioId));
-          }
-        } catch {
-          /* fall through to a silent hold */
-        }
-      }
+      // The music is prepared IN PARALLEL with pausing the recording — it is only
+      // generated locally, and nothing reaches the wire until `replaceTrack` below.
+      const musicReady: Promise<HoldMusic | null> = tok
+        ? fetchHoldAudio(tok, call.companyId)
+            .then(({ audioId }) =>
+              audioId !== null
+                ? startHoldMusic(phoneAudioUrl(tok, audioId))
+                : null,
+            )
+            .catch((err: unknown) => {
+              console.warn('[hold-music] could not resolve the hold track:', err);
+              return null;
+            })
+        : Promise.resolve(null);
+
+      // ⚠️ ORDER: the recording is paused BEFORE any music is put on the wire.
+      if (tok) await setCallHold(tok, call.companyId, call.callSid, true);
+      const music = await musicReady;
 
       if (music) {
         slot.music = music;
-        await sender.replaceTrack(music.track).catch(() => undefined);
-      } else if (sender.track) {
-        // Silent hold. The track is disabled rather than replaced, and `micTrack` still
-        // holds it so resume and mute both behave.
-        sender.track.enabled = false;
+        await sender.replaceTrack(music.track).catch((err: unknown) => {
+          console.warn('[hold-music] replaceTrack failed:', err);
+        });
       }
+      // No music: a silent hold, which the disabled microphone above already is.
       slot.held = true;
       slot.heldAuto = kind === 'auto';
       publish();
@@ -1965,8 +1977,10 @@ Transferred by ${info.transferFrom.name}`
       const target = slotsRef.current.get(callId);
       if (!target || callId === activeIdRef.current) return;
       switchBusyRef.current = true;
-      // A real user gesture, which is what keeps audio playable.
+      // A real user gesture, which is what keeps audio playable — for the ringtone's
+      // context AND the hold-music one, which are different contexts.
       unlockAudio();
+      primeHoldAudio();
 
       void (async () => {
         try {
@@ -2481,9 +2495,11 @@ Transferred by ${info.transferFrom.name}`
         if (!slot || !sender) return;
         const next = !slot.muted;
         slot.muted = next;
-        // The parked microphone, when held, so unmuting mid-hold cannot un-park it.
+        // While held (`micTrack` is set) the microphone stays off whatever mute says —
+        // unmuting mid-hold must not put the agent's voice back on the caller's line.
+        // `teardownHold` applies the mute state when the hold ends.
         const track = slot.micTrack ?? sender.track;
-        if (track) track.enabled = !next;
+        if (track) track.enabled = !next && !slot.micTrack;
         publish();
       },
 
@@ -2527,6 +2543,9 @@ Transferred by ${info.transferFrom.name}`
           return;
         }
 
+        // Inside the click, before any await: the hold context must start RUNNING here or
+        // the music track it produces is silence.
+        if (!slot.held) primeHoldAudio();
         void queueHold(slot, () =>
           slot.held ? resumeSlot(slot) : holdSlot(slot, 'manual'),
         ).catch(() => undefined);

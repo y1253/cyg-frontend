@@ -64,7 +64,10 @@ export function ConnectNumberDialog({
     eligibleCount: results.length,
     country: search.data?.searched.country === 'US' ? 'USA' : 'CANADA',
     areaCode: search.data?.searched.areaCode ?? '',
+    smsViaCampaign: search.data?.smsViaCampaign ?? false,
   });
+  /** US numbers get SMS from the 10DLC campaign after purchase, not from the search. */
+  const smsViaCampaign = search.data?.smsViaCampaign ?? false;
 
   const reset = () => {
     setSelected(null);
@@ -175,13 +178,19 @@ export function ConnectNumberDialog({
                     number that cannot text". Rendered from n.voice/n.sms rather than
                     hardcoded, so if the filter ever regresses the badge goes missing
                     instead of lying.
+
+                    The one exception is a US number under the 10DLC campaign: its
+                    search flag says sms:false (US inventory always does), and SMS
+                    arrives with the campaign assignment the server makes right after
+                    the purchase. `smsViaCampaign` is the server saying so; the badge
+                    names the campaign so it does not read as an ordinary SMS flag.
                   */}
-                  {n.voice && n.sms && (
+                  {n.voice && (n.sms || smsViaCampaign) && (
                     <Badge
                       variant="outline"
                       className="bg-teal-50 text-teal-700 border-teal-200 text-[10px] px-1.5 py-0"
                     >
-                      Voice + SMS
+                      {n.sms ? 'Voice + SMS' : 'Voice + SMS (10DLC)'}
                     </Badge>
                   )}
                   <span className="text-xs text-muted-foreground">
@@ -200,6 +209,8 @@ export function ConnectNumberDialog({
                 Buy <strong>{formatE164(selected.phoneNumber)}</strong>? This purchases the
                 number immediately and starts a recurring monthly charge on your SignalWire
                 account.
+                {smsViaCampaign &&
+                  ' It is then added to your A2P 10DLC campaign; texting starts once SignalWire confirms the assignment.'}
               </p>
               <div className="mt-3 flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => setConfirming(false)}>
@@ -210,7 +221,13 @@ export function ConnectNumberDialog({
                   disabled={attach.isPending}
                   onClick={() =>
                     attach.mutate(
-                      { phoneNumber: selected.phoneNumber, region: selected.region },
+                      {
+                        phoneNumber: selected.phoneNumber,
+                        region: selected.region,
+                        // The country that was SEARCHED decides whether the server
+                        // submits the number to the 10DLC campaign (+1 is shared).
+                        country: search.data?.searched.country,
+                      },
                       {
                         onSuccess: () => {
                           reset();
