@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchActiveCall } from '@/api/phone';
@@ -12,11 +13,13 @@ import { fetchActiveCall } from '@/api/phone';
  */
 export function useActiveCall(companyId: number, enabled: boolean) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(4000);
   return useQuery({
     queryKey: ['phone-active-call', companyId],
     queryFn: () => fetchActiveCall(token!, companyId),
     enabled: !!token && !!companyId && enabled,
-    refetchInterval: 4000,
+    refetchInterval: pollMs,
     staleTime: 0,
   });
 }

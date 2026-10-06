@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchPhoneCounts } from '@/api/phone';
@@ -15,10 +16,12 @@ export function usePhoneCounts(
   active: boolean = true,
 ) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(60000);
   return useQuery({
     queryKey: ['phone-counts', companyId],
     queryFn: () => fetchPhoneCounts(token!, companyId),
     enabled: !!token && !!companyId && hasNumber && active,
-    refetchInterval: active ? 60000 : false,
+    refetchInterval: active ? pollMs : false,
   });
 }

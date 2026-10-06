@@ -4,27 +4,37 @@ import { handleUnauthorized, unauthorizedCode } from './client';
 const API = '/api';
 
 /**
- * What the server can announce. Mirrors `RealtimeTopic` in
- * `server/src/realtime/realtime.types.ts` — keep the two in step.
+ * What the server can announce. Mirrors `REALTIME_TOPICS` in
+ * `server/src/realtime/realtime.types.ts` — keep the two in step. A value rather than
+ * only a union so `realtime-topics.test.ts` can walk every topic and fail when one has no
+ * query-key mapping.
  */
-export type RealtimeTopic =
-  | 'call-ended'
-  | 'phone'
-  | 'phone-state'
-  | 'active-call'
-  | 'ringing'
-  | 'sms'
-  | 'whatsapp'
-  | 'email'
-  | 'internal-message'
-  | 'internal-call'
-  | 'presence'
-  /** This user's session was ended server-side. Only wakes the poll; see below. */
-  | 'session';
+export const REALTIME_TOPICS = [
+  'call-ended',
+  'phone',
+  'phone-state',
+  'active-call',
+  'ringing',
+  'sms',
+  'whatsapp',
+  'whatsapp-account',
+  'email',
+  'chat',
+  'call-summary',
+  'internal-message',
+  'internal-call',
+  'presence',
+  'assignments',
+  /** This user's session was ended server-side. Only wakes the channel; see below. */
+  'session',
+] as const;
+
+export type RealtimeTopic = (typeof REALTIME_TOPICS)[number];
 
 export interface RealtimeEvent {
   seq: number;
-  at: number;
+  /** Long-poll only; the WebSocket does not send it. */
+  at?: number;
   topic: RealtimeTopic;
   companyId?: number;
   /** `ringing` only — an `IncomingCallPayload`. Every other topic is a hint to refetch. */
@@ -71,6 +81,23 @@ export async function fetchRealtime(
   if (!res.ok) throw new Error(`realtime ${res.status}`);
   return (await res.json()) as RealtimeBatch;
 }
+
+// ── WebSocket transport ─────────────────────────────────────────────────────
+
+/** Same origin as the page, so the vite proxy (dev) and nginx (prod) both carry it. */
+export function realtimeWsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}${API}/realtime/ws`;
+}
+
+/** Close code meaning "your session is over" — mirrors `WS_CLOSE` on the server. */
+export const WS_SESSION_ENDED = 4401;
+
+/** What the server sends down the socket. */
+export type RealtimeServerFrame =
+  | { type: 'hello'; seq: number; events: RealtimeEvent[]; reset?: boolean }
+  | ({ type: 'event' } & RealtimeEvent)
+  | { type: 'ping' };
 
 /**
  * Narrow a `ringing` event's payload without trusting it blindly.

@@ -68,17 +68,42 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
         ['inbox-summary'],
       ];
 
+    // Account state, not messages: connected, disconnected, or a Generate step moved.
+    case 'whatsapp-account':
+      return perCompany('whatsapp-account');
+
     // Gmail and Outlook share these query keys — `useGmailEmails` is the hook both
-    // providers run through, so this covers a mailbox of either kind.
+    // providers run through, so this covers a mailbox of either kind. The open thread
+    // too: a reply that lands in it is the commonest "new mail" of all.
     case 'email':
       return [
         ...perCompany(
           'gmail-emails',
+          'gmail-email-thread',
           'gmail-unread-count',
           'gmail-uncompleted-count',
         ),
         ['inbox-summary'],
       ];
+
+    // Google Chat and Teams — again one set of keys for both providers.
+    case 'chat':
+      return [
+        ...perCompany(
+          'gmail-chats',
+          'gmail-chat-thread',
+          'gmail-unread-count',
+          'gmail-uncompleted-count',
+        ),
+        ['inbox-summary'],
+      ];
+
+    // A summary settled. The detail view's recordings query carries it, and the
+    // timeline row shows its one-liner. Internal summaries arrive with no company.
+    case 'call-summary':
+      return id === undefined
+        ? [['internal-call-recordings'], ['internal-calls']]
+        : perCompany('call-recordings', 'phone-timeline');
 
     // Per-user, and not keyed by company: the workspace inbox is one list.
     case 'internal-message':
@@ -96,8 +121,13 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     case 'presence':
       return [['phone-presence']];
 
-    // Nothing to refresh: the event exists to wake the parked poll, whose next request
-    // is refused and signs this device out (`fetchRealtime`).
+    // This user gained or lost a company (or changed role): the dashboard's list, and
+    // the bell, whose scope is exactly "my companies".
+    case 'assignments':
+      return [['companies'], ['inbox-summary']];
+
+    // Nothing to refresh: the event exists to wake the channel — the poll's next request
+    // is refused (`fetchRealtime`), and the socket is closed with 4401.
     case 'session':
       return [];
   }
@@ -115,7 +145,8 @@ function exhaustive(topic: never): unknown[][] {
 
 /**
  * What to refresh after a `reset` — i.e. when the client was away long enough that the
- * server could no longer say what it missed.
+ * server could no longer say what it missed — and after every RECONNECT, since nothing
+ * was listening while the connection was down.
  *
  * Deliberately the whole communications surface rather than a replay: the point of a
  * reset is that the specific events are GONE, so anything narrower would be a guess.
@@ -128,11 +159,19 @@ export const RESET_KEYS: unknown[][] = [
   ['phone-ringing'],
   ['phone-presence'],
   ['gmail-emails'],
+  ['gmail-email-thread'],
+  ['gmail-chats'],
+  ['gmail-chat-thread'],
   ['gmail-unread-count'],
   ['gmail-uncompleted-count'],
   ['whatsapp-timeline'],
   ['whatsapp-counts'],
+  ['whatsapp-thread'],
+  ['whatsapp-account'],
   ['sms-thread'],
+  ['call-recordings'],
+  ['internal-call-recordings'],
+  ['companies'],
   ['internal-messages'],
   ['internal-message-thread'],
   ['internal-uncompleted-count'],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RESET_KEYS, keysFor } from './realtime-topics';
-import { callEventOf } from '@/api/realtime';
+import { callEventOf, REALTIME_TOPICS } from '@/api/realtime';
 import type { RealtimeEvent, RealtimeTopic } from '@/api/realtime';
 
 const ev = (topic: RealtimeTopic, companyId?: number): RealtimeEvent => ({
@@ -64,24 +64,27 @@ describe('keysFor', () => {
     expect(keysFor(ev('phone'))).toEqual([]);
   });
 
-  it('covers every topic', () => {
-    const topics: RealtimeTopic[] = [
-      'call-ended',
-      'phone',
-      'phone-state',
-      'active-call',
-      'ringing',
-      'sms',
-      'whatsapp',
-      'email',
-      'internal-message',
-      'internal-call',
-      'presence',
-    ];
-    for (const t of topics) {
+  it('every topic maps to at least one query key', () => {
+    // Walks the WHOLE list, so a topic added on the server and mirrored here without a
+    // mapping fails this test instead of silently refreshing nothing. `session` is the
+    // one documented exception: it only wakes the channel to sign the device out.
+    for (const t of REALTIME_TOPICS) {
+      if (t === 'session') continue;
       expect(() => keysFor(ev(t, 1))).not.toThrow();
-      expect(keysFor(ev(t, 1)).length).toBeGreaterThan(0);
+      expect(keysFor(ev(t, 1)).length, t).toBeGreaterThan(0);
     }
+  });
+
+  it('refreshes chats and the open email thread, which nothing used to', () => {
+    expect(flat(keysFor(ev('chat', 5)))).toEqual(
+      expect.arrayContaining(['gmail-chats:5', 'gmail-chat-thread:5', 'inbox-summary']),
+    );
+    expect(flat(keysFor(ev('email', 5)))).toContain('gmail-email-thread:5');
+  });
+
+  it('routes an internal call summary without a company', () => {
+    expect(flat(keysFor(ev('call-summary')))).toContain('internal-call-recordings');
+    expect(flat(keysFor(ev('call-summary', 4)))).toContain('call-recordings:4');
   });
 
   it('refreshes a mailbox of either provider off one topic', () => {

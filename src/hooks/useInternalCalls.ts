@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -23,13 +24,15 @@ export function useInternalCalls(
   active: boolean,
 ) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(15000);
   return useInfiniteQuery({
     queryKey: ['internal-calls', folder],
     queryFn: ({ pageParam }) => fetchInternalCalls(token!, folder, pageParam),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: !!token && active,
-    refetchInterval: active ? 15000 : false,
+    refetchInterval: active ? pollMs : false,
   });
 }
 
@@ -41,10 +44,12 @@ export function useInternalCalls(
  */
 export function useInternalCallCounts(active: boolean) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(30000);
   return useQuery({
     queryKey: ['internal-call-counts'],
     queryFn: () => fetchInternalCallCounts(token!),
     enabled: !!token && active,
-    refetchInterval: active ? 30000 : false,
+    refetchInterval: active ? pollMs : false,
   });
 }

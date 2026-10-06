@@ -95,6 +95,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        // The realtime WebSocket (`/api/realtime/ws`) upgrades through this same entry.
+        ws: true,
       },
     },
   },

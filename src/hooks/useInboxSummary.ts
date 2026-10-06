@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
@@ -21,12 +22,14 @@ export function useInboxSummary() {
   const { token } = useAuth();
   const dismissed = useDismissedIds();
 
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(60000);
   const query = useQuery({
     queryKey: ['inbox-summary'],
     queryFn: () => fetchInboxSummary(token!),
     enabled: !!token,
     // Matches the server-side TTL — polling faster would just re-read its cache.
-    refetchInterval: 60000,
+    refetchInterval: pollMs,
     // React Query treats a hidden tab as "not focused" and skips interval fetches, but
     // this query is the only signal the new-message notifier has for email and chat.
     // Without this flag a backgrounded tab — the case where an alert matters most —

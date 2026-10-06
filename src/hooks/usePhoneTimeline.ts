@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchPhoneTimeline } from '@/api/phone';
@@ -16,6 +17,8 @@ export function usePhoneTimeline(
   active: boolean = true,
 ) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(15000);
   return useInfiniteQuery({
     queryKey: ['phone-timeline', companyId],
     queryFn: ({ pageParam }) =>
@@ -24,7 +27,7 @@ export function usePhoneTimeline(
     getNextPageParam: (last) =>
       last.hasMore ? (last.nextCursor ?? undefined) : undefined,
     enabled: !!token && !!companyId && hasNumber && active,
-    refetchInterval: active ? 15000 : false,
+    refetchInterval: active ? pollMs : false,
     // Under the 15s poll interval, so polling is unaffected — this only stops the
     // OTHER refetch trigger: at staleTime 0 every window focus and remount refetched
     // EVERY loaded page (TanStack refetches an infinite query's whole page array),

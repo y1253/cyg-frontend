@@ -1,40 +1,63 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { fetchRealtime, callEventOf } from '@/api/realtime';
+import {
+  fetchRealtime,
+  callEventOf,
+  realtimeWsUrl,
+  WS_SESSION_ENDED,
+  type RealtimeEvent,
+  type RealtimeServerFrame,
+} from '@/api/realtime';
+import { handleUnauthorized } from '@/api/client';
 import type { IncomingCallPayload } from '@/api/phone';
 import { RESET_KEYS, keysFor } from '@/lib/realtime-topics';
+import { setRealtimeConnected } from '@/lib/realtime-status';
 
 /** Backoff ceiling, matching `useInternalMessageStream`. */
 const MAX_BACKOFF_MS = 30_000;
 
+/** A socket that has not said hello by now is treated as blocked. */
+const HELLO_TIMEOUT_MS = 8_000;
+
 /**
- * The app's single real-time connection.
+ * The server pings every 25s. Nothing at all for this long means the socket is
+ * half-open — what a TLS-intercepting proxy leaves behind — so it is closed and redialled.
+ */
+const SILENCE_MS = 70_000;
+
+/** Consecutive sockets that died before hello, after which this tab uses the long poll. */
+const WS_FAILURES_BEFORE_FALLBACK = 2;
+
+/** While on the long poll, how often the WebSocket is tried again. */
+const WS_RETRY_MS = 5 * 60_000;
+
+type WsOutcome = 'stopped' | 'session-ended' | 'failed-before-hello' | 'closed';
+
+/**
+ * The app's single real-time connection — the reason the polls can be slow.
  *
- * ── WHY THIS EXISTS WHEN THERE ARE ALREADY THREE SSE STREAMS ───────────────────
- * Because on the network this firm uses, all three are dead. The office runs a
- * TLS-intercepting content filter that buffers a response until it completes, so an
- * event stream never delivers even its headers — verified from inside it: a normal API
- * call returned 200 in 76ms while both streams hung indefinitely. Every communications
- * surface therefore fell back to its slowest poll, and each poll lands on a server cache
- * sized to sit just under it: the missed-call badge was a 60s poll in front of two 55s
- * caches, so up to ~115 seconds. That is the reported "it takes a minute".
+ * ── TWO TRANSPORTS, ONE CHANNEL ────────────────────────────────────────────────
+ * PRIMARY: a WebSocket to `/api/realtime/ws`. The server pushes a small object the
+ * moment anything changes — `{ topic: 'email', companyId: 3 }` — only for companies this
+ * user works (management gets every company), and the browser refetches exactly what
+ * that topic covers (`keysFor`). No data rides the socket; every read still goes through
+ * the ordinary authorised route.
  *
- * A long poll is a normal request that COMPLETES, so the filter forwards it — and it
- * completes the moment the server has something, so completing costs nothing.
+ * FALLBACK: the long poll (`GET /api/realtime/events`). The office runs a
+ * TLS-intercepting content filter that kills every SSE stream outright, and a WebSocket
+ * may well fare no better. A long poll is a normal request that completes, so it gets
+ * through. Same events, same cursor, so switching is seamless. Two sockets in a row that
+ * never say hello → this tab polls, and re-tries the socket every 5 minutes.
  *
- * ⚠️ This does NOT replace any `refetchInterval`. Every one of them stays exactly as it
- * was, demoted to the backstop for a channel that is down — the same arrangement the
- * internal-message stream already documents. If this hook is the only thing keeping a
- * surface fresh, that surface is one network blip from looking broken.
+ * ── WHAT "CONNECTED" BUYS ──────────────────────────────────────────────────────
+ * `setRealtimeConnected(true)` drops every `refetchInterval` in the app to a 5-minute
+ * backstop (`lib/realtime-status.ts`). The flag goes false the instant either transport
+ * fails, and the polls return to their normal rates — so a dead channel degrades to how
+ * the app behaved before it existed, never to a stale screen.
  *
- * ONE loop per tab, and it must stay that way. A held request occupies one of the
- * browser's six per-host HTTP/1.1 connections — irrelevant in production, where nginx
- * serves HTTP/2 and multiplexes, but in `vite dev` (HTTP/1.1) a second copy of this hook
- * would spend a third of the tab's connection budget on waiting.
- *
- * `onCallEvent` must be identity-stable; it is read through a ref regardless, so a
- * changing callback can never restart the loop mid-poll.
+ * ONE loop per tab, mounted in `SoftphoneProvider`. `onCallEvent` is read through a ref,
+ * so a changing callback never restarts the connection.
  */
 export function useRealtime(
   onCallEvent?: (call: IncomingCallPayload & { type: string }) => void,
@@ -53,50 +76,167 @@ export function useRealtime(
     let stopped = false;
     let retry = 0;
     let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let socket: WebSocket | null = null;
+    let sleepTimer: ReturnType<typeof setTimeout> | null = null;
+    let wakeSleep: (() => void) | null = null;
 
-    // The cursor lives in the closure, not in state: it changes on every poll and
-    // rendering on it would re-run this effect and tear down the very request that
-    // produced it.
+    // The cursor lives in the closure, not in state, and is SHARED by both transports:
+    // whichever reconnects resumes exactly where the other left off.
     let since = 0;
 
     const invalidate = (keys: unknown[][]) => {
       for (const queryKey of keys) void qc.invalidateQueries({ queryKey });
     };
 
-    const loop = async () => {
-      while (!stopped) {
-        controller = new AbortController();
+    const dispatch = (events: RealtimeEvent[], reset?: boolean) => {
+      if (reset) {
+        // Away long enough that the server can no longer say what changed.
+        invalidate(RESET_KEYS);
+        return;
+      }
+      for (const event of events) {
+        // A ringing event carries the call itself, because the softphone needs it to
+        // pair an INVITE rather than a hint to go and look.
+        const call = callEventOf(event);
+        if (call) handlerRef.current?.(call);
+        invalidate(keysFor(event));
+      }
+    };
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        wakeSleep = resolve;
+        sleepTimer = setTimeout(resolve, ms);
+      });
+
+    const backoff = () =>
+      Math.min(MAX_BACKOFF_MS, 1000 * 2 ** retry++) + Math.random() * 500;
+
+    /** One WebSocket, start to finish. */
+    const runSocket = () =>
+      new Promise<WsOutcome>((resolve) => {
+        let ws: WebSocket;
         try {
-          const batch = await fetchRealtime(token, since, controller.signal);
-          if (stopped) return;
+          ws = new WebSocket(realtimeWsUrl());
+        } catch {
+          resolve('failed-before-hello');
+          return;
+        }
+        socket = ws;
+        let greeted = false;
+        let settled = false;
+        let silence: ReturnType<typeof setTimeout> | null = null;
 
-          retry = 0;
-          since = batch.seq;
+        const finish = (outcome: WsOutcome) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(helloTimer);
+          if (silence) clearTimeout(silence);
+          socket = null;
+          resolve(outcome);
+        };
+        const armSilence = () => {
+          if (silence) clearTimeout(silence);
+          silence = setTimeout(() => ws.close(), SILENCE_MS);
+        };
+        const helloTimer = setTimeout(() => {
+          if (!greeted) ws.close();
+        }, HELLO_TIMEOUT_MS);
 
-          if (batch.reset) {
-            // We were away long enough that the server can no longer say what changed.
-            invalidate(RESET_KEYS);
-            continue;
+        ws.onopen = () => {
+          // Auth is the FIRST MESSAGE, never the URL: a seven-day JWT in a query string
+          // would land in every proxy access log.
+          ws.send(JSON.stringify({ type: 'auth', token, since }));
+        };
+
+        ws.onmessage = (msg) => {
+          let frame: RealtimeServerFrame;
+          try {
+            frame = JSON.parse(String(msg.data)) as RealtimeServerFrame;
+          } catch {
+            return;
           }
-
-          for (const event of batch.events) {
-            // A ringing event carries the call itself, because the softphone needs it to
-            // pair an INVITE rather than a hint to go and look.
-            const call = callEventOf(event);
-            if (call) handlerRef.current?.(call);
-            invalidate(keysFor(event));
+          armSilence();
+          if (frame.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }));
+            return;
           }
-        } catch (err) {
-          if (stopped) return;
-          // An abort is our own teardown, not a failure.
-          if (err instanceof DOMException && err.name === 'AbortError') return;
+          if (frame.type === 'hello') {
+            if (!greeted) console.info('[realtime] transport=ws');
+            greeted = true;
+            retry = 0;
+            since = frame.seq;
+            setRealtimeConnected(true);
+            dispatch(frame.events, frame.reset);
+            return;
+          }
+          if (frame.type === 'event') {
+            since = frame.seq;
+            dispatch([frame]);
+          }
+        };
 
-          const wait = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** retry++) + Math.random() * 500;
-          console.warn('[realtime] poll failed, retrying', err);
-          await new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, wait);
-          });
+        ws.onclose = (ev) => {
+          if (stopped) return finish('stopped');
+          if (ev.code === WS_SESSION_ENDED) {
+            // Signed out server-side (or the token was refused at auth) — the same
+            // treatment a 401 gets everywhere else.
+            handleUnauthorized('SESSION_ENDED');
+            return finish('session-ended');
+          }
+          finish(greeted ? 'closed' : 'failed-before-hello');
+        };
+      });
+
+    /** One long poll. */
+    const pollOnce = async (): Promise<'ok' | 'stopped' | 'error'> => {
+      controller = new AbortController();
+      try {
+        const batch = await fetchRealtime(token, since, controller.signal);
+        if (stopped) return 'stopped';
+        retry = 0;
+        since = batch.seq;
+        setRealtimeConnected(true);
+        dispatch(batch.events, batch.reset);
+        return 'ok';
+      } catch (err) {
+        if (stopped) return 'stopped';
+        // An abort is our own teardown (or a sign-out `fetchRealtime` already handled).
+        if (err instanceof DOMException && err.name === 'AbortError') return 'stopped';
+        console.warn('[realtime] poll failed, retrying', err);
+        return 'error';
+      }
+    };
+
+    const loop = async () => {
+      let wsFailures = 0;
+      let pollUntil = 0; // while now < pollUntil, use the long poll
+
+      while (!stopped) {
+        if (Date.now() >= pollUntil) {
+          const outcome = await runSocket();
+          if (outcome === 'stopped' || outcome === 'session-ended') return;
+          setRealtimeConnected(false);
+
+          if (outcome === 'failed-before-hello') {
+            if (++wsFailures >= WS_FAILURES_BEFORE_FALLBACK) {
+              console.info('[realtime] transport=longpoll (websocket unavailable)');
+              wsFailures = 0;
+              pollUntil = Date.now() + WS_RETRY_MS;
+              continue;
+            }
+          } else {
+            wsFailures = 0;
+          }
+          await sleep(backoff());
+          continue;
+        }
+
+        const result = await pollOnce();
+        if (result === 'stopped') return;
+        if (result === 'error') {
+          setRealtimeConnected(false);
+          await sleep(backoff());
         }
       }
     };
@@ -106,7 +246,10 @@ export function useRealtime(
     return () => {
       stopped = true;
       controller?.abort();
-      if (timer) clearTimeout(timer);
+      socket?.close();
+      if (sleepTimer) clearTimeout(sleepTimer);
+      wakeSleep?.();
+      setRealtimeConnected(false);
     };
   }, [token, qc]);
 }

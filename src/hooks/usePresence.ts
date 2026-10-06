@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useQuery } from '@tanstack/react-query';
 import { fetchPresence } from '@/api/phone';
 import { useAuth } from '@/context/AuthContext';
@@ -24,11 +25,13 @@ import { useAuth } from '@/context/AuthContext';
  */
 export function usePresence(enabled: boolean = true) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(15_000);
   return useQuery({
     queryKey: ['phone-presence'],
     queryFn: () => fetchPresence(token!),
     enabled: !!token && enabled,
     staleTime: 10_000,
-    refetchInterval: enabled ? 15_000 : false,
+    refetchInterval: enabled ? pollMs : false,
   });
 }

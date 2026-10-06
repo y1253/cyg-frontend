@@ -1,3 +1,4 @@
+import { useBackstop } from '@/lib/realtime-status';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchRingingCall } from '@/api/phone';
@@ -15,11 +16,13 @@ import { fetchRingingCall } from '@/api/phone';
  */
 export function useRingingCall(companyId: number, enabled: boolean) {
   const { token } = useAuth();
+  // The realtime channel announces changes; this poll is only the backstop.
+  const pollMs = useBackstop(3000);
   return useQuery({
     queryKey: ['phone-ringing', companyId],
     queryFn: () => fetchRingingCall(token!, companyId),
     enabled: !!token && !!companyId && enabled,
-    refetchInterval: 3000,
+    refetchInterval: pollMs,
     // A ring is over in seconds; a cached answer is worse than no answer.
     staleTime: 0,
     gcTime: 0,
