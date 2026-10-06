@@ -95,6 +95,11 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
 
     case 'presence':
       return [['phone-presence']];
+
+    // Nothing to refresh: the event exists to wake the parked poll, whose next request
+    // is refused and signs this device out (`fetchRealtime`).
+    case 'session':
+      return [];
   }
 
   // An unrecognised topic is a NEWER SERVER talking to an older bundle — this is an

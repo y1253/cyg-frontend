@@ -6,7 +6,7 @@ import {
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
-import type { AuthUser } from '../api/auth';
+import { serverLogout, type AuthUser } from '../api/auth';
 import { clearPresence } from '../api/phone';
 
 // How long the app sits idle before signing the user out. Read in two places
@@ -26,7 +26,8 @@ interface AuthContextType {
   token: string | null;
   setUser: (user: AuthUser | null) => void;
   setToken: (token: string | null) => void;
-  logout: () => void;
+  /** `IDLE` when the inactivity timer is the one signing out. */
+  logout: (reason?: 'LOGOUT' | 'IDLE') => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -37,6 +38,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!stored) return null;
     const lastActivity = localStorage.getItem('lastActivity');
     if (!lastActivity || Date.now() - parseInt(lastActivity) > TIMEOUT_MS) {
+      // Idle-expired while the app was closed. Tell the server too: one device per
+      // account, and a reload landing here moments after the last request would
+      // otherwise leave this very device "signed in" and block its own next login
+      // until the staleness window passes.
+      serverLogout(stored, 'IDLE');
       clearSession();
       return null;
     }
@@ -74,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * that authorises the sign-out request. Identity changes exactly when `token` does, so
    * the effect gains no extra runs.
    */
-  const logout = useCallback(function logout() {
+  const logout = useCallback(function logout(reason: 'LOGOUT' | 'IDLE' = 'LOGOUT') {
     /**
      * Tell the server BEFORE the token is cleared — it is the credential the route needs.
      *
@@ -87,7 +93,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
      * Fire-and-forget with `keepalive`: the idle-timeout caller navigates away immediately
      * afterwards, and signing out must never be blocked by a phone route.
      */
-    if (token) clearPresence(token);
+    if (token) {
+      clearPresence(token);
+      // Ends the server session, so the account can sign in on another device at once.
+      // The staleness window would free it eventually; this makes Sign out mean it.
+      serverLogout(token, reason);
+    }
     setUserState(null);
     setTokenState(null);
     clearSession();
@@ -102,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       localStorage.setItem('lastActivity', Date.now().toString());
       timer = setTimeout(() => {
-        logout();
+        logout('IDLE');
         window.location.href = '/login';
       }, TIMEOUT_MS);
     }

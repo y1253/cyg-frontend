@@ -1,8 +1,18 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { login, faceLogin } from '../../api/auth';
+import {
+  LoginError,
+  faceLogin,
+  isCodeRequired,
+  login,
+  resendLoginCode,
+  verifyLoginCode,
+  type LoginResponse,
+} from '../../api/auth';
+import { takeSignedOutNotice } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { AdminStage } from './AdminStage';
+import { CodeStage } from './CodeStage';
 import { BrandPanel } from './BrandPanel';
 import { EmailStage } from './EmailStage';
 import type { FrameMetrics } from '../../lib/faceQuality';
@@ -12,7 +22,7 @@ import { VerifiedStage } from './VerifiedStage';
 import { NAVY_MID, TEXT_PRIMARY } from './loginTheme';
 import { warmup } from '../../lib/faceDetector';
 
-type Stage = 'email' | 'face' | 'admin' | 'verified';
+type Stage = 'email' | 'face' | 'admin' | 'code' | 'verified';
 
 export function LoginPage() {
   const [stage, setStage] = useState<Stage>('email');
@@ -22,10 +32,21 @@ export function LoginPage() {
   const [verifiedName, setVerifiedName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [challenge, setChallenge] = useState<{ id: string; sentTo: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [notice, setNotice] = useState('');
   const [faceAttempts, setFaceAttempts] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setUser, setToken } = useAuth();
   const navigate = useNavigate();
+
+  // A device whose session was ended server-side (an admin signed it out) lands here
+  // with a reason; say so, rather than leaving them to wonder why they were bounced.
+  useEffect(() => {
+    if (takeSignedOutNotice()) {
+      setError('You were signed out. Your session was ended from another device or by an admin.');
+    }
+  }, []);
 
   function validateEmail(val: string) {
     if (!val.trim()) return 'Email is required';
@@ -64,6 +85,13 @@ export function LoginPage() {
       setStage('verified');
       setTimeout(() => navigate('/dashboard'), 3000);
     } catch (e) {
+      // Not a recognition failure: retrying the camera cannot help, so stop at once.
+      if (e instanceof LoginError && e.alreadySignedIn) {
+        setFaceAttempts(MAX_FACE_ATTEMPTS);
+        setError(e.message);
+        setLoading(false);
+        return;
+      }
       const attempts = faceAttempts + 1;
       setFaceAttempts(attempts);
       if (attempts >= MAX_FACE_ATTEMPTS) {
@@ -96,13 +124,55 @@ export function LoginPage() {
     setError('');
     try {
       const data = await login(email, password);
-      setToken(data.access_token);
-      setUser(data.user);
-      navigate('/dashboard');
-    } catch {
-      setError('Invalid email or password');
+      if (isCodeRequired(data)) {
+        setChallenge({ id: data.challengeId, sentTo: data.sentTo });
+        setCode('');
+        setNotice('');
+        setStage('code');
+        return;
+      }
+      finishPasswordLogin(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Invalid email or password');
     } finally {
       setLoading(false);
+    }
+  }
+
+  function finishPasswordLogin(data: LoginResponse) {
+    setPassword('');
+    setToken(data.access_token);
+    setUser(data.user);
+    navigate('/dashboard');
+  }
+
+  async function handleCodeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!challenge) return;
+    if (!/^\d{6}$/.test(code)) { setError('Enter the 6-digit code from the email'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      finishPasswordLogin(await verifyLoginCode(challenge.id, code));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That code is not right.');
+      setCode('');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResend(): Promise<boolean> {
+    if (!challenge) return false;
+    setError('');
+    setNotice('');
+    try {
+      const r = await resendLoginCode(challenge.id);
+      setNotice(`A new code was sent to ${r.sentTo}.`);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send a new code.");
+      return false;
     }
   }
 
@@ -189,6 +259,20 @@ export function LoginPage() {
                 onTogglePassword={() => setShowPassword(v => !v)}
                 onSubmit={handleAdminSubmit}
                 onBack={() => goToStage('email')}
+              />
+            )}
+
+            {stage === 'code' && challenge && (
+              <CodeStage
+                sentTo={challenge.sentTo}
+                code={code}
+                loading={loading}
+                error={error}
+                notice={notice}
+                onCodeChange={v => { setCode(v); if (error) setError(''); }}
+                onSubmit={handleCodeSubmit}
+                onResend={handleResend}
+                onBack={() => { setChallenge(null); goToStage('admin'); }}
               />
             )}
 

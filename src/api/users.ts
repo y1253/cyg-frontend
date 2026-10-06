@@ -24,6 +24,18 @@ export interface AppUser {
    */
   phoneE164?: string | null;
   createdAt: string;
+  /**
+   * The device this user is signed in on, or null when signed out. Management list
+   * only (`GET /users`). One device per account: while this is set and not `stale`, a
+   * login anywhere else is refused.
+   */
+  activeSession?: {
+    ip: string | null;
+    loginAt: string;
+    lastSeenAt: string;
+    /** Silent past the server's staleness window: the next login will take over. */
+    stale: boolean;
+  } | null;
 }
 
 export interface CreateUserData {
@@ -168,6 +180,18 @@ export async function deleteUser(token: string, id: number): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { message?: string };
     throw new Error(body.message ?? 'Failed to delete user');
+  }
+}
+
+/** Sign a user out of whatever device they are on (management only). */
+export async function forceLogoutUser(token: string, id: number): Promise<void> {
+  const res = await fetchWithAuth(token, `${API}/users/${id}/force-logout`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(body.message ?? 'Failed to sign the user out');
   }
 }
 

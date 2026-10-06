@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useUsers } from '../../hooks/useUsers';
 import { useDeleteUser } from '../../hooks/useDeleteUser';
+import { useForceLogout } from '../../hooks/useForceLogout';
+import { useAuth } from '../../context/AuthContext';
 import { roleLabel, type AppUser } from '../../api/users';
 import { useRoles } from '../../hooks/useRoles';
 import { Button } from '@/components/ui/button';
@@ -39,6 +41,8 @@ export function UsersPage() {
   const { data: users = [], isLoading } = useUsers();
   const { data: roles = [] } = useRoles();
   const deleteMutation = useDeleteUser();
+  const forceLogout = useForceLogout();
+  const { user: me } = useAuth();
 
   // Built from GET /users/roles rather than a literal union, so adding a role to the
   // Prisma enum shows up here with no client edit. Also the Select's `items`, so the
@@ -121,6 +125,9 @@ export function UsersPage() {
         onView={u => navigate(`/admin/users/${u.id}`)}
         onEdit={setEditUser}
         onDelete={setDeleteUser}
+        onForceLogout={u => forceLogout.mutate(u.id)}
+        currentUserId={me?.id}
+        signingOutId={forceLogout.isPending ? forceLogout.variables : null}
       />
 
       <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />

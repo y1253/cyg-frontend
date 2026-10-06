@@ -1,4 +1,5 @@
 import type { IncomingCallPayload } from './phone';
+import { handleUnauthorized, unauthorizedCode } from './client';
 
 const API = '/api';
 
@@ -17,7 +18,9 @@ export type RealtimeTopic =
   | 'email'
   | 'internal-message'
   | 'internal-call'
-  | 'presence';
+  | 'presence'
+  /** This user's session was ended server-side. Only wakes the poll; see below. */
+  | 'session';
 
 export interface RealtimeEvent {
   seq: number;
@@ -58,6 +61,13 @@ export async function fetchRealtime(
     headers: { Authorization: `Bearer ${token}` },
     signal,
   });
+  // The poll is the first request to notice a session ended server-side — a `session`
+  // event wakes it and its very next request is refused — so it must sign the device
+  // out like `fetchWithAuth` does, not just back off and retry forever.
+  if (res.status === 401) {
+    handleUnauthorized(await unauthorizedCode(res));
+    throw new DOMException('signed out', 'AbortError');
+  }
   if (!res.ok) throw new Error(`realtime ${res.status}`);
   return (await res.json()) as RealtimeBatch;
 }
