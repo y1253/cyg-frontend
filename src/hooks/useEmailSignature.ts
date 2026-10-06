@@ -113,11 +113,8 @@ export function useResetCompanySignature(companyId: number) {
 export function usePreviewSignature() {
   const { token } = useAuth();
   return useMutation({
-    mutationFn: (body: {
-      template: string;
-      companyId?: number;
-      signatureImageId?: number;
-    }) => previewSignature(token!, body),
+    mutationFn: (body: Parameters<typeof previewSignature>[1]) =>
+      previewSignature(token!, body),
   });
 }
 

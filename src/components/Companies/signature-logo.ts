@@ -1,4 +1,8 @@
-import type { SignatureImage } from '@/api/emailSignature';
+import type {
+  LogoLayoutFields,
+  LogoPosition,
+  SignatureImage,
+} from '@/api/emailSignature';
 
 /**
  * The "no logo" sentinel, as the string a picker uses for its value.
@@ -40,4 +44,18 @@ export function logoLabel(
   id: number,
 ): string {
   return logoOptions(images)[String(id)] ?? 'Unavailable logo';
+}
+
+/** What each logo position is called in the UI. One place, so the picker and the summary agree. */
+export const LOGO_POSITION_LABELS: Record<LogoPosition, string> = {
+  left: 'Left of text',
+  right: 'Right of text',
+  above: 'Above text',
+  below: 'Below text',
+  token: 'Where I type {logo}',
+};
+
+/** One-line summary of a layout, for the read-only "Inherited" box. */
+export function describeLogoLayout(v: LogoLayoutFields): string {
+  return `${LOGO_POSITION_LABELS[v.logoPosition] ?? '—'} · ${v.logoWidth}px`;
 }

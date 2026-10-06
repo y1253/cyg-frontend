@@ -12,7 +12,34 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 export interface EffectiveEmailSignature {
   signatureHtml: string;
   signatureImageId: number;
+  /** Logo width in px, 40–600. */
+  logoWidth: number;
+  /** `token` = wherever `{logo}` is typed; the rest place it automatically. */
+  logoPosition: LogoPosition;
+  /** Vertical beside the text, horizontal above/below it. */
+  logoAlign: LogoAlign;
+  /** px between the logo and the text. */
+  logoGap: number;
 }
+
+/** Mirrors `LOGO_POSITIONS` / `LOGO_ALIGNS` in the server's `email-signature.util.ts`. */
+export type LogoPosition = 'token' | 'left' | 'right' | 'above' | 'below';
+export type LogoAlign = 'start' | 'center' | 'end';
+
+/** The four layout fields, which the per-company card overrides as one group. */
+export type LogoLayoutFields = Pick<
+  EffectiveEmailSignature,
+  'logoWidth' | 'logoPosition' | 'logoAlign' | 'logoGap'
+>;
+export const LOGO_LAYOUT_KEYS = [
+  'logoWidth',
+  'logoPosition',
+  'logoAlign',
+  'logoGap',
+] as const satisfies readonly (keyof LogoLayoutFields)[];
+export const LOGO_WIDTH_MIN = 40;
+export const LOGO_WIDTH_MAX = 600;
+export const LOGO_GAP_MAX = 60;
 
 /** `null` on a field means "inherit the global default". */
 export type EmailSignatureOverrides = {
@@ -151,7 +178,11 @@ export async function resetCompanySignature(
 
 export async function previewSignature(
   token: string,
-  body: { template: string; companyId?: number; signatureImageId?: number },
+  body: {
+    template: string;
+    companyId?: number;
+    signatureImageId?: number;
+  } & Partial<LogoLayoutFields>,
 ): Promise<{ html: string }> {
   const res = await fetchWithAuth(token, `${API}/email-signature/preview`, {
     method: 'POST',

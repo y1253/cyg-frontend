@@ -12,9 +12,33 @@ import {
   useResetCompanySignature,
   useUpdateCompanySignature,
 } from '@/hooks/useEmailSignature';
-import type { EmailSignatureOverrides } from '@/api/emailSignature';
+import {
+  LOGO_LAYOUT_KEYS,
+  type EmailSignatureOverrides,
+  type LogoLayoutFields,
+} from '@/api/emailSignature';
+import { LogoLayoutControls } from '@/components/CompanySettings/LogoLayoutControls';
 import { SignatureLogoPicker } from './SignatureLogoPicker';
-import { logoLabel } from './signature-logo';
+import { describeLogoLayout, logoLabel } from './signature-logo';
+
+/**
+ * The four layout fields are overridden as ONE group in the UI — a "Use default" box per
+ * field would be noise for what an admin thinks of as one decision. Server-side they stay
+ * separate nullable columns, so the group is: inheriting iff all four are null, and any
+ * partially-set state left by a direct API call is completed from the defaults.
+ */
+function layoutOverride(
+  draft: EmailSignatureOverrides,
+  defaults: LogoLayoutFields,
+): LogoLayoutFields | null {
+  if (LOGO_LAYOUT_KEYS.every((k) => draft[k] === null)) return null;
+  return {
+    logoWidth: draft.logoWidth ?? defaults.logoWidth,
+    logoPosition: draft.logoPosition ?? defaults.logoPosition,
+    logoAlign: draft.logoAlign ?? defaults.logoAlign,
+    logoGap: draft.logoGap ?? defaults.logoGap,
+  };
+}
 
 /**
  * This company's email signature: inherited from the firm-wide default unless overridden.
@@ -53,6 +77,10 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
     draft?.signatureHtml ?? data?.defaults.signatureHtml ?? '';
   const effectiveImageId =
     draft?.signatureImageId ?? data?.defaults.signatureImageId ?? 0;
+  const logoWidth = draft?.logoWidth ?? data?.defaults.logoWidth;
+  const logoPosition = draft?.logoPosition ?? data?.defaults.logoPosition;
+  const logoAlign = draft?.logoAlign ?? data?.defaults.logoAlign;
+  const logoGap = draft?.logoGap ?? data?.defaults.logoGap;
   const runPreview = preview.mutate;
   useEffect(() => {
     if (!editing) return;
@@ -62,12 +90,26 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
           template: effectiveTemplate,
           companyId,
           signatureImageId: effectiveImageId,
+          logoWidth,
+          logoPosition,
+          logoAlign,
+          logoGap,
         },
         { onSuccess: (r) => setPreviewHtml(r.html) },
       );
     }, 350);
     return () => clearTimeout(t);
-  }, [editing, effectiveTemplate, effectiveImageId, companyId, runPreview]);
+  }, [
+    editing,
+    effectiveTemplate,
+    effectiveImageId,
+    logoWidth,
+    logoPosition,
+    logoAlign,
+    logoGap,
+    companyId,
+    runPreview,
+  ]);
 
   if (isLoading || !data || !draft) {
     return (
@@ -78,9 +120,11 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
   }
 
   const { defaults, overrides, effective, previewHtml: savedPreview } = data;
-  const overrideCount = Object.values(overrides).filter(
-    (v) => v !== null,
-  ).length;
+  // The four layout columns are one setting in the UI, so they count once here.
+  const overrideCount =
+    (overrides.signatureHtml !== null ? 1 : 0) +
+    (overrides.signatureImageId !== null ? 1 : 0) +
+    (LOGO_LAYOUT_KEYS.some((k) => overrides[k] !== null) ? 1 : 0);
 
   const set = <K extends keyof EmailSignatureOverrides>(
     key: K,
@@ -221,6 +265,34 @@ export function SignatureSettingsSection({ companyId }: { companyId: number }) {
               />
             )}
           </OverrideField>
+
+          {(draft.signatureImageId ?? defaults.signatureImageId) > 0 && (
+            <OverrideField<LogoLayoutFields>
+              label="Logo size & placement"
+              hint="Untick to resize the logo or move it beside, above or below the text for this company."
+              inherited={defaults}
+              value={layoutOverride(draft, defaults)}
+              onChange={(next) =>
+                setDraft((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        // null re-ticks "Use default" for all four at once.
+                        logoWidth: next?.logoWidth ?? null,
+                        logoPosition: next?.logoPosition ?? null,
+                        logoAlign: next?.logoAlign ?? null,
+                        logoGap: next?.logoGap ?? null,
+                      }
+                    : prev,
+                )
+              }
+              renderInherited={describeLogoLayout}
+            >
+              {(value, setValue) => (
+                <LogoLayoutControls value={value} onChange={setValue} />
+              )}
+            </OverrideField>
+          )}
 
           {overrideCount > 0 && (
             <div className="border-t pt-3">

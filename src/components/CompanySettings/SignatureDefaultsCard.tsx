@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SignatureField } from './SignatureField';
+import { LogoLayoutControls } from './LogoLayoutControls';
 import {
   usePreviewSignature,
   useSignatureDefaults,
@@ -26,6 +27,10 @@ function stripMeta(
   return {
     signatureHtml: row.signatureHtml,
     signatureImageId: row.signatureImageId,
+    logoWidth: row.logoWidth,
+    logoPosition: row.logoPosition,
+    logoAlign: row.logoAlign,
+    logoGap: row.logoGap,
   };
 }
 
@@ -64,17 +69,37 @@ export function SignatureDefaultsCard() {
   // be a second copy of the escaping rules.
   const template = draft?.signatureHtml ?? '';
   const imageId = draft?.signatureImageId ?? 0;
+  const logoWidth = draft?.logoWidth;
+  const logoPosition = draft?.logoPosition;
+  const logoAlign = draft?.logoAlign;
+  const logoGap = draft?.logoGap;
   const runPreview = preview.mutate;
   useEffect(() => {
     if (draft === null) return;
     const t = setTimeout(() => {
       runPreview(
-        { template, signatureImageId: imageId },
+        {
+          template,
+          signatureImageId: imageId,
+          logoWidth,
+          logoPosition,
+          logoAlign,
+          logoGap,
+        },
         { onSuccess: (r) => setPreviewHtml(r.html) },
       );
     }, 350);
     return () => clearTimeout(t);
-  }, [template, imageId, draft, runPreview]);
+  }, [
+    template,
+    imageId,
+    logoWidth,
+    logoPosition,
+    logoAlign,
+    logoGap,
+    draft,
+    runPreview,
+  ]);
 
   if (isLoading || !draft) {
     return (
@@ -178,11 +203,22 @@ export function SignatureDefaultsCard() {
             ))}
           </SelectContent>
         </Select>
-        <p className="text-[11px] text-muted-foreground">
-          Shown wherever you place the{' '}
-          <code className="font-mono">{'{logo}'}</code> token. Leave the token out
-          and no image is sent.
-        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-xs">Logo size &amp; placement</Label>
+        {draft.signatureImageId > 0 ? (
+          <LogoLayoutControls
+            value={draft}
+            onChange={(next) =>
+              setDraft((prev) => (prev ? { ...prev, ...next } : prev))
+            }
+          />
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            Pick a logo above to set its size and where it sits next to the text.
+          </p>
+        )}
       </div>
     </Card>
   );
