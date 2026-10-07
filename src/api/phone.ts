@@ -20,6 +20,11 @@ export interface SupportNumber {
    */
   campaignState?: string | null;
   campaignError?: string | null;
+  /**
+   * Whether SignalWire's GET reports this number SMS-capable. Null = not checked yet.
+   * Only `false` is acted on (the card warns, the server refuses to send).
+   */
+  smsCapable?: boolean | null;
   createdAt: string;
   releasedAt: string | null;
 }
