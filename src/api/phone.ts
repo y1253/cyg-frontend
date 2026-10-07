@@ -146,17 +146,54 @@ export async function attachSupportNumber(
   return res.json() as Promise<SupportNumber>;
 }
 
-/** Releases the number back to SignalWire. Permanent; billing stops. */
+/**
+ * SignalWire refused the release: it locks a number for 14 days after purchase (code
+ * 22121). Nothing was disconnected. An ADMIN may retry with `deferIfLocked`.
+ */
+export class ReleaseLockedError extends Error {
+  readonly releasableAt: string;
+  constructor(message: string, releasableAt: string) {
+    super(message);
+    this.name = 'ReleaseLockedError';
+    this.releasableAt = releasableAt;
+  }
+}
+
+/**
+ * Releases the number back to SignalWire. Permanent; billing stops.
+ *
+ * `deferIfLocked` is the admin-only "Disconnect anyway": if SignalWire still has the number
+ * locked, it is detached from the company now and released automatically once the lock
+ * lifts (it keeps billing until then). Without it, a lock throws `ReleaseLockedError`.
+ */
 export async function releaseSupportNumber(
   token: string,
   companyId: number,
+  deferIfLocked = false,
 ): Promise<void> {
   const res = await fetchWithAuth(
     token,
-    `${API}/phone/companies/${companyId}/number`,
+    `${API}/phone/companies/${companyId}/number${deferIfLocked ? '?deferIfLocked=true' : ''}`,
     { method: 'DELETE', headers: JSON_HEADERS },
   );
-  if (!res.ok) throw await failure(res, 'Failed to disconnect the number');
+  if (res.ok) return;
+  if (res.status === 409) {
+    const body = (await res
+      .clone()
+      .json()
+      .catch(() => ({}))) as {
+      code?: string;
+      releasableAt?: string;
+      message?: string;
+    };
+    if (body.code === 'RELEASE_LOCKED' && body.releasableAt) {
+      throw new ReleaseLockedError(
+        body.message ?? 'SignalWire cannot release this number yet',
+        body.releasableAt,
+      );
+    }
+  }
+  throw await failure(res, 'Failed to disconnect the number');
 }
 
 /** Softphone credentials for the signed-in user. */

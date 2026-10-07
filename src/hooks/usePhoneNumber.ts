@@ -67,7 +67,9 @@ export function useReleaseNumber(companyId: number) {
   const { token } = useAuth();
   const invalidate = useInvalidateNumber(companyId);
   return useMutation({
-    mutationFn: () => releaseSupportNumber(token!, companyId),
+    // `true` = the admin-only "Disconnect anyway" — see `releaseSupportNumber`.
+    mutationFn: (deferIfLocked: boolean = false) =>
+      releaseSupportNumber(token!, companyId, deferIfLocked),
     onSuccess: invalidate,
   });
 }

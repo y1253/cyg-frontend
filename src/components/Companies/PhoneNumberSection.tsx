@@ -11,6 +11,9 @@ import {
 } from '@/components/ui/dialog';
 import { formatE164 } from '@/lib/phone';
 import { usePhoneNumber, useReleaseNumber } from '@/hooks/usePhoneNumber';
+import { useAuth } from '@/context/AuthContext';
+import { isSuperAdmin } from '@/lib/roles';
+import { ReleaseLockedError } from '@/api/phone';
 import { ConnectNumberDialog } from './ConnectNumberDialog';
 
 /** Mirrors the server's `SMS_VERIFY_GRACE_MS`: past it, NULL just means "not checked". */
@@ -73,6 +76,10 @@ export function PhoneNumberSection({
 }) {
   const { data: number, isLoading } = usePhoneNumber(companyId);
   const release = useReleaseNumber(companyId);
+  const { user } = useAuth();
+  const admin = isSuperAdmin(user);
+  const locked =
+    release.error instanceof ReleaseLockedError ? release.error : null;
 
   const [connectOpen, setConnectOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -152,7 +159,10 @@ export function PhoneNumberSection({
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => setDisconnectOpen(true)}
+              onClick={() => {
+                release.reset();
+                setDisconnectOpen(true);
+              }}
             >
               <PhoneOff size={14} className="mr-1.5" />
               Disconnect
@@ -170,7 +180,7 @@ export function PhoneNumberSection({
           </div>
         )}
 
-        {release.isError && (
+        {release.isError && !locked && (
           <p className="mt-2 text-xs text-destructive">
             {errorText(release.error)}
           </p>
@@ -196,21 +206,51 @@ export function PhoneNumberSection({
             cannot be recovered, and anyone who calls or texts it will not reach this
             company.
           </p>
+          {/* SignalWire locks a number for 14 days after purchase (code 22121), which
+              used to make Disconnect a dead end: the company stayed stuck on the number
+              and could not connect another. An ADMIN may detach it anyway; the server
+              releases it automatically when the lock lifts. */}
+          {locked && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              SignalWire can't release this number until{' '}
+              <strong>{new Date(locked.releasableAt).toLocaleString()}</strong> — it was
+              bought less than 14 days ago.{' '}
+              {admin
+                ? 'You can disconnect it from this company now; it stays on the account (and keeps billing) until then, and is released automatically.'
+                : 'Ask an admin to disconnect it anyway.'}
+            </div>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDisconnectOpen(false)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              disabled={release.isPending}
-              onClick={() =>
-                release.mutate(undefined, {
-                  onSuccess: () => setDisconnectOpen(false),
-                })
-              }
-            >
-              {release.isPending ? 'Disconnecting…' : 'Release number'}
-            </Button>
+            {locked ? (
+              admin && (
+                <Button
+                  variant="destructive"
+                  disabled={release.isPending}
+                  onClick={() =>
+                    release.mutate(true, {
+                      onSuccess: () => setDisconnectOpen(false),
+                    })
+                  }
+                >
+                  {release.isPending ? 'Disconnecting…' : 'Disconnect anyway'}
+                </Button>
+              )
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={release.isPending}
+                onClick={() =>
+                  release.mutate(false, {
+                    onSuccess: () => setDisconnectOpen(false),
+                  })
+                }
+              >
+                {release.isPending ? 'Disconnecting…' : 'Release number'}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
