@@ -71,6 +71,7 @@ import {
   hangUpInternalCall,
   reportInternalCallEnded,
   reportInternalCallEndedOnUnload,
+  setInternalCallHold,
   setInternalCallState,
 } from '@/api/internalCalls';
 import { canCompleteCall } from '@/components/Phone/call-slots';
@@ -746,6 +747,23 @@ const MAX_HELD_INVITES = 8;
  */
 const COMPLETE_PROMPT_MS = 5_000;
 
+/**
+ * Pause / resume the call's recording around a hold, on the route that owns the call.
+ *
+ * ⚠️ A staff call has no company: its `companyId` is the caller's own WORKSPACE, which
+ * the company route refuses — so every internal hold used to leave the recording running
+ * and the hold music in it. Both helpers are best-effort and never throw.
+ */
+function holdRecording(
+  tok: string,
+  call: IncomingCallInfo,
+  held: boolean,
+): Promise<void> {
+  return call.kind === 'internal'
+    ? setInternalCallHold(tok, call.callSid, held)
+    : setCallHold(tok, call.companyId, call.callSid, held);
+}
+
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const notifyCall = useCallNotifier();
@@ -1140,7 +1158,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         : Promise.resolve(null);
 
       // ⚠️ ORDER: the recording is paused BEFORE any music is put on the wire.
-      if (tok) await setCallHold(tok, call.companyId, call.callSid, true);
+      if (tok) await holdRecording(tok, call, true);
       const music = await musicReady;
 
       if (music) {
@@ -1163,9 +1181,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       teardownHold(slot, audioSenderOf(slot.invitation));
       publish();
       const tok = tokenRef.current;
-      if (tok) {
-        await setCallHold(tok, slot.info.companyId, slot.info.callSid, false);
-      }
+      if (tok) await holdRecording(tok, slot.info, false);
     },
     [publish, teardownHold],
   );

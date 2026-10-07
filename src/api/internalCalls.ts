@@ -341,6 +341,34 @@ export function hangUpInternalCall(token: string, sid: string): void {
 }
 
 /**
+ * Pause / resume an internal call's recording around a hold — the staff-call twin of
+ * `setCallHold` in `api/phone.ts`.
+ *
+ * ⚠️ A staff call must NOT go through `setCallHold`. That posts to
+ * `/phone/companies/:companyId/...` with the caller's WORKSPACE as the company, which the
+ * server refuses (403 without an assignment, 404 since a workspace has no support number)
+ * — so the recording was never paused and carried the hold music.
+ *
+ * Best effort and never throws, for the same reason as its twin: the music is played by
+ * this browser regardless, and a silent caller is worse than music in a recording.
+ */
+export async function setInternalCallHold(
+  token: string,
+  sid: string,
+  held: boolean,
+): Promise<void> {
+  try {
+    await fetchWithAuth(
+      token,
+      `${API}/internal-calls/${encodeURIComponent(sid)}/${held ? 'hold' : 'resume'}`,
+      { method: 'POST', headers: JSON_HEADERS },
+    );
+  } catch {
+    /* best effort — see the docblock */
+  }
+}
+
+/**
  * Tell the server how the internal call this browser was on ended.
  *
  * ── WHY THE BROWSER REPORTS AT ALL ─────────────────────────────────────────────
