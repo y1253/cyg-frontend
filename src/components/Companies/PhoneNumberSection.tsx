@@ -13,6 +13,20 @@ import { formatE164 } from '@/lib/phone';
 import { usePhoneNumber, useReleaseNumber } from '@/hooks/usePhoneNumber';
 import { ConnectNumberDialog } from './ConnectNumberDialog';
 
+/** Mirrors the server's `SMS_VERIFY_GRACE_MS`: past it, NULL just means "not checked". */
+const SMS_CHECK_WINDOW_MS = 30 * 60_000;
+
+/** Is a NULL `smsCapable` still "being checked", rather than simply never checked? */
+function smsStillChecking(number: {
+  smsCapable?: boolean | null;
+  createdAt: string;
+}): boolean {
+  return (
+    number.smsCapable == null &&
+    Date.now() - new Date(number.createdAt).getTime() < SMS_CHECK_WINDOW_MS
+  );
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Error';
 }
@@ -86,10 +100,20 @@ export function PhoneNumberSection({
                   (`smsCapable`): four numbers bought 2026-09-15 arrived voice-only although
                   the search said otherwise, and every text silently failed. Null (not
                   checked yet) shows nothing. */}
+              {/* Null on a just-bought number means "still checking": SignalWire reports
+                  sms:false for a while after a purchase (2026-10-07), so the server stores
+                  NULL until the 10-minute sweep settles it. Saying nothing here is what
+                  let a half-provisioned number look finished. */}
+              {smsStillChecking(number) && (
+                <span className="text-xs text-muted-foreground">
+                  Checking text messaging… this can take a few minutes after connecting.
+                </span>
+              )}
               {number.smsCapable === false && (
                 <span className="text-xs text-destructive">
                   Calls only — this number cannot send or receive texts. Disconnect it
-                  and connect a new number.
+                  and connect a new number. SignalWire won't release a number for 14 days
+                  after purchase, so disconnecting a new one does not stop its charge.
                 </span>
               )}
               <div className="flex items-center gap-1.5">
