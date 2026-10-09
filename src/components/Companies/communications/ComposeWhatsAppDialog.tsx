@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -7,12 +7,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
-import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
+import { useSendWhatsAppSmart } from '@/hooks/useSendWhatsAppSmart';
 import { useSendWhatsAppMedia } from '@/hooks/useSendWhatsAppMedia';
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useFileDrop } from '@/hooks/useFileDrop';
-import { WHATSAPP_CAPTION_LIMIT, fileAcceptsCaption } from '@/api/whatsapp';
+import {
+  WHATSAPP_CAPTION_LIMIT,
+  fileAcceptsCaption,
+  type WhatsAppSmartSendResult,
+} from '@/api/whatsapp';
 import { AttachRow } from '../AttachRow';
 import {
   PolishBudgetToggle,
@@ -25,22 +28,26 @@ import { DictateButton } from '../DictateButton';
 import { FileDropOverlay, UploadProgressBar } from '../ComposerBits';
 import { mergeAttachments } from '../message-utils';
 import { formatE164, toE164 } from '@/lib/phone';
-import { TemplatePicker } from './TemplatePicker';
-
-type Picked = { name: string; language: string; variables: string[] } | null;
 
 /**
- * Start a new WhatsApp conversation — the twin of `ComposeSmsDialog`, with one thing
- * that has no SMS equivalent.
+ * Template messages cap the body at 1024 characters; the server refuses longer outside
+ * the window, so the box stops there too.
+ */
+const TEMPLATE_TEXT_LIMIT = 1024;
+
+/**
+ * Start a new WhatsApp conversation — the twin of `ComposeSmsDialog`.
  *
- * ── THE 24-HOUR WINDOW DECIDES WHAT YOU GET TO TYPE ───────────────────────────
- * Meta only accepts free-form text within 24 hours of the customer's last message; outside
- * it, an approved template is the only thing that will send. So once a valid number is
- * entered this looks that peer up and shows EITHER a message box OR the template picker.
+ * ── THE USER ONLY EVER WRITES A MESSAGE ──────────────────────────────────────
+ * Meta accepts free-form text only within 24 hours of the customer's last message, and an
+ * approved TEMPLATE outside it. This dialog used to make the user pick one and fill in
+ * `{{1}}` values, which the people using it could not be expected to understand. Now
+ * every send goes through smart send: the server sends a text when it can, and otherwise
+ * matches or creates a template in the background (`WhatsAppOutboxService`). The thread
+ * shows the message's progress.
  *
- * Deciding before the user writes is the whole point. The alternative — the SMS dialog's
- * shape, a textarea and a rejection on send — invites somebody to compose a paragraph that
- * Meta was never going to deliver.
+ * The window still decides two things here: whether a FILE can go (a template carries
+ * none), and the length cap.
  */
 export function ComposeWhatsAppDialog({
   open,
@@ -58,13 +65,11 @@ export function ComposeWhatsAppDialog({
 }) {
   const [to, setTo] = useState('');
   const [body, setBody] = useState('');
-  const [picked, setPicked] = useState<Picked>(null);
   const [error, setError] = useState<string | null>(null);
   const [attached, setAttached] = useState<File[]>([]);
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
 
-  const sendText = useSendWhatsApp(companyId);
-  const sendTemplate = useSendWhatsAppTemplate(companyId);
+  const sendText = useSendWhatsAppSmart(companyId);
   const sendFile = useSendWhatsAppMedia(companyId);
 
   // A WhatsApp id is the E.164 number without its "+". Resolved here so the lookup below
@@ -129,22 +134,14 @@ export function ComposeWhatsAppDialog({
   const reset = () => {
     setTo('');
     setBody('');
-    setPicked(null);
     setError(null);
     setAttached([]);
     setAttachNotice(null);
   };
 
-
-
-  // Stable, or `TemplatePicker`'s reporting effect would re-run on every render here.
-  const handlePicked = useCallback((next: Picked) => setPicked(next), []);
-
-  const pending =
-    sendText.isPending || sendTemplate.isPending || sendFile.isPending;
+  const pending = sendText.isPending || sendFile.isPending;
   const sendError =
     (sendText.error as Error)?.message ??
-    (sendTemplate.error as Error)?.message ??
     (sendFile.error as Error)?.message ??
     null;
 
@@ -154,32 +151,26 @@ export function ComposeWhatsAppDialog({
       return;
     }
     setError(null);
-    const done = { onSuccess: (sent: { at: string }) => { reset(); onSent(peer, sent.at); } };
-
-    if (windowOpen) {
-      if (file) {
-        sendFile.mutate(
-          {
-            to: peer,
-            file,
-            caption: captionAllowed ? body.trim() : '',
-          },
-          done,
-        );
-        return;
-      }
-      if (!body.trim()) {
-        setError('Write a message or attach a file first');
-        return;
-      }
-      sendText.mutate({ to: peer, body: body.trim() }, done);
+    if (file) {
+      sendFile.mutate(
+        { to: peer, file, caption: captionAllowed ? body.trim() : '' },
+        { onSuccess: (sent) => { reset(); onSent(peer, sent.at); } },
+      );
       return;
     }
-    if (!picked) {
-      setError('Choose a template and fill in every value');
+    if (!body.trim()) {
+      setError(windowOpen ? 'Write a message or attach a file first' : 'Write a message first');
       return;
     }
-    sendTemplate.mutate({ to: peer, ...picked }, done);
+    sendText.mutate(
+      { to: peer, text: body.trim() },
+      {
+        onSuccess: (res: WhatsAppSmartSendResult) => {
+          reset();
+          onSent(peer, res.kind === 'sent' ? res.message.at : res.pending.createdAt);
+        },
+      },
+    );
   };
 
   return (
@@ -245,7 +236,7 @@ export function ComposeWhatsAppDialog({
                 disabledReason="Checking whether this number can receive a file…"
               />
             </div>
-          ) : windowOpen ? (
+          ) : (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="wa-body">Message</Label>
               <Textarea
@@ -260,46 +251,36 @@ export function ComposeWhatsAppDialog({
                     : 'Write a WhatsApp message…'
                 }
                 rows={4}
-                maxLength={file && captionAllowed ? WHATSAPP_CAPTION_LIMIT : 4096}
+                maxLength={
+                  !windowOpen
+                    ? TEMPLATE_TEXT_LIMIT
+                    : file && captionAllowed
+                      ? WHATSAPP_CAPTION_LIMIT
+                      : 4096
+                }
                 disabled={!!file && !captionAllowed}
               />
               <span className="text-xs text-muted-foreground">
-                They wrote recently, so you can send anything.
+                {windowOpen
+                  ? 'They wrote recently, so you can send anything.'
+                  : "They haven't written in the last 24 hours, so WhatsApp may take a few minutes to deliver this. You'll see its progress in the conversation."}
               </span>
-              {/* Rendered only inside the open window — a template carries no
-                  attachment, which is why `file` is derived from `windowOpen` above
-                  rather than read straight off the picked list. */}
+              {/* A file can only go inside the window: outside it the message travels as
+                  an approved template, which carries none. `file` is derived from
+                  `windowOpen` above for the same reason. */}
               <AttachRow
-                files={attached}
+                files={windowOpen ? attached : []}
                 setFiles={setAttached}
                 onPick={addFiles}
-                notice={attachNotice}
+                notice={windowOpen ? attachNotice : null}
                 cloudLabel={null}
+                disabledReason={
+                  windowOpen ? undefined : 'You can send files once they reply.'
+                }
               />
               {sendFile.uploadProgress !== null && (
                 <UploadProgressBar progress={sendFile.uploadProgress} />
               )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <p className="text-xs text-muted-foreground">
-                {thread?.windowOpenUntil
-                  ? 'It is more than 24 hours since they last wrote, so WhatsApp only accepts an approved template.'
-                  : 'This number has never messaged you, so WhatsApp only accepts an approved template as the first message.'}
-              </p>
-              <TemplatePicker
-                companyId={companyId}
-                enabled={open}
-                onChange={handlePicked}
-              />
-              <AttachRow
-                files={[]}
-                setFiles={setAttached}
-                onPick={addFiles}
-                notice={null}
-                cloudLabel={null}
-                disabledReason="A template cannot carry a file. Once they reply, you can send one for 24 hours."
-              />
             </div>
           )}
 
@@ -307,7 +288,7 @@ export function ComposeWhatsAppDialog({
             <p className="text-xs text-destructive">{error ?? sendError}</p>
           )}
 
-          {windowOpen && (
+          {peer && !checking && (
             <PolishPanel
               polish={polish}
               context={POLISH_CONTEXT}
@@ -316,12 +297,8 @@ export function ComposeWhatsAppDialog({
             />
           )}
           <div className="flex items-center justify-end gap-2">
-            {/* Only inside the 24-hour window: outside it the only thing that can be sent
-                is a template, whose wording is fixed by Meta. */}
-            {windowOpen && (
+            {peer && !checking && (
               <>
-                {/* Gated with Dictate, and for the same reason: outside the window the
-                    only thing sendable is a template, whose wording Meta fixes. */}
                 <PolishButton
                   polish={polish}
                   draftPlain={body}
@@ -352,11 +329,11 @@ export function ComposeWhatsAppDialog({
             <Button
               size="sm"
               className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700"
-              disabled={pending || !peer || checking || (!windowOpen && !picked)}
+              disabled={pending || !peer || checking}
               onClick={handleSend}
             >
               <Send size={13} />
-              {pending ? 'Sending…' : windowOpen ? 'Send' : 'Send template'}
+              {pending ? 'Sending…' : 'Send'}
             </Button>
           </div>
         </div>

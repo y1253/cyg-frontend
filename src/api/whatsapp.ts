@@ -113,7 +113,29 @@ export interface WhatsAppThreadResult {
   /** Free-form replies are accepted only before this. Null = the customer never wrote. */
   windowOpenUntil: string | null;
   connected: boolean;
+  /** Messages typed outside the 24-hour window that are still on their way (smart send). */
+  pending: WhatsAppOutboxItem[];
 }
+
+/**
+ * A message the server is still turning into something WhatsApp will deliver.
+ *
+ * Deliberately carries no template name or values: the user wrote `text`, and that is all
+ * they ever see.
+ */
+export interface WhatsAppOutboxItem {
+  id: number;
+  text: string;
+  status: 'MATCHING' | 'AWAITING_TEMPLATE' | 'SENDING' | 'FAILED';
+  /** A reason the user can read, on FAILED only. */
+  error: string | null;
+  createdAt: string;
+}
+
+/** What a smart send answered: sent there and then, or queued behind a template. */
+export type WhatsAppSmartSendResult =
+  | { kind: 'sent'; message: WhatsAppItem }
+  | { kind: 'queued'; pending: WhatsAppOutboxItem };
 
 export type WhatsAppStateAction = 'read' | 'unread' | 'complete' | 'uncomplete';
 
@@ -413,6 +435,41 @@ export async function sendWhatsAppTemplate(
   );
   if (!res.ok) throw await failure(res, 'Failed to send the template');
   return res.json() as Promise<WhatsAppItem>;
+}
+
+/**
+ * Send what the user typed, whatever the 24-hour window says. Inside it this is a plain
+ * text; outside it the server finds or creates a template in the background.
+ */
+export async function sendWhatsAppSmart(
+  token: string,
+  companyId: number,
+  to: string,
+  text: string,
+): Promise<WhatsAppSmartSendResult> {
+  const res = await fetchWithAuth(
+    token,
+    `${API}/whatsapp/companies/${companyId}/messages/smart`,
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ to, text }) },
+  );
+  if (!res.ok) throw await failure(res, 'Failed to send the message');
+  return res.json() as Promise<WhatsAppSmartSendResult>;
+}
+
+/** Retry (`retry`) or drop (`discard`) a message that has not been sent. */
+export async function whatsAppOutboxAction(
+  token: string,
+  companyId: number,
+  id: number,
+  action: 'retry' | 'discard',
+): Promise<void> {
+  const base = `${API}/whatsapp/companies/${companyId}/outbox/${id}`;
+  const res = await fetchWithAuth(
+    token,
+    action === 'retry' ? `${base}/retry` : base,
+    { method: action === 'retry' ? 'POST' : 'DELETE', headers: JSON_HEADERS },
+  );
+  if (!res.ok) throw await failure(res, 'That did not work');
 }
 
 export async function sendWhatsAppText(

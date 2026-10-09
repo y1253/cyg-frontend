@@ -50,6 +50,11 @@ export interface PendingMeta {
    */
   sendState: 'sending' | 'failed';
   error?: string;
+  /**
+   * What to say instead of "Sending…" while the row is not failed. WhatsApp smart send
+   * uses it for "Preparing…" / "Waiting for WhatsApp approval…".
+   */
+  stateLabel?: string;
   /** Object URLs for the local files, so the bubble can show the picture immediately. */
   previews: string[];
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { UntilAction } from '@/api/completeUntil';
 import {
   AlertCircle, ArrowLeft, Check, CheckCheck, CheckCircle2, Clock, MailOpen, MessageCircle,
@@ -16,11 +16,13 @@ import {
   whatsappMediaUrl,
   whatsappPreviewText,
   type WhatsAppItem,
+  type WhatsAppOutboxItem,
 } from '@/api/whatsapp';
 import { useWhatsAppThread } from '@/hooks/useWhatsAppThread';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { useSendWhatsAppMedia } from '@/hooks/useSendWhatsAppMedia';
-import { useSendWhatsAppTemplate } from '@/hooks/useSendWhatsAppTemplate';
+import { useSendWhatsAppSmart } from '@/hooks/useSendWhatsAppSmart';
+import { useWhatsAppOutboxAction } from '@/hooks/useWhatsAppOutboxAction';
 import { useMarkWhatsAppItem } from '@/hooks/useMarkWhatsAppItem';
 import { AttachmentChip } from '../AttachmentPreview';
 import { AttachRow } from '../AttachRow';
@@ -36,10 +38,14 @@ import {
 import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { threadPolishContext, whatsappBudget } from './polish-budget';
 import { DictateButton } from '../DictateButton';
-import { TemplatePicker } from './TemplatePicker';
 import { makeIsFuture } from './thread-dim';
 import { ANCHOR_RING } from './anchor-style';
-import { isPendingId, mergePending, type PendingMeta } from './pending-sends';
+import {
+  PENDING_PREFIX,
+  isPendingId,
+  mergePending,
+  type PendingMeta,
+} from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TranslateControl } from './TranslatePanel';
@@ -111,18 +117,9 @@ export function WhatsAppThreadView({
   const polish = useDraftPolish('whatsapp');
   // Default ON, though it only has anything to constrain once a caption limit applies.
   const [keepShort, setKeepShort] = useState(true);
-  // The closed-window branch: a template is the only thing Meta will accept there.
-  const sendTemplate = useSendWhatsAppTemplate(companyId);
-  const [templateOpen, setTemplateOpen] = useState(false);
-  const [picked, setPicked] = useState<
-    { name: string; language: string; variables: string[] } | null
-  >(null);
-  // Stable, or `TemplatePicker`'s reporting effect re-runs on every render here.
-  const handlePicked = useCallback(
-    (next: { name: string; language: string; variables: string[] } | null) =>
-      setPicked(next),
-    [],
-  );
+  // Outside the 24-hour window: the server turns the text into a template send.
+  const sendSmart = useSendWhatsAppSmart(companyId);
+  const outboxAction = useWhatsAppOutboxAction(companyId);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
@@ -130,10 +127,10 @@ export function WhatsAppThreadView({
   const sends = usePendingSends<WhatsAppItem>();
   const translation = useTranslation();
   /** The server's rows plus whatever this browser is still uploading. */
-  const messages = mergePending(
-    serverMessages,
-    sends.pending.map((p) => p.row),
-  ) as (WhatsAppItem & Partial<PendingMeta>)[];
+  const messages = mergePending(serverMessages, [
+    ...sends.pending.map((p) => p.row),
+    ...(data?.pending ?? []).map((o) => outboxRow(o, peer)),
+  ]) as (WhatsAppItem & Partial<PendingMeta>)[];
 
   /**
    * Show the message immediately, then send it.
@@ -198,6 +195,12 @@ export function WhatsAppThreadView({
   const windowOpen =
     !!data?.windowOpenUntil && new Date(data.windowOpenUntil).getTime() > now;
   const canReply = !!data?.connected && windowOpen;
+  /**
+   * Text can be written whatever the window says — outside it the server finds or creates
+   * a template (smart send). Only a FILE still needs the window, since a template carries
+   * none.
+   */
+  const canWrite = !!data?.connected;
 
   /**
    * Jump to the anchor message — on open, and again whenever the anchor MOVES.
@@ -291,7 +294,8 @@ export function WhatsAppThreadView({
   // Caption support is Meta's rule, not ours: audio and stickers silently discard one, so
   // the field says so rather than letting somebody type a sentence that never arrives.
   const captionAllowed = file ? fileAcceptsCaption(file) : true;
-  const captionLimit = file ? WHATSAPP_CAPTION_LIMIT : 4096;
+  // Outside the window the text becomes a template body, which Meta caps at 1024.
+  const captionLimit = file || !windowOpen ? WHATSAPP_CAPTION_LIMIT : 4096;
 
   /**
    * ⚠️ Recomputed per render because the budget CHANGES while the composer is open:
@@ -361,9 +365,36 @@ export function WhatsAppThreadView({
     );
   };
 
+  /**
+   * Outside the window: queue it with the server. The optimistic bubble is dropped once
+   * the server answers, and the server's own pending row (polled with the thread) takes
+   * over showing its progress.
+   */
+  const sendQueued = (pendingId: string, body: string) =>
+    sendSmart.mutate(
+      { to: peer, text: body },
+      {
+        onSuccess: () => sends.drop(pendingId),
+        onError: (err: unknown) =>
+          sends.fail(
+            pendingId,
+            err instanceof Error && err.message
+              ? err.message
+              : 'The message could not be sent.',
+          ),
+      },
+    );
+
   const handleSend = () => {
     const body = draft.trim();
     if (!body) return;
+    if (!windowOpen) {
+      const id = addPending(body, [], { type: 'text' });
+      setDraft('');
+      setQuotePick(undefined);
+      sendQueued(id, body);
+      return;
+    }
     const id = addPending(body, [], {
       type: 'text',
       replyToMessageId: quoted?.messageId ?? null,
@@ -405,7 +436,7 @@ export function WhatsAppThreadView({
     );
   };
 
-  const sendError = (sendText.error ?? sendFile.error) as Error | null;
+  const sendError = (sendText.error ?? sendFile.error ?? outboxAction.error) as Error | null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -543,6 +574,11 @@ export function WhatsAppThreadView({
                 }
                 translation={translation}
                 onRetry={() => {
+                  const outboxId = outboxIdOf(m.id);
+                  if (outboxId !== null) {
+                    outboxAction.mutate({ id: outboxId, action: 'retry' });
+                    return;
+                  }
                   const held = sends.pending.find((p) => p.row.id === m.id);
                   if (!held) return;
                   sends.drop(m.id);
@@ -552,11 +588,21 @@ export function WhatsAppThreadView({
                       file: held.files[0],
                       caption: held.row.body ?? '',
                     });
+                  } else if (!windowOpen) {
+                    const id = addPending(held.row.body ?? '', [], { type: 'text' });
+                    sendQueued(id, held.row.body ?? '');
                   } else {
                     sendText.mutate({ to: peer, body: held.row.body ?? '' });
                   }
                 }}
-                onDiscard={() => sends.drop(m.id)}
+                onDiscard={() => {
+                  const outboxId = outboxIdOf(m.id);
+                  if (outboxId !== null) {
+                    outboxAction.mutate({ id: outboxId, action: 'discard' });
+                    return;
+                  }
+                  sends.drop(m.id);
+                }}
               />
             ))}
           </div>
@@ -589,73 +635,24 @@ export function WhatsAppThreadView({
             No WhatsApp number is connected to this company, so replies cannot be sent. An
             admin can connect one on the Details tab.
           </p>
-        ) : !isLoading && data && !windowOpen ? (
-          // The window has shut, so a template is the only thing that will send. This
-          // used to be the end of the road ("templates are not supported here yet") —
-          // it is now the second home of the compose dialog's picker.
-          <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-3">
-            <p className="flex items-start gap-2 text-xs text-amber-900">
-              <Clock size={14} className="mt-0.5 shrink-0" />
-              {data.windowOpenUntil
-                ? 'The 24-hour reply window is closed. WhatsApp only allows an approved template until the customer writes again.'
-                : 'This customer has not messaged this number yet. WhatsApp only allows an approved template as the first message.'}
-            </p>
-            {templateOpen ? (
-              <>
-                <TemplatePicker
-                  companyId={companyId}
-                  enabled
-                  onChange={handlePicked}
-                />
-                {sendTemplate.isError && (
-                  <p className="text-xs text-destructive">
-                    {(sendTemplate.error as Error)?.message ?? 'Failed to send'}
-                  </p>
-                )}
-                <div className="flex justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setTemplateOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700"
-                    disabled={!picked || sendTemplate.isPending}
-                    onClick={() =>
-                      picked &&
-                      sendTemplate.mutate(
-                        { to: peer, ...picked },
-                        { onSuccess: () => setTemplateOpen(false) },
-                      )
-                    }
-                  >
-                    <Send size={13} />
-                    {sendTemplate.isPending ? 'Sending…' : 'Send template'}
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1 border-amber-300 text-amber-800 hover:bg-amber-100"
-                  onClick={() => setTemplateOpen(true)}
-                >
-                  <MessageCircle size={13} /> Send a template
-                </Button>
-              </div>
-            )}
-          </div>
         ) : (
           <>
+            {!isLoading && data && !windowOpen && (
+              // Outside the window the message goes as a WhatsApp template, which the
+              // server picks or creates by itself. The user only needs to know it may
+              // take a little longer, and that files wait until the customer replies.
+              <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+                <Clock size={14} className="mt-0.5 shrink-0" />
+                {data.windowOpenUntil
+                  ? "They haven't written in the last 24 hours, so WhatsApp may take a few minutes to deliver your message. Files can be sent once they reply."
+                  : "They haven't messaged this number yet, so WhatsApp may take a few minutes to deliver your first message. Files can be sent once they reply."}
+              </p>
+            )}
             {/* The quoted message, removable. Unlike the SMS chip this costs the body
                 nothing — Meta carries the quote structurally and renders it in the
                 customer's app. Clearing it sends a plain message. */}
-            {quoted && (
+            {/* Only inside the window: a template send carries no native quote. */}
+            {quoted && windowOpen && (
               <div className="mb-2 flex items-start gap-2 rounded-md border-l-2 border-emerald-400 bg-emerald-50/60 px-2.5 py-1.5 text-xs">
                 <div className="min-w-0 flex-1">
                   <span className="font-medium text-emerald-900">
@@ -691,7 +688,7 @@ export function WhatsAppThreadView({
               }
               rows={3}
               maxLength={captionLimit}
-              disabled={!canReply || (!!file && !captionAllowed)}
+              disabled={!canWrite || (!!file && !captionAllowed)}
             />
 
             {/* The picked file, with the same chips the email and internal composers use.
@@ -703,6 +700,9 @@ export function WhatsAppThreadView({
               onPick={addFiles}
               notice={attachNotice}
               cloudLabel={null}
+              disabledReason={
+                canReply ? undefined : 'You can send files once they reply.'
+              }
             />
 
             <PolishPanel
@@ -735,7 +735,7 @@ export function WhatsAppThreadView({
                       polish={polish}
                       budget={polishBudget}
                       onChange={setKeepShort}
-                      disabled={!canReply}
+                      disabled={!canWrite}
                     />
                   )}
                 </PolishButton>
@@ -748,7 +748,7 @@ export function WhatsAppThreadView({
                     message like any other. Inbound voice notes are untouched and still
                     arrive and play. */}
                 <DictateButton
-                  disabled={!canReply}
+                  disabled={!canWrite}
                   onText={(text) =>
                     setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text))
                   }
@@ -768,11 +768,11 @@ export function WhatsAppThreadView({
                   <Button
                     size="sm"
                     className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
-                    disabled={sendText.isPending || !canReply}
+                    disabled={sendText.isPending || sendSmart.isPending || !canWrite}
                     onClick={handleSend}
                   >
                     <Send size={13} />
-                    {sendText.isPending ? 'Sending…' : 'Send'}
+                    {sendText.isPending || sendSmart.isPending ? 'Sending…' : 'Send'}
                   </Button>
                 )}
               </div>
@@ -1112,7 +1112,7 @@ function WhatsAppBubble({
           ) : (
             <>
               <Clock size={10} className="shrink-0" />
-              Sending…
+              {pending.stateLabel ?? 'Sending…'}
             </>
           )
         ) : (
@@ -1124,4 +1124,65 @@ function WhatsAppBubble({
       </span>
     </div>
   );
+}
+
+/**
+ * Smart-send rows carry the `pending:` prefix ON PURPOSE, so every guard that already
+ * keeps an optimistic bubble away from read/complete/quote/anchor actions covers them too.
+ */
+const OUTBOX_ROW_PREFIX = `${PENDING_PREFIX}outbox:`;
+
+function outboxIdOf(id: string): number | null {
+  if (!id.startsWith(OUTBOX_ROW_PREFIX)) return null;
+  const n = Number(id.slice(OUTBOX_ROW_PREFIX.length));
+  return Number.isInteger(n) ? n : null;
+}
+
+/** What the user sees while the server works out how WhatsApp will deliver a message. */
+function outboxLabel(status: WhatsAppOutboxItem['status']): string {
+  return status === 'AWAITING_TEMPLATE'
+    ? 'Waiting for WhatsApp approval…'
+    : 'Preparing…';
+}
+
+/**
+ * A message the server is still delivering, drawn as an outbound bubble.
+ *
+ * Only what the user typed is shown -- which template carries it, and with which values,
+ * never leaves the server.
+ */
+function outboxRow(
+  o: WhatsAppOutboxItem,
+  peer: string,
+): WhatsAppItem & PendingMeta {
+  const failed = o.status === 'FAILED';
+  return {
+    id: `${OUTBOX_ROW_PREFIX}${o.id}`,
+    // Negative, like every pending row: never a real row id.
+    messageId: -o.id,
+    kind: 'whatsapp',
+    direction: 'outbound',
+    peer,
+    peerName: null,
+    type: 'text',
+    body: o.text,
+    isVoice: false,
+    durationSec: null,
+    hasMedia: false,
+    mediaStatus: null,
+    mimeType: null,
+    filename: null,
+    size: null,
+    status: null,
+    errorCode: null,
+    replyToMessageId: null,
+    at: o.createdAt,
+    isRead: true,
+    isCompleted: true,
+    pending: true,
+    sendState: failed ? 'failed' : 'sending',
+    error: failed ? (o.error ?? undefined) : undefined,
+    stateLabel: failed ? undefined : outboxLabel(o.status),
+    previews: [],
+  };
 }

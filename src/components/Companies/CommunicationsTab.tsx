@@ -479,9 +479,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
    * could never be a missed call. Mounted with the INBOX rather than with the picker,
    * which is the whole point — the picker's dialog closing used to stop the status poll.
    */
+  // Management only. Smart send creates templates in the background so that nobody
+  // else ever has to see one; for everyone else this strip would be template jargon
+  // ("cyg_documents_needed · waiting for Meta to review") about messages they simply sent.
   const templateSubmissionsQuery = useTemplateSubmissions(
     companyId,
-    active && !activeSearch,
+    active && !activeSearch && isAdmin,
   );
   const dismissTemplate = useDismissTemplateSubmission(companyId);
 
@@ -1370,7 +1373,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
       {ringingBanner}
       {headerBar}
       <InboxView
-      templateSubmissions={templateSubmissionsQuery.data ?? []}
+      templateSubmissions={isAdmin ? (templateSubmissionsQuery.data ?? []) : []}
       onDismissTemplate={(id: number) => dismissTemplate.mutate(id)}
       dismissingTemplate={
         dismissTemplate.isPending ? (dismissTemplate.variables ?? null) : null
