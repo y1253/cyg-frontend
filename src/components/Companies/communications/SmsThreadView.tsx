@@ -34,6 +34,7 @@ import { useFileDrop } from '@/hooks/useFileDrop';
 import { AttachmentChip } from '../AttachmentPreview';
 import type { CompleteTarget, ItemKind } from './types';
 import { makeIsFuture } from './thread-dim';
+import { useHoldAnchorInView } from './useHoldAnchorInView';
 import { ANCHOR_RING } from './anchor-style';
 import { isPendingId, mergePending, type PendingMeta } from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
@@ -155,6 +156,8 @@ export function SmsThreadView({
   // Default ON: a text is billed per segment, so shortening is nearly always wanted.
   const [keepShort, setKeepShort] = useState(true);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const holdAnchor = useHoldAnchorInView(anchorRef, listRef, anchorMsgId);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
   const serverMessages: SmsItem[] = data?.messages ?? [];
@@ -205,7 +208,9 @@ export function SmsThreadView({
     if (scrolledFor.current === anchorMsgId) return;
     scrolledFor.current = anchorMsgId;
     el.scrollIntoView({ block: 'end' });
-  }, [active, anchorMsgId, messages.length]);
+    // Pictures above the anchor may still be loading; keep it in view while they do.
+    holdAnchor(anchorMsgId);
+  }, [active, anchorMsgId, messages.length, holdAnchor]);
 
   // Drives the "Back to message" affordance — only useful once it is off screen.
   //
@@ -486,7 +491,7 @@ export function SmsThreadView({
             No messages with this number yet.
           </p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div ref={listRef} className="flex flex-col gap-3">
             {messages.map((m) => (
               <SmsBubble
                 key={m.id}

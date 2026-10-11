@@ -39,6 +39,7 @@ import { useDraftPolish } from '@/hooks/useDraftPolish';
 import { threadPolishContext, whatsappBudget } from './polish-budget';
 import { DictateButton } from '../DictateButton';
 import { makeIsFuture } from './thread-dim';
+import { useHoldAnchorInView } from './useHoldAnchorInView';
 import { ANCHOR_RING } from './anchor-style';
 import {
   PENDING_PREFIX,
@@ -122,6 +123,8 @@ export function WhatsAppThreadView({
   const sendSmart = useSendWhatsAppSmart(companyId);
   const outboxAction = useWhatsAppOutboxAction(companyId);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const holdAnchor = useHoldAnchorInView(anchorRef, listRef, anchorMsgId);
   const [anchorVisible, setAnchorVisible] = useState(true);
 
   const serverMessages: WhatsAppItem[] = data?.messages ?? [];
@@ -224,7 +227,9 @@ export function WhatsAppThreadView({
     if (scrolledFor.current === anchorMsgId) return;
     scrolledFor.current = anchorMsgId;
     el.scrollIntoView({ block: 'end' });
-  }, [active, anchorMsgId, messages.length]);
+    // Pictures above the anchor may still be loading; keep it in view while they do.
+    holdAnchor(anchorMsgId);
+  }, [active, anchorMsgId, messages.length, holdAnchor]);
 
   // ⚠️ `anchorMsgId` in the deps, or after a re-anchor the observer keeps watching the
   // OLD node — still mounted, only the ref moved — and the "Back to message" pill tracks
@@ -512,7 +517,7 @@ export function WhatsAppThreadView({
             No WhatsApp messages with this number yet.
           </p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div ref={listRef} className="flex flex-col gap-3">
             {messages.map((m) => (
               <WhatsAppBubble
                 key={m.id}
@@ -861,6 +866,8 @@ function BubbleContent({
             <img
               src={whatsappMediaUrl(token, m.messageId)}
               alt={caption ? (m.body ?? '') : m.type === 'sticker' ? 'Sticker' : 'Photo'}
+              loading="lazy"
+              decoding="async"
               className={m.type === 'sticker' ? 'h-32 w-32 object-contain' : 'max-h-72 rounded-lg'}
             />
           </a>
