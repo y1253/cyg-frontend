@@ -59,6 +59,18 @@ export interface PendingMeta {
   previews: string[];
 }
 
+/**
+ * What a queued WhatsApp smart send says while the server works out how WhatsApp will
+ * deliver it. One copy, shared by the thread bubble and the inbox row, so the two never
+ * describe the same message differently.
+ */
+export function outboxLabel(status: string): string {
+  if (status === 'FAILED') return 'Not sent';
+  return status === 'AWAITING_TEMPLATE'
+    ? 'Waiting for WhatsApp approval…'
+    : 'Preparing…';
+}
+
 interface Placed {
   id: string;
   at: string;

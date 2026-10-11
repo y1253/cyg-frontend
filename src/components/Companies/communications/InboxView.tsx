@@ -19,6 +19,7 @@ import { InboxNotices } from './InboxNotices';
 import { TemplateSubmissionRows } from './TemplateSubmissionRows';
 import type { WhatsAppSubmission } from '@/api/whatsapp';
 import { InboxRow } from './InboxRow';
+import { isPendingId } from './pending-sends';
 import {
   KIND_FILTER_LABELS,
   type CompleteTarget, type KindFilter, type UnifiedItem,
@@ -203,7 +204,13 @@ export function InboxView({
   };
 
   const runBulk = (action: 'read' | 'unread' | 'complete' | 'uncomplete') => {
-    onBulk(action, visibleItems.filter((it) => selectedIds.has(it.data.id)));
+    // A queued WhatsApp send (`pending:`) is not on the server yet: never a bulk target.
+    onBulk(
+      action,
+      visibleItems.filter(
+        (it) => selectedIds.has(it.data.id) && !isPendingId(it.data.id),
+      ),
+    );
     setSelectedIds(new Set());
   };
 

@@ -64,6 +64,7 @@ import type {
 } from '@/api/completeUntil';
 import { useListScrollRestore } from './communications/useListScrollRestore';
 import { useUnifiedInbox } from './communications/useUnifiedInbox';
+import { isPendingId } from './communications/pending-sends';
 import { showListSpinner } from './communications/inbox-loading';
 import {
   ALL_LABELS, CONTACTS_FOLDER, FOLDERS, INBOX_TABS, isImplicitlyRead,
@@ -892,6 +893,18 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     // composer rather than a thread.
     if (selectedLabel === 'DRAFTS' && item.kind === 'email') {
       openDraftRow(item.data.id);
+      return;
+    }
+    // A queued WhatsApp smart send (`pending:outbox:…`) opens its conversation with NO
+    // anchor: the row disappears the moment the message is sent, and a persisted
+    // `pending:` anchor would point at something that no longer exists.
+    if (item.kind === 'whatsapp' && isPendingId(item.data.id)) {
+      setSelected({
+        kind: 'whatsapp',
+        peer: item.data.peer,
+        msgId: '',
+        msgTime: new Date().toISOString(),
+      });
       return;
     }
     if (!item.data.isRead) stateMutations[item.kind].read(item.data.id);

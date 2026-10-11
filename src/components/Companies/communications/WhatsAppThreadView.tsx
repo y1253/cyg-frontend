@@ -44,6 +44,7 @@ import {
   PENDING_PREFIX,
   isPendingId,
   mergePending,
+  outboxLabel,
   type PendingMeta,
 } from './pending-sends';
 import { usePendingSends } from '@/hooks/usePendingSends';
@@ -1136,13 +1137,6 @@ function outboxIdOf(id: string): number | null {
   if (!id.startsWith(OUTBOX_ROW_PREFIX)) return null;
   const n = Number(id.slice(OUTBOX_ROW_PREFIX.length));
   return Number.isInteger(n) ? n : null;
-}
-
-/** What the user sees while the server works out how WhatsApp will deliver a message. */
-function outboxLabel(status: WhatsAppOutboxItem['status']): string {
-  return status === 'AWAITING_TEMPLATE'
-    ? 'Waiting for WhatsApp approval…'
-    : 'Preparing…';
 }
 
 /**

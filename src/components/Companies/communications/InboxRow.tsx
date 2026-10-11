@@ -14,6 +14,7 @@ import {
   type WhatsAppItem,
 } from '@/api/whatsapp';
 import { formatE164 } from '@/lib/phone';
+import { isPendingId, outboxLabel } from './pending-sends';
 import { AttachmentChip } from '../AttachmentPreview';
 import { displayName, formatEmailDate, senderInitial } from '../message-utils';
 import {
@@ -94,6 +95,9 @@ export function InboxRow({
   // Nothing to toggle: the server rebuilds this row as read whatever the table says, so
   // the control would flip and bounce back. See `isImplicitlyRead`.
   const readLocked = isImplicitlyRead(item);
+  // A WhatsApp smart send still in the queue: not on the server yet, so it can be
+  // opened (its conversation) but never selected, marked or completed.
+  const queued = item.kind === 'whatsapp' && isPendingId(item.data.id);
 
   return (
     <div
@@ -105,7 +109,10 @@ export function InboxRow({
           : isRead ? style.hoverRead : style.hoverUnread,
         isFirst ? '' : 'border-t border-border/60',
       ].join(' ')}
-      onClick={() => (selectionMode ? onToggleSelect() : onOpen())}
+      onClick={() => {
+        if (!selectionMode) onOpen();
+        else if (!queued) onToggleSelect();
+      }}
     >
       {/* Unread accent bar */}
       {!isRead && (
@@ -114,7 +121,7 @@ export function InboxRow({
         />
       )}
       {/* Selection checkbox */}
-      {selectionMode && (
+      {selectionMode && !queued && (
         <div className="mt-1 shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
           <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
         </div>
@@ -164,7 +171,9 @@ export function InboxRow({
           </span>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* Small blue completed-check toggle. Not-complete → opens the confirm
-                popup; already-complete → undoes directly (no confirm). */}
+                popup; already-complete → undoes directly (no confirm). Absent on a
+                queued send, which has nothing on the server to complete. */}
+            {!queued && (
             <button
               className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full hover:bg-muted/60 transition-colors"
               title={isCompleted ? 'Completed — click to undo' : 'Mark complete'}
@@ -178,6 +187,7 @@ export function InboxRow({
                 className={isCompleted ? 'text-blue-600 fill-blue-100' : 'text-muted-foreground/40'}
               />
             </button>
+            )}
             {showKindBadge && (
               <Badge
                 variant="outline"
@@ -408,6 +418,19 @@ function WhatsAppRowBody({
       >
         {msg.direction === 'outbound' && (
           <span className="shrink-0 text-muted-foreground/70">You:</span>
+        )}
+        {msg.outboxStatus && (
+          <span
+            className={[
+              'shrink-0 rounded px-1 py-px text-[10px] font-medium',
+              msg.outboxStatus === 'FAILED'
+                ? 'bg-red-50 text-red-700'
+                : 'bg-amber-50 text-amber-700',
+            ].join(' ')}
+            title={msg.outboxError ?? undefined}
+          >
+            {outboxLabel(msg.outboxStatus)}
+          </span>
         )}
         {isAudio ? (
           <Mic size={11} className="shrink-0 text-emerald-600" />

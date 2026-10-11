@@ -97,6 +97,14 @@ export interface WhatsAppItem {
   at: string;
   isRead: boolean;
   isCompleted: boolean;
+  /**
+   * Only on a smart-send message still in the queue, listed in the inbox on page 1. Its id
+   * is `pending:outbox:{id}`, so every `isPendingId` guard keeps it away from read,
+   * complete, select and anchor actions.
+   */
+  outboxStatus?: 'MATCHING' | 'AWAITING_TEMPLATE' | 'SENDING' | 'FAILED';
+  /** A reason a user can read, on FAILED only. */
+  outboxError?: string | null;
 }
 
 export interface WhatsAppTimelineResult {

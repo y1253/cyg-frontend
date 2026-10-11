@@ -4,6 +4,7 @@ import {
   isPendingId,
   mergePending,
   newPendingId,
+  outboxLabel,
 } from './pending-sends';
 
 describe('pending ids', () => {
@@ -62,5 +63,18 @@ describe('mergePending', () => {
   it('is the server list unchanged when nothing is in flight', () => {
     const server = [{ id: 'swsms:1', ...at('2026-09-22T10:00:00Z') }];
     expect(mergePending(server, [])).toEqual(server);
+  });
+});
+
+describe('outboxLabel', () => {
+  it('names each queue state the way the thread and the inbox both show it', () => {
+    expect(outboxLabel('MATCHING')).toBe('Preparing…');
+    expect(outboxLabel('SENDING')).toBe('Preparing…');
+    expect(outboxLabel('AWAITING_TEMPLATE')).toBe('Waiting for WhatsApp approval…');
+    expect(outboxLabel('FAILED')).toBe('Not sent');
+  });
+
+  it('a queued inbox row is a pending id, so no mark/complete action can reach it', () => {
+    expect(isPendingId('pending:outbox:7')).toBe(true);
   });
 });
