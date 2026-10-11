@@ -9,6 +9,8 @@ import { CompanyDetailPage } from '../components/Companies/CompanyDetailPage';
 import { TasksPage } from '../components/Tasks/TasksPage';
 import { CompanySettingsPage } from '../components/CompanySettings/CompanySettingsPage';
 import { ArchivedPage } from '../components/Archive/ArchivedPage';
+import { CustomersPage } from '../components/Customers/CustomersPage';
+import { CustomerDetailPage } from '../components/Customers/CustomerDetailPage';
 import { AppLayout } from '../components/Layout/AppLayout';
 import { PrivateRoute } from './PrivateRoute';
 import { AdminRoute } from './AdminRoute';
@@ -97,6 +99,8 @@ export const router = createBrowserRouter([
             children: [
               { path: '/admin/tasks', element: <TasksPage /> },
               { path: '/admin/company-settings', element: <CompanySettingsPage /> },
+              { path: '/admin/customers', element: <CustomersPage /> },
+              { path: '/admin/customers/:id', element: <CustomerDetailPage /> },
             ],
           },
         ],

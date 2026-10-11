@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Archive,
   ClipboardList,
+  Contact,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -59,6 +60,13 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Users',
     short: 'Users',
     tier: 'admin',
+  },
+  {
+    to: '/admin/customers',
+    icon: <Contact size={16} />,
+    label: 'Customers',
+    short: 'Clients',
+    tier: 'super',
   },
   {
     to: '/admin/company-settings',
