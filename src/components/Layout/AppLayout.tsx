@@ -64,7 +64,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     to: '/admin/customers',
     icon: <Contact size={16} />,
-    label: 'Customers',
+    label: 'Customer site',
     short: 'Clients',
     tier: 'super',
   },

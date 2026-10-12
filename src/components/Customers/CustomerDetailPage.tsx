@@ -12,6 +12,7 @@ import { useCustomer } from '@/hooks/useCustomer';
 import { cn } from '@/lib/utils';
 import { CustomerAvatar } from './CustomerAvatar';
 import { StatementRowsDialog } from './StatementRowsDialog';
+import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
 import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
 /** ADMIN: one public-site customer — profile, sales-tax setup and every statement they uploaded. */
@@ -220,6 +221,8 @@ export function CustomerDetailPage() {
           </Table>
         )}
       </Card>
+
+      <CustomerPaymentsCard customerId={c.id} />
 
       <StatementRowsDialog customerId={c.id} statement={open} onClose={() => setOpen(null)} />
     </div>
