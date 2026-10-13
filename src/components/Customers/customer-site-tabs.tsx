@@ -1,0 +1,43 @@
+import type { ReactNode } from 'react';
+import { CreditCard, MessageSquareText, Receipt, Tag, Users2 } from 'lucide-react';
+
+/** The Customer site area's sections, in `?tab=` order (`CustomerSiteShell`). */
+export type CustomerSiteTab = 'customers' | 'numbers' | 'pricing' | 'promo' | 'payments';
+
+export const CUSTOMER_SITE_TABS: {
+  key: CustomerSiteTab;
+  label: string;
+  icon: ReactNode;
+  blurb: string;
+}[] = [
+  {
+    key: 'customers',
+    label: 'Customers',
+    icon: <Users2 size={15} />,
+    blurb: 'Everyone who signed up on cygfinance.com, and the bookkeeping they did there.',
+  },
+  {
+    key: 'numbers',
+    label: 'Text numbers',
+    icon: <MessageSquareText size={15} />,
+    blurb: 'Numbers customers text their receipts to. Every connected number is shown on cygfinance.com.',
+  },
+  {
+    key: 'pricing',
+    label: 'Pricing',
+    icon: <CreditCard size={15} />,
+    blurb: 'What a customer pays to Generate — live on cygfinance.com as soon as you save.',
+  },
+  {
+    key: 'promo',
+    label: 'Promo codes',
+    icon: <Tag size={15} />,
+    blurb: 'Discounts customers enter before paying: a percentage off, or a fixed price.',
+  },
+  {
+    key: 'payments',
+    label: 'Payments',
+    icon: <Receipt size={15} />,
+    blurb: 'Every Generate a customer paid for (or got free with a promo code).',
+  },
+];

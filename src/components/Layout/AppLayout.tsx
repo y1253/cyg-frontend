@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Archive,
   ClipboardList,
-  Contact,
+  Globe,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -62,13 +62,6 @@ const NAV_ITEMS: NavItem[] = [
     tier: 'admin',
   },
   {
-    to: '/admin/customers',
-    icon: <Contact size={16} />,
-    label: 'Customer site',
-    short: 'Clients',
-    tier: 'super',
-  },
-  {
     to: '/admin/company-settings',
     icon: <Settings size={16} />,
     label: 'Company Settings',
@@ -94,6 +87,20 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 /**
+ * The public site's admin, ADMIN only. Deliberately NOT in `NAV_ITEMS`: it manages a
+ * different product (cygfinance.com) for different people (its customers), so it sits in
+ * its own section pinned to the bottom of the sidebar, in the indigo its pages use
+ * (`CustomerSiteShell`) — never mistaken for one more staff page.
+ */
+const CUSTOMER_SITE_ITEM: NavItem = {
+  to: '/admin/customers',
+  icon: <Globe size={16} />,
+  label: 'Customer site',
+  short: 'Site',
+  tier: 'super',
+};
+
+/**
  * One nav row.
  *
  * ⚠️ `h-11` (44px) on the drawer variant, not the desktop `py-2` (~36px). Below `md` every
@@ -104,10 +111,13 @@ function SideNavLink({
   item,
   variant,
   onNavigate,
+  site = false,
 }: {
   item: NavItem;
   variant: 'drawer' | 'rail' | 'sidebar';
   onNavigate?: () => void;
+  /** The Customer site entry: indigo instead of the staff app's colours. */
+  site?: boolean;
 }) {
   const base =
     variant === 'rail'
@@ -123,9 +133,13 @@ function SideNavLink({
       title={variant === 'rail' ? item.label : undefined}
       className={({ isActive }) =>
         `${base} ${
-          isActive
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          site
+            ? isActive
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-indigo-700 hover:bg-indigo-50 hover:text-indigo-900'
+            : isActive
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
         }`
       }
     >
@@ -322,6 +336,19 @@ function AppShell() {
               </span>
             ))}
           </nav>
+          {showSuperAdminNav && (
+            <div className="shrink-0 border-t border-indigo-100 bg-indigo-50/50 p-2 lg:p-3">
+              <p className="mb-1.5 hidden px-3 text-[10px] font-semibold tracking-[0.14em] text-indigo-500 uppercase lg:block">
+                Public website
+              </p>
+              <span className="lg:hidden">
+                <SideNavLink item={CUSTOMER_SITE_ITEM} variant="rail" site />
+              </span>
+              <span className="hidden lg:block">
+                <SideNavLink item={CUSTOMER_SITE_ITEM} variant="sidebar" site />
+              </span>
+            </div>
+          )}
         </aside>
 
         <main className="min-w-0 flex-1 overflow-y-auto bg-muted/40">
@@ -398,6 +425,15 @@ function AppShell() {
                 />
               ))}
             </nav>
+
+            {showSuperAdminNav && (
+              <div className="shrink-0 border-t border-indigo-100 bg-indigo-50/50 p-3">
+                <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-[0.14em] text-indigo-500 uppercase">
+                  Public website
+                </p>
+                <SideNavLink item={CUSTOMER_SITE_ITEM} variant="drawer" onNavigate={closeDrawer} site />
+              </div>
+            )}
 
             {/* Pinned away from the nav: the one action here that cannot be undone
                 by tapping something else. */}

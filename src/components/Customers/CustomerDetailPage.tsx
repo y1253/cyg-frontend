@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useCustomer } from '@/hooks/useCustomer';
 import { cn } from '@/lib/utils';
 import { CustomerAvatar } from './CustomerAvatar';
+import { CustomerSiteShell } from './CustomerSiteShell';
 import { StatementRowsDialog } from './StatementRowsDialog';
 import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
 import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
@@ -45,7 +46,8 @@ export function CustomerDetailPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 p-4 sm:p-6">
+    <CustomerSiteShell active={null}>
+    <div className="flex flex-col gap-5">
       <Button
         variant="ghost"
         size="sm"
@@ -226,6 +228,7 @@ export function CustomerDetailPage() {
 
       <StatementRowsDialog customerId={c.id} statement={open} onClose={() => setOpen(null)} />
     </div>
+    </CustomerSiteShell>
   );
 }
 

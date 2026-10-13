@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CreditCard, FileText, ListOrdered, Receipt, Tag, UserRound, Users2 } from 'lucide-react';
+import { FileText, ListOrdered, UserRound, Users2 } from 'lucide-react';
 import type { CustomerSummary } from '@/api/customers';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,6 +12,9 @@ import { cn } from '@/lib/utils';
 import { CustomerAvatar } from './CustomerAvatar';
 import { AUTH_LABEL, fmtAgo, fmtDateTime } from './customer-format';
 import { PaymentsPanel } from './billing/PaymentsPanel';
+import { CustomerSiteShell } from './CustomerSiteShell';
+import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
+import { IntakeNumbersPanel } from './intake/IntakeNumbersPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
 
@@ -32,56 +35,24 @@ const SORTERS: Record<Sort, (a: CustomerSummary, b: CustomerSummary) => number> 
     b.createdAt.localeCompare(a.createdAt),
 };
 
-type Tab = 'customers' | 'pricing' | 'promo' | 'payments';
-
-const TABS: { key: Tab; label: string; icon: React.ReactNode; blurb: string }[] = [
-  { key: 'customers', label: 'Customers', icon: <Users2 size={15} />, blurb: 'Everyone who signed up on cygfinance.com, and the bookkeeping they did there.' },
-  { key: 'pricing', label: 'Pricing', icon: <CreditCard size={15} />, blurb: 'What a customer pays to Generate — live on cygfinance.com as soon as you save.' },
-  { key: 'promo', label: 'Promo codes', icon: <Tag size={15} />, blurb: 'Discounts customers enter before paying: a percentage off, or a fixed price.' },
-  { key: 'payments', label: 'Payments', icon: <Receipt size={15} />, blurb: 'Every Generate a customer paid for (or got free with a promo code).' },
-];
-
-const isTab = (v: string | null): v is Tab => TABS.some(t => t.key === v);
-
 /**
- * ADMIN: the public site (cygfinance.com) — its customers, the Generate price, promo codes
- * and payments. The tab lives in `?tab=` so a link (or a reload) lands on the same one.
+ * ADMIN: the public site (cygfinance.com) — its customers, the numbers they text receipts
+ * to, the Generate price, promo codes and payments. The tab lives in `?tab=` so a link (or a reload) lands on the same one.
  */
 export function CustomersPage() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const raw = params.get('tab');
-  const tab: Tab = isTab(raw) ? raw : 'customers';
-  const current = TABS.find(t => t.key === tab)!;
+  const tab: CustomerSiteTab = CUSTOMER_SITE_TABS.some(t => t.key === raw) ? (raw as CustomerSiteTab) : 'customers';
+  const current = CUSTOMER_SITE_TABS.find(t => t.key === tab)!;
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold sm:text-2xl">Customer site</h2>
-        <p className="text-muted-foreground mt-0.5 text-sm">{current.blurb}</p>
-      </div>
-
-      <div className="mb-5 flex overflow-x-auto overscroll-x-contain border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setParams(t.key === 'customers' ? {} : { tab: t.key }, { replace: true })}
-            className={cn(
-              '-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
-              tab === t.key ? 'border-primary text-primary' : 'text-muted-foreground hover:text-foreground border-transparent',
-            )}
-          >
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
-      </div>
-
+    <CustomerSiteShell active={tab} blurb={current.blurb}>
       {tab === 'customers' && <CustomersList />}
+      {tab === 'numbers' && <IntakeNumbersPanel />}
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}
-    </div>
+    </CustomerSiteShell>
   );
 }
 
@@ -114,7 +85,7 @@ function CustomersList() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat icon={<Users2 size={16} />} label="Customers" value={stats.total} tone="bg-teal-50 text-teal-700" />
+        <Stat icon={<Users2 size={16} />} label="Customers" value={stats.total} tone="bg-indigo-50 text-indigo-700" />
         <Stat icon={<UserRound size={16} />} label="Signed up this month" value={stats.thisMonth} tone="bg-sky-50 text-sky-700" />
         <Stat icon={<FileText size={16} />} label="Statements uploaded" value={stats.statements} tone="bg-violet-50 text-violet-700" />
         <Stat icon={<ListOrdered size={16} />} label="Transactions read" value={stats.transactions} tone="bg-amber-50 text-amber-700" />

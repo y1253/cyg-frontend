@@ -7,6 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatE164 } from '@/lib/phone';
 import type { AvailableNumber } from '@/api/phone';
+
+/** What buying a picked number takes — the company attach by default, or another purchase. */
+export interface NumberPurchase {
+  mutate: (
+    data: { phoneNumber: string; region?: string | null; country?: string },
+    opts: { onSuccess: () => void },
+  ) => void;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  reset: () => void;
+}
 import { useAttachNumber, useSearchAvailableNumbers } from '@/hooks/usePhoneNumber';
 import { emptyResultMessage } from './connect-number-message';
 
@@ -23,7 +35,8 @@ const COUNTRIES = [
  * Search-and-pick, then buy. Two-step so the purchase is never a single click.
  *
  * Its own file so the WhatsApp card can open the SAME popup when a company has no support
- * number yet — a second copy of a dialog that spends money would drift.
+ * number yet — a second copy of a dialog that spends money would drift. For the same reason
+ * the customer site's receipt numbers buy through it too (`purchase` + `title`).
  */
 export function ConnectNumberDialog({
   open,
@@ -31,11 +44,17 @@ export function ConnectNumberDialog({
   companyId,
   companyCountry,
   onAttached,
+  purchase,
+  title = 'Connect a support number',
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Ignored when `purchase` is given. */
   companyId: number;
   companyCountry: string | null;
+  /** Buy the picked number some other way than attaching it to `companyId`. */
+  purchase?: NumberPurchase;
+  title?: string;
   /** Runs after a number was bought and the dialog closed. */
   onAttached?: () => void;
 }) {
@@ -45,7 +64,8 @@ export function ConnectNumberDialog({
   const [confirming, setConfirming] = useState(false);
 
   const search = useSearchAvailableNumbers();
-  const attach = useAttachNumber(companyId);
+  const attachToCompany = useAttachNumber(companyId);
+  const attach: NumberPurchase = purchase ?? attachToCompany;
   const results = search.data?.numbers ?? [];
   /**
    * The message comes from what was SEARCHED, not from the inputs as they stand now.
@@ -86,7 +106,7 @@ export function ConnectNumberDialog({
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Connect a support number</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
