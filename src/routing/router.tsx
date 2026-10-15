@@ -4,7 +4,6 @@ import { DashboardPage } from '../components/Dashboard/DashboardPage';
 import { UsersPage } from '../components/Users/UsersPage';
 import { UserDetailPage } from '../components/Users/UserDetailPage';
 import { ProfilePage } from '../components/Profile/ProfilePage';
-import { RegisterPage } from '../components/Register/RegisterPage';
 import { CompanyDetailPage } from '../components/Companies/CompanyDetailPage';
 import { TasksPage } from '../components/Tasks/TasksPage';
 import { CompanySettingsPage } from '../components/CompanySettings/CompanySettingsPage';
@@ -45,10 +44,6 @@ export const router = createBrowserRouter([
   {
     path: '/microsoft/error',
     element: <MicrosoftErrorPage />,
-  },
-  {
-    path: '/register',
-    element: <RegisterPage />,
   },
   {
     // PHASE 2a SPIKE — throwaway. Unauthenticated on purpose: it takes its SIP

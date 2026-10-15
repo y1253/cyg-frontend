@@ -2240,7 +2240,7 @@ export function CompanyDetailPage() {
     companyActivity: '', qbPlan: '', supportNumber: '',
   });
   const [contactForm, setContactForm] = useState({
-    personalName: '', privateEmail: '', privatePhone: '', storeNumber: '',
+    personalName: '', privateEmail: '', privatePhone: '',
   });
   const [legalForm, setLegalForm] = useState({
     neq: '', revenueQcId: '', craBn: '', fiscalYear: '',
@@ -2265,7 +2265,9 @@ export function CompanyDetailPage() {
       setConnectingGmail(true);
       try {
         const { authUrl } = await fetchAuthUrl(token, companyId, provider);
-        const popup = window.open(authUrl, `${provider}-oauth`, 'width=500,height=600,noopener');
+        // NOT `noopener`: with it window.open returns null and the popup has no opener, so
+        // neither the message nor the closed-poll below could ever finish the connect.
+        const popup = window.open(authUrl, `${provider}-oauth`, 'width=500,height=600');
         const onMessage = (e: MessageEvent<{ type: string }>) => {
           if (e.origin !== window.location.origin) return;
           const t = e.data?.type;
@@ -2362,7 +2364,6 @@ export function CompanyDetailPage() {
         personalName: company.contactInfo?.personalName ?? '',
         privateEmail: company.contactInfo?.privateEmail ?? '',
         privatePhone: company.contactInfo?.privatePhone ?? '',
-        storeNumber:  company.contactInfo?.storeNumber  ?? '',
       });
     } else if (section === 'legal') {
       const fy = company.legalInfo?.fiscalYear;
@@ -2840,7 +2841,6 @@ export function CompanyDetailPage() {
                       { key: 'personalName', label: 'Name' },
                       { key: 'privateEmail', label: 'Email' },
                       { key: 'privatePhone', label: 'Phone' },
-                      { key: 'storeNumber',  label: 'Store Phone' },
                     ].map(({ key, label }) => (
                       <div key={key} className="flex flex-col gap-1">
                         <Label className="text-xs">{label}</Label>
@@ -2855,8 +2855,52 @@ export function CompanyDetailPage() {
                     <Field label="Name"             value={company.contactInfo?.personalName} />
                     <Field label="Email"            value={company.contactInfo?.privateEmail} />
                     <Field label="Phone"            value={company.contactInfo?.privatePhone} />
-                    <Field label="Store Phone"      value={company.contactInfo?.storeNumber} />
+                    {/* The cygfinance.com account that registered (or was linked to) it. */}
+                    <Field
+                      label="Customer account"
+                      value={company.customer ? `${company.customer.name} · ${company.customer.email}` : null}
+                    />
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Bills — answered by the customer at registration, editable here */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Bills</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                <p className="text-sm">Track open (unpaid) bills?</p>
+                <p className="text-xs text-muted-foreground">
+                  A bill with nothing written on it saying it was paid is treated as open until the
+                  customer says otherwise.
+                </p>
+                {isAdmin ? (
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { value: true, label: 'Yes' },
+                      { value: false, label: 'No' },
+                      { value: null, label: 'Not answered' },
+                    ] as const).map(({ value, label }) => (
+                      <Button
+                        key={label}
+                        size="sm"
+                        variant={company.trackOpenBills === value ? 'default' : 'outline'}
+                        disabled={updateCompanyMutation.isPending}
+                        onClick={() =>
+                          company.trackOpenBills !== value &&
+                          updateCompanyMutation.mutate({ id: companyId, data: { trackOpenBills: value } })
+                        }
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm font-medium">
+                    {company.trackOpenBills === true ? 'Yes' : company.trackOpenBills === false ? 'No' : 'Not answered'}
+                  </p>
                 )}
               </CardContent>
             </Card>

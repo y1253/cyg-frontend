@@ -4,156 +4,9 @@ const API = '/api';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-// ─── Register ────────────────────────────────────────────────────────────────
-
-export interface CashFlowAccountData {
-  accountName: string;
-  enabled: boolean;
-  note?: string;
-  startDate: string;
-  cycleType: string;
-  cycle: number;
-  cycleDay?: number | null;
-  cycleNth?: number | null;
-}
-
-export interface CreditCardAccountData {
-  accountName: string;
-  enabled: boolean;
-  note?: string;
-  statementDay: number | null;
-  limitEnabled: boolean;
-  limitNote?: string;
-  limitAmount?: string;
-  limitCycleDays: number;
-}
-
-export interface RegisterCompanyData {
-  hasQbAccount: boolean;
-  qbPlan?: string;
-  country: string;
-  businessName: string;
-  businessType?: string;
-  companyType?: string;
-  companyActivity?: string;
-  personalName?: string;
-  privateEmail?: string;
-  privatePhone?: string;
-  storeNumber?: string;
-  neq?: string;
-  revenueQcId?: string;
-  craBn?: string;
-  fiscalYear?: string;
-  billingEmail?: string;
-  billingPassword?: string;
-  accountantName?: string;
-  accountantEmail?: string;
-  accountantPhone?: string;
-  reconciliationAccounts?: { name: string; type: string; startDate: string }[];
-  apManageBills?: boolean;
-  apStartDate?: string;
-  apCycleType?: string;
-  apCycle?: number;
-  apCycleDay?: number;
-  apCycleNth?: number;
-  arInvoicingEnabled?: boolean;
-  arInvoicingStartDate?: string;
-  arInvoicingCycleType?: string;
-  arInvoicingCycle?: number;
-  arInvoicingCycleDay?: number;
-  arInvoicingCycleNth?: number;
-  arInvoicingNote?: string;
-  arStatementsEnabled?: boolean;
-  arStatementsStartDate?: string;
-  arStatementsCycleType?: string;
-  arStatementsCycle?: number;
-  arStatementsCycleDay?: number;
-  arStatementsCycleNth?: number;
-  arStatementsNote?: string;
-  arCollectionEnabled?: boolean;
-  arCollectionStartDate?: string;
-  arCollectionCycleType?: string;
-  arCollectionCycle?: number;
-  arCollectionCycleDay?: number;
-  arCollectionCycleNth?: number;
-  arCollectionNote?: string;
-  arReportEnabled?: boolean;
-  arReportStartDate?: string;
-  arReportCycleType?: string;
-  arReportCycle?: number;
-  arReportCycleDay?: number;
-  arReportCycleNth?: number;
-  arReportNote?: string;
-  payrollEnabled?: boolean;
-  payrollStartDate?: string;
-  payrollCycleType?: string;
-  payrollCycle?: number;
-  payrollCycleDay?: number;
-  payrollCycleNth?: number;
-  payrollNote?: string;
-  payrollTaxEnabled?: boolean;
-  payrollTaxCadEnabled?: boolean;
-  payrollTaxQcEnabled?: boolean;
-  payrollTaxStartDate?: string;
-  payrollTaxCycleType?: string;
-  payrollTaxCycle?: number;
-  payrollTaxCycleDay?: number;
-  payrollTaxCycleNth?: number;
-  payrollTaxNote?: string;
-  payrollTaxQcStartDate?: string;
-  payrollTaxQcCycleType?: string;
-  payrollTaxQcCycle?: number;
-  payrollTaxQcCycleDay?: number;
-  payrollTaxQcCycleNth?: number;
-  payrollTaxQcNote?: string;
-  payrollYearEndEnabled?: boolean;
-  payrollYearEndRl1?: boolean;
-  payrollYearEndT4?: boolean;
-  payrollYearEndCnesst?: boolean;
-  locationVisitEnabled?: boolean;
-  locationVisitFrequency?: string;
-  qcDocsEnabled?: boolean;
-  qcDocsNote?: string;
-  craDocsEnabled?: boolean;
-  craDocsNote?: string;
-  salesTaxEnabled?: boolean;
-  salesTaxNote?: string;
-  cashFlowEnabled?: boolean;
-  cashFlowAccounts?: CashFlowAccountData[];
-  creditCardEnabled?: boolean;
-  creditCardAccounts?: CreditCardAccountData[];
-  receiptTrackingEnabled?: boolean;
-  receiptTrackingStartDate?: string;
-  receiptTrackingCycleType?: string;
-  receiptTrackingCycle?: number;
-  receiptTrackingCycleDay?: number;
-  receiptTrackingCycleNth?: number;
-  receiptTrackingNote?: string;
-  cardHolderName?: string;
-  cardNumber?: string;
-  cardExpiry?: string;
-  cardCvv?: string;
-}
-
-export interface RegisterCompanyResponse {
-  id: number;
-  businessName: string;
-}
-
-export async function registerCompany(
-  data: RegisterCompanyData,
-): Promise<RegisterCompanyResponse> {
-  const res = await fetch(`${API}/companies/register`, {
-    method: 'POST',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message ?? 'Registration failed');
-  }
-  return res.json() as Promise<RegisterCompanyResponse>;
-}
+// Registration moved to the customer site (cygfinance.com/dashboard/register), which
+// talks to this server's `/registrations` routes with a CUSTOMER token (step2,
+// 2026-10-15). The staff app has no registration form any more.
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -211,13 +64,16 @@ export interface CompanyDetail {
   companyType: string | null;
   companyActivity: string | null;
   status: boolean;
+  /** "Should we track open (unpaid) bills?" — null = not answered. */
+  trackOpenBills: boolean | null;
+  /** The cygfinance.com account this company belongs to. */
+  customer: { id: number; name: string; email: string } | null;
   createdAt: string;
   deletedAt: string | null;
   contactInfo: {
     personalName: string | null;
     privateEmail: string | null;
     privatePhone: string | null;
-    storeNumber: string | null;
   } | null;
   legalInfo: {
     neq: string | null;
@@ -254,10 +110,11 @@ export interface UpdateCompanyData {
   companyActivity?: string;
   country?: string;
   qbPlan?: string;
+  /** `null` clears it back to "not answered". */
+  trackOpenBills?: boolean | null;
   personalName?: string;
   privateEmail?: string;
   privatePhone?: string;
-  storeNumber?: string;
   neq?: string;
   revenueQcId?: string;
   craBn?: string;
