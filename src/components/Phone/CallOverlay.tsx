@@ -57,6 +57,7 @@ import {
 import {
   canQuickSwap,
   otherCallId,
+  otherPartyName,
   showSwitcher,
   switcherMaxHeightClass,
   switcherRows,
@@ -423,13 +424,11 @@ export function CallOverlay() {
   const outgoing = info?.direction === 'outbound';
   const otherParty = outgoing ? info?.to : info?.from;
   /**
-   * A saved contact's name for an INBOUND caller.
-   *
-   * Inbound only: `fromName` names `from`, and on an outbound call `otherParty` is `to`.
-   * Labelling a dialled number with the name of whoever we happen to be calling FROM
-   * would be worse than showing no name at all.
+   * A saved contact's name for the other party: `fromName` on an inbound call, `toName`
+   * (the number dialled) on an outbound one — never `fromName` outbound, which would name
+   * our own support number.
    */
-  const otherPartyName = !outgoing ? info?.fromName : undefined;
+  const partyName = otherPartyName(info);
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
@@ -484,11 +483,11 @@ export function CallOverlay() {
                 : `On call · ${mmss(seconds)}`}
             </p>
             <p className="truncate text-sm font-semibold">
-              {otherPartyName ||
+              {partyName ||
                 formatE164(otherParty) ||
                 (outgoing ? 'Dialling' : 'Unknown caller')}
             </p>
-            {otherPartyName && (
+            {partyName && (
               // The number stays on screen under the name: an agent reads it back,
               // writes it down, or checks it against the contact they think it is.
               <p className="truncate text-xs text-muted-foreground">
@@ -985,7 +984,7 @@ function TransferringCard({
               {headline}
             </p>
             <p className="truncate text-sm font-semibold">
-              {info?.fromName ||
+              {otherPartyName(info) ||
                 formatE164(otherParty) ||
                 info?.from ||
                 'Unknown caller'}

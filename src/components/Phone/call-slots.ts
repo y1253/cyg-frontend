@@ -45,9 +45,8 @@ export function mmss(total: number): string {
  * inbound-only caveat on `fromName`. The switcher needs the identical answer, and two
  * copies of it are how the card and the strip start disagreeing about who is on line 2.
  *
- * Inbound only for the name: `fromName` names `from`, and on an outbound call the other
- * party is `to`. Labelling a dialled number with the name of whoever we happen to be
- * calling FROM would be worse than showing no name at all.
+ * The name follows the direction (`otherPartyName`): `fromName` names `from`, which on an
+ * outbound call is OUR support number, so an outbound call is named by `toName` instead.
  */
 export function partyLabel(info: IncomingCallInfo): {
   party: string;
@@ -55,13 +54,25 @@ export function partyLabel(info: IncomingCallInfo): {
 } {
   const outgoing = info.direction === 'outbound';
   const other = outgoing ? info.to : info.from;
-  const name = outgoing ? undefined : info.fromName;
+  const name = otherPartyName(info);
   const formatted = formatE164(other) || null;
   if (name) return { party: name, number: formatted };
   return {
     party: formatted ?? (outgoing ? 'Dialling' : 'Unknown caller'),
     number: null,
   };
+}
+
+/**
+ * The saved contact's name for the OTHER party: the caller (`fromName`) on an inbound
+ * call, the number dialled (`toName`) on an outbound one. Never `fromName` on an outbound
+ * call — that would name our own support number.
+ */
+export function otherPartyName(
+  info: Pick<IncomingCallInfo, 'direction' | 'fromName' | 'toName'> | null | undefined,
+): string | undefined {
+  if (!info) return undefined;
+  return (info.direction === 'outbound' ? info.toName : info.fromName) || undefined;
 }
 
 function stateOf(call: CallView): CallRow['state'] {

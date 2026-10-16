@@ -42,7 +42,8 @@ export function ContactsPanel({
   uncompletedCount: number;
   /** Null when this company has no line, which hides Call and Text. */
   supportNumber: string | null;
-  onCall: (e164: string) => void;
+  /** `name` puts the contact on the "Calling…" card before the call connects. */
+  onCall: (e164: string, name?: string) => void;
   onText: (e164: string) => void;
   /** Set while this company's line is on a call: every Call icon is disabled. */
   callBlockedReason?: string | null;
@@ -183,7 +184,7 @@ export function ContactsPanel({
                         size="sm"
                         className="h-7 w-7 p-0 text-green-700 hover:bg-green-50"
                         disabled={!!callBlockedReason}
-                        onClick={() => onCall(contact.phoneE164!)}
+                        onClick={() => onCall(contact.phoneE164!, contact.name)}
                       >
                         <Phone size={14} />
                       </Button>

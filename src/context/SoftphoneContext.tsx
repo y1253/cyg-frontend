@@ -74,7 +74,7 @@ import {
   setInternalCallHold,
   setInternalCallState,
 } from '@/api/internalCalls';
-import { canCompleteCall } from '@/components/Phone/call-slots';
+import { canCompleteCall, otherPartyName } from '@/components/Phone/call-slots';
 import { setTabRinging } from '@/lib/tab-badge';
 import { useCallNotifier } from '@/context/NotificationContext';
 import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat';
@@ -164,6 +164,8 @@ export interface IncomingCallInfo {
   fromName?: string;
   /** The number being dialled. Outbound only. */
   to?: string;
+  /** The saved contact's name for `to` (outbound only). Absent when nobody saved it. */
+  toName?: string;
   /** Absent on an event from an older build — treated as inbound. */
   direction?: 'inbound' | 'outbound';
   callSid: string;
@@ -1289,7 +1291,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           companyId: slot.info.companyId,
           kind: slot.info.kind ?? 'company',
           token: slot.info.token,
-          peer: slot.info.fromName || formatE164(slot.info.from),
+          peer:
+            otherPartyName(slot.info) ||
+            formatE164(
+              slot.info.direction === 'outbound' ? slot.info.to : slot.info.from,
+            ),
           until: Date.now() + COMPLETE_PROMPT_MS,
         };
         completeTimerRef.current = setTimeout(() => {

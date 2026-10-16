@@ -492,7 +492,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   const startingCallRef = useRef(false);
   const startCall = startCallMutation.mutate;
   const handleCall = useCallback(
-    (number: string) => {
+    (number: string, name?: string) => {
       // Every call button goes through here, so this one check covers a button whose
       // disabled state has not re-rendered yet. The server refuses a busy dial as well.
       if (startingCallRef.current || callBlocked) return;
@@ -504,7 +504,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
         companyId,
         companyName: company?.businessName ?? '',
         to: number,
-        peerName: null,
+        // A saved contact's name (from the contacts list); the server sends the same
+        // name as `toName` once the call is placed.
+        peerName: name ?? null,
         kind: 'company',
         cancelled: false,
       });

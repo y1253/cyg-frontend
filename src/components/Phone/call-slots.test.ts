@@ -57,6 +57,19 @@ describe('partyLabel', () => {
     ).toEqual({ party: '(514) 555-1111', number: null });
   });
 
+  it('names an OUTBOUND call after the saved contact dialled (toName)', () => {
+    expect(
+      partyLabel(
+        info({
+          direction: 'outbound',
+          to: '+15145551111',
+          toName: 'Dana Roy',
+          fromName: 'Us',
+        }),
+      ),
+    ).toEqual({ party: 'Dana Roy', number: '(514) 555-1111' });
+  });
+
   it('falls back to a wording that says which direction it is', () => {
     expect(partyLabel(info({ from: '' })).party).toBe('Unknown caller');
     expect(
