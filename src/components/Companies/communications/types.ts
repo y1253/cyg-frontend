@@ -1,6 +1,6 @@
 import {
   Inbox, Mail, SendHorizonal, AlertOctagon, Trash, Circle, FileText,
-  MessageSquare, Phone, MessageSquareText, MessageCircle, Contact,
+  MessageSquare, Phone, MessageSquareText, MessageCircle, Contact, Paperclip,
   type LucideIcon,
 } from 'lucide-react';
 import type { EmailSummary, ChatInboxMessage } from '@/api/gmail';
@@ -20,10 +20,18 @@ export const FOLDERS = [
   // but it is deliberately absent from INBOX_TABS and MAILBOX_ONLY_FOLDERS below, and
   // CommunicationsTab returns the contacts panel before any inbox machinery runs.
   { id: 'CONTACTS', label: 'Contacts', icon: Contact },
+  // Not a mail folder either, for the same reasons: the bookkeeping files the customer
+  // uploaded into THIS company on cygfinance.com (statements, receipts, cheques), filed
+  // per bank account. Read-only for staff. CommunicationsTab returns `CompanyFilesPanel`
+  // before any inbox machinery runs, exactly like Contacts.
+  { id: 'ATTACHMENTS', label: 'Attachments', icon: Paperclip },
 ] as const;
 
 /** The one folder that is not a folder. Exported so the guards below read as prose. */
 export const CONTACTS_FOLDER = 'CONTACTS';
+
+/** The second folder that is not a folder: the company's bookkeeping files. */
+export const ATTACHMENTS_FOLDER = 'ATTACHMENTS';
 
 /**
  * Every id the persisted view state may name. Its ONLY consumer is the restore check in

@@ -55,6 +55,7 @@ import { InboxView } from './communications/InboxView';
 import { InboxNotices } from './communications/InboxNotices';
 import { CommsHeader } from './communications/CommsHeader';
 import { ContactsPanel } from './communications/ContactsPanel';
+import { CompanyFilesPanel } from './communications/CompanyFilesPanel';
 import { usePersistCommUi, useRestoredCommUi } from './communications/useCommUiState';
 import { readIdForSelection } from '@/components/Layout/unread-feed';
 import { useMarkUntil } from '@/hooks/useMarkUntil';
@@ -67,7 +68,7 @@ import { useUnifiedInbox } from './communications/useUnifiedInbox';
 import { isPendingId } from './communications/pending-sends';
 import { showListSpinner } from './communications/inbox-loading';
 import {
-  ALL_LABELS, CONTACTS_FOLDER, FOLDERS, INBOX_TABS, isImplicitlyRead,
+  ALL_LABELS, ATTACHMENTS_FOLDER, CONTACTS_FOLDER, FOLDERS, INBOX_TABS, isImplicitlyRead,
   type CompleteTarget, type ItemKind, type KindFilter,
   type Selection, type UnifiedItem,
 } from './communications/types';
@@ -204,6 +205,8 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   // The one tab that is not a mail folder. It renders no messages and fetches nothing
   // from a provider, so it has to be kept out of `emailLabel`'s fall-through below.
   const isContacts = selectedLabel === CONTACTS_FOLDER;
+  // The company's bookkeeping files: not a mail folder either, same treatment as Contacts.
+  const isFiles = selectedLabel === ATTACHMENTS_FOLDER;
   // UNREAD/UNCOMPLETED are filtered folders whose badge counts the WHOLE mailbox;
   // they get the clamp relaxed + a target-driven auto-load so the list backs the badge.
   const isFilteredFolder =
@@ -251,8 +254,9 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     activeSearch,
     // `!isContacts` is load-bearing: `emailLabel` falls through to `selectedLabel` for
     // any folder that is not one of the special cases, so without this the Contacts tab
-    // would ask Gmail/Graph for a label literally named CONTACTS on every open.
-    active && !!account && !isContacts,
+    // would ask Gmail/Graph for a label literally named CONTACTS on every open. The same
+    // goes for ATTACHMENTS.
+    active && !!account && !isContacts && !isFiles,
     searchParams,
     searchKey,
   );
@@ -1360,6 +1364,27 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
                 msgTime: new Date().toISOString(),
               })
             }
+          />
+        </div>
+      </>
+    );
+  }
+
+  // ── Attachments (the company's bookkeeping files) ─────────────────────────
+  // Same position and reasons as Contacts above: it is not a list of messages.
+  if (isFiles) {
+    return (
+      <>
+        {ringingBanner}
+        <div className="flex flex-col gap-4">
+          {headerBar}
+          <CompanyFilesPanel
+            companyId={companyId}
+            account={account ?? null}
+            selectedLabel={selectedLabel}
+            onSelectFolder={handleSelectFolder}
+            unreadCount={unreadCount}
+            uncompletedCount={uncompletedCount}
           />
         </div>
       </>
