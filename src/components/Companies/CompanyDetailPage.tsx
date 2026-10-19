@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DictateButton } from './DictateButton';
+import { CustomerRulesSection } from './CustomerRulesSection';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, GripVertical, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
@@ -871,6 +872,7 @@ type Tab =
   | 'resolved'
   | 'links'
   | 'schedules'
+  | 'rules'
   | 'communications';
 
 // ─── Company Notes section ────────────────────────────────────────────────────
@@ -1127,11 +1129,12 @@ function TabBar({
     { key: 'resolved', label: `Resolved (${resolvedCount})` },
     { key: 'links', label: 'Links' },
     { key: 'schedules' as Tab, label: 'Schedules' },
+    { key: 'rules' as Tab, label: 'Rules' },
     { key: 'communications' as Tab, label: 'Communications' },
   ];
 
   return (
-    // Six tabs at `px-5` need ~620px, which no phone has. The STRIP scrolls sideways —
+    // Seven tabs at `px-5` need ~720px, which no phone has. The STRIP scrolls sideways —
     // never the page — and `[scrollbar-width:none]` keeps a desktop scrollbar from
     // appearing under a row that fits perfectly well there.
     <div className="flex overflow-x-auto overscroll-x-contain border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -3303,6 +3306,11 @@ export function CompanyDetailPage() {
         {/* ── Links tab ── */}
         {tab === 'links' && (
           <LinksSection companyId={companyId} />
+        )}
+
+        {/* ── Rules tab — the customer's own bookkeeping rules (step2) ── */}
+        {tab === 'rules' && (
+          <CustomerRulesSection companyId={companyId} canEdit={isAdmin} />
         )}
 
         {/* ── Schedules tab ── */}
