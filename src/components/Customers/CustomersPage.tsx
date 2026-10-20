@@ -15,6 +15,7 @@ import { PaymentsPanel } from './billing/PaymentsPanel';
 import { CustomerSiteShell } from './CustomerSiteShell';
 import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
 import { IntakeNumbersPanel } from './intake/IntakeNumbersPanel';
+import { AiRulesPanel } from './ai/AiRulesPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
 
@@ -49,6 +50,7 @@ export function CustomersPage() {
     <CustomerSiteShell active={tab} blurb={current.blurb}>
       {tab === 'customers' && <CustomersList />}
       {tab === 'numbers' && <IntakeNumbersPanel />}
+      {tab === 'ai' && <AiRulesPanel />}
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}

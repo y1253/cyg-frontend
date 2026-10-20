@@ -14,6 +14,7 @@ import { CustomerAvatar } from './CustomerAvatar';
 import { CustomerSiteShell } from './CustomerSiteShell';
 import { StatementRowsDialog } from './StatementRowsDialog';
 import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
+import { CustomerAiCard } from './ai/CustomerAiCard';
 import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
 /** ADMIN: one public-site customer — profile, sales-tax setup and every statement they uploaded. */
@@ -225,6 +226,8 @@ export function CustomerDetailPage() {
       </Card>
 
       <CustomerPaymentsCard customerId={c.id} />
+
+      <CustomerAiCard customerId={c.id} />
 
       <StatementRowsDialog customerId={c.id} statement={open} onClose={() => setOpen(null)} />
     </div>
