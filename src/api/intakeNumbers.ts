@@ -14,7 +14,20 @@ export interface IntakeNumber {
   providerReleaseAfter: string | null;
   createdAt: string;
   releasedAt: string | null;
+  /** Meta's id once the number is on the firm's WhatsApp account; null = WhatsApp off. */
+  whatsappPhoneNumberId: string | null;
+  /** null = off. Texts keep working whatever this says. */
+  whatsappStatus: IntakeWhatsAppStatus | null;
+  whatsappError: string | null;
+  /** How Meta sent the code while one is pending. */
+  whatsappCodeMethod: 'SMS' | 'VOICE' | null;
 }
+
+export type IntakeWhatsAppStatus = 'PENDING_CODE' | 'VERIFYING' | 'CONNECTED' | 'FAILED';
+
+/** Still being set up — the tab polls while any number is in one of these. */
+export const isWhatsAppSettingUp = (n: IntakeNumber) =>
+  n.whatsappStatus === 'PENDING_CODE' || n.whatsappStatus === 'VERIFYING';
 
 async function failure(res: Response, fallback: string): Promise<Error> {
   const body = (await res.json().catch(() => ({}))) as { message?: string | string[] };
@@ -68,4 +81,18 @@ export async function releaseIntakeNumber(token: string, id: number, deferIfLock
     }
   }
   throw await failure(res, 'Failed to disconnect the number');
+}
+
+/** Customers can WhatsApp this number too (texts keep working). Answers with its new state. */
+export async function enableIntakeWhatsApp(token: string, id: number): Promise<IntakeNumber> {
+  const res = await fetchWithAuth(token, `/api/intake-numbers/${id}/whatsapp`, { method: 'POST', headers: JSON_HEADERS });
+  if (!res.ok) throw await failure(res, 'Failed to turn WhatsApp on');
+  return res.json() as Promise<IntakeNumber>;
+}
+
+/** WhatsApp off for this number; customers can still text it. */
+export async function disableIntakeWhatsApp(token: string, id: number): Promise<IntakeNumber> {
+  const res = await fetchWithAuth(token, `/api/intake-numbers/${id}/whatsapp`, { method: 'DELETE', headers: JSON_HEADERS });
+  if (!res.ok) throw await failure(res, 'Failed to turn WhatsApp off');
+  return res.json() as Promise<IntakeNumber>;
 }

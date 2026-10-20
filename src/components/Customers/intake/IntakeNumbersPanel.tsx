@@ -1,12 +1,18 @@
 import { useState } from 'react';
-import { MessageSquareText, Phone, Plus, Unplug } from 'lucide-react';
+import { Loader2, MessageCircle, MessageSquareText, Phone, Plus, Unplug } from 'lucide-react';
 import type { IntakeNumber } from '@/api/intakeNumbers';
 import { ReleaseLockedError } from '@/api/phone';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ConnectNumberDialog } from '@/components/Companies/ConnectNumberDialog';
-import { useBuyIntakeNumber, useIntakeNumbers, useReleaseIntakeNumber } from '@/hooks/useIntakeNumbers';
+import {
+  useBuyIntakeNumber,
+  useDisableIntakeWhatsApp,
+  useEnableIntakeWhatsApp,
+  useIntakeNumbers,
+  useReleaseIntakeNumber,
+} from '@/hooks/useIntakeNumbers';
 import { formatE164 } from '@/lib/phone';
 import { fmtDateTime } from '../customer-format';
 
@@ -14,7 +20,8 @@ import { fmtDateTime } from '../customer-format';
  * The numbers customers text receipts to. Each one is a SignalWire number bought here; a
  * text from the phone on a customer's account is filed into their bookkeeping like an
  * upload (picture, PDF, voice note or plain words). Every active number is listed on
- * cygfinance.com. Several numbers are fine — they all work the same.
+ * cygfinance.com. Several numbers are fine — they all work the same. An admin can also turn
+ * WhatsApp on for a number: customers can then text it OR WhatsApp it, and the site says so.
  */
 export function IntakeNumbersPanel() {
   const { data: numbers = [], isLoading, isError } = useIntakeNumbers();
@@ -33,8 +40,8 @@ export function IntakeNumbersPanel() {
           <div className="min-w-0 flex-1 text-sm">
             <p className="font-medium">How it works</p>
             <p className="text-muted-foreground">
-              Customers text a photo, PDF, voice note or a few words to any number below. We match the sender to the
-              phone on their account and file it like an upload. Nothing is texted back.
+              Customers text (or WhatsApp, where it is on) a photo, PDF, voice note or a few words to any number below.
+              We match the sender to the phone on their account and file it like an upload. Nothing is sent back.
             </p>
           </div>
           <Button onClick={() => setBuying(true)} className="gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700">
@@ -115,6 +122,8 @@ function NumberCard({ n }: { n: IntakeNumber }) {
           </Badge>
         </div>
 
+        <WhatsAppRow n={n} />
+
         {locked ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <p>{locked.message}</p>
@@ -167,5 +176,82 @@ function NumberCard({ n }: { n: IntakeNumber }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * WhatsApp on this receipt number, on top of texting. Setup runs on the server — the number
+ * is added to the firm's WhatsApp account and Meta's code is read off it (a text, or a call
+ * when Meta cannot text a VoIP number) — so this only shows where it is and offers a retry.
+ */
+function WhatsAppRow({ n }: { n: IntakeNumber }) {
+  const enable = useEnableIntakeWhatsApp();
+  const disable = useDisableIntakeWhatsApp();
+  const [confirmOff, setConfirmOff] = useState(false);
+  const status = n.whatsappStatus;
+  const error = enable.error ?? disable.error;
+
+  return (
+    <div className="rounded-md border border-emerald-100 bg-emerald-50/40 p-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <MessageCircle size={15} className="text-emerald-700" />
+        <span className="font-medium text-emerald-900">WhatsApp</span>
+        {status === 'CONNECTED' ? (
+          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+            Active — customers can text or WhatsApp
+          </Badge>
+        ) : status === 'PENDING_CODE' ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <Loader2 size={12} className="animate-spin" />
+            Waiting for Meta's code ({n.whatsappCodeMethod === 'VOICE' ? 'by phone call' : 'by text'})…
+          </span>
+        ) : status === 'VERIFYING' ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <Loader2 size={12} className="animate-spin" /> Verifying…
+          </span>
+        ) : status === 'FAILED' ? (
+          <span className="text-destructive">Setup failed</span>
+        ) : (
+          <span className="text-muted-foreground">Off — texts only</span>
+        )}
+        <span className="ml-auto flex gap-2">
+          {(status === null || status === 'FAILED') && (
+            <Button
+              size="sm"
+              className="h-7 bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={enable.isPending}
+              onClick={() => enable.mutate(n.id)}
+            >
+              {enable.isPending ? 'Starting…' : status === 'FAILED' ? 'Try again' : 'Enable WhatsApp'}
+            </Button>
+          )}
+          {status !== null && !confirmOff && (
+            <Button size="sm" variant="ghost" className="h-7 text-muted-foreground" onClick={() => setConfirmOff(true)}>
+              Turn off
+            </Button>
+          )}
+        </span>
+      </div>
+      {status === 'FAILED' && n.whatsappError && <p className="mt-2 text-destructive">{n.whatsappError}</p>}
+      {confirmOff && (
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-muted-foreground">Turn WhatsApp off? Customers can still text this number.</span>
+          <Button size="sm" variant="outline" className="h-7" onClick={() => setConfirmOff(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            className="h-7"
+            disabled={disable.isPending}
+            onClick={() => disable.mutate(n.id, { onSettled: () => setConfirmOff(false) })}
+          >
+            {disable.isPending ? 'Turning off…' : 'Turn off'}
+          </Button>
+        </div>
+      )}
+      {error && <p className="mt-2 text-destructive">{error instanceof Error ? error.message : 'Something went wrong'}</p>}
+      <p className="mt-2 text-muted-foreground">WhatsApp shows the firm name (CygFinance) to customers.</p>
+    </div>
   );
 }
