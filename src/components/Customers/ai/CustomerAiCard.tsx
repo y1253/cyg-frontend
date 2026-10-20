@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, MessageCircle, MessageSquareText, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bot, Mail, MessageCircle, MessageSquareText, Sparkles, Trash2 } from 'lucide-react';
 import type { AiAction, AiChannel, CustomerAi } from '@/api/aiRules';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ const CHANNEL: Record<AiChannel, { label: string; icon: React.ReactNode; classNa
   BOT: { label: 'Bot', icon: <Bot size={11} />, className: 'border-indigo-200 text-indigo-700' },
   SMS: { label: 'Text', icon: <MessageSquareText size={11} />, className: 'border-sky-200 text-sky-700' },
   WHATSAPP: { label: 'WhatsApp', icon: <MessageCircle size={11} />, className: 'border-emerald-200 text-emerald-700' },
+  EMAIL: { label: 'Email', icon: <Mail size={11} />, className: 'border-amber-200 text-amber-700' },
 };
 
 /**

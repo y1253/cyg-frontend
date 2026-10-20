@@ -17,6 +17,9 @@ import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
 import { CustomerAiCard } from './ai/CustomerAiCard';
 import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
+/** The customer's preferred contact method, as they chose it on cygfinance.com (step12). */
+const CONTACT_LABEL = { EMAIL: 'Email', WHATSAPP: 'WhatsApp', SMS: 'Text message' } as const;
+
 /** ADMIN: one public-site customer — profile, sales-tax setup and every statement they uploaded. */
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -93,6 +96,10 @@ export function CustomerDetailPage() {
           <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <Field label="Email" icon={<Mail size={11} />} value={c.email} />
             <Field label="Phone" icon={<Phone size={11} />} value={c.phone || '—'} />
+            <Field
+              label="Prefers"
+              value={c.preferredContact ? CONTACT_LABEL[c.preferredContact] : 'No preference'}
+            />
             <Field label="Signs in with" value={AUTH_LABEL[c.authType]} />
             <Field label="Signed up" value={fmtDateTime(c.createdAt)} />
             <Field label="Last login" value={c.lastLoginAt ? fmtDateTime(c.lastLoginAt) : 'Never'} />

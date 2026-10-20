@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { CreditCard, MessageSquareText, Receipt, Sparkles, Tag, Users2 } from 'lucide-react';
+import { CreditCard, Mail, MessageSquareText, Receipt, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's sections, in `?tab=` order (`CustomerSiteShell`). */
-export type CustomerSiteTab = 'customers' | 'numbers' | 'ai' | 'pricing' | 'promo' | 'payments';
+export type CustomerSiteTab = 'customers' | 'numbers' | 'inbox' | 'ai' | 'pricing' | 'promo' | 'payments';
 
 export const CUSTOMER_SITE_TABS: {
   key: CustomerSiteTab;
@@ -21,6 +21,12 @@ export const CUSTOMER_SITE_TABS: {
     label: 'Text numbers',
     icon: <MessageSquareText size={15} />,
     blurb: 'Numbers customers text their receipts to. Every connected number is shown on cygfinance.com.',
+  },
+  {
+    key: 'inbox',
+    label: 'Customer inbox',
+    icon: <Mail size={15} />,
+    blurb: 'The mailbox customers email statements, receipts and questions to — the AI answers in the thread.',
   },
   {
     key: 'ai',
