@@ -2,6 +2,7 @@ import { fetchWithAuth } from './client';
 
 /** step12: the customer site's AI phone (Customer site → AI phone). */
 export type AiVoiceOption = { id: string; label: string; gender: 'female' | 'male' | 'neutral' };
+export type AiLanguageOption = { id: string; label: string };
 
 export type CustomerVoice = {
   enabled: boolean;
@@ -9,13 +10,16 @@ export type CustomerVoice = {
   /** null = the generated "Hi <first name>…". */
   greeting: string | null;
   maxMinutes: number;
+  /** The language every call starts in; a caller who speaks another is followed. */
+  language: string;
   updatedAt: string;
   voices: AiVoiceOption[];
+  languages: AiLanguageOption[];
   /** The receipt numbers that answer with the AI. */
   numbers: string[];
 };
 
-export type CustomerVoiceChange = Partial<Pick<CustomerVoice, 'enabled' | 'voice' | 'greeting' | 'maxMinutes'>>;
+export type CustomerVoiceChange = Partial<Pick<CustomerVoice, 'enabled' | 'voice' | 'greeting' | 'maxMinutes' | 'language'>>;
 
 const URL = '/api/customer-voice';
 

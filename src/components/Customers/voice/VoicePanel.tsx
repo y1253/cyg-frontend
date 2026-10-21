@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useCustomerVoice, useUpdateCustomerVoice } from '@/hooks/useCustomerVoice';
 import { cn } from '@/lib/utils';
@@ -15,8 +16,9 @@ const GENDER: Record<AiVoiceOption['gender'], string> = { female: 'Female', male
 /**
  * ADMIN (step12): the customer site's AI phone. On = a customer who calls a receipt number
  * from the phone on their account talks to the same AI assistant they text, and scheduled
- * messages can call customers who prefer a phone call. The voice, the first words and the
- * longest call are set here; the customer API reads them on every call.
+ * messages can call customers who prefer a phone call. The voice, the language calls start
+ * in, the first words and the longest call are set here; the customer API reads them on
+ * every call.
  */
 export function VoicePanel() {
   const voice = useCustomerVoice();
@@ -36,18 +38,22 @@ export function VoicePanel() {
 function VoiceForm({ v }: { v: CustomerVoice }) {
   const save = useUpdateCustomerVoice();
   const [voice, setVoice] = useState(v.voice);
+  const [language, setLanguage] = useState(v.language);
   const [greeting, setGreeting] = useState(v.greeting ?? '');
   const [minutes, setMinutes] = useState(String(v.maxMinutes));
   const [saved, setSaved] = useState(false);
   const mins = Number(minutes);
   const minutesBad = !Number.isInteger(mins) || mins < 1 || mins > 60;
-  const dirty = voice !== v.voice || greeting.trim() !== (v.greeting ?? '') || (!minutesBad && mins !== v.maxMinutes);
+  const dirty =
+    voice !== v.voice ||
+    language !== v.language ||
+    greeting.trim() !== (v.greeting ?? '') || (!minutesBad && mins !== v.maxMinutes);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (minutesBad) return;
     setSaved(false);
-    save.mutate({ voice, greeting: greeting.trim() || null, maxMinutes: mins }, { onSuccess: () => setSaved(true) });
+    save.mutate({ voice, language, greeting: greeting.trim() || null, maxMinutes: mins }, { onSuccess: () => setSaved(true) });
   };
 
   return (
@@ -106,6 +112,30 @@ function VoiceForm({ v }: { v: CustomerVoice }) {
             </div>
 
             <div className="flex flex-col gap-1.5">
+              <Label>Default language</Label>
+              <Select
+                items={Object.fromEntries(v.languages.map(l => [l.id, l.label]))}
+                value={language}
+                onValueChange={next => setLanguage(next ?? language)}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {v.languages.map(l => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The AI starts every call in this language. If the caller speaks or asks for another one, it switches
+                to theirs for the rest of the call.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="voice-greeting">First words on a call they make</Label>
               <Textarea
                 id="voice-greeting"
@@ -116,7 +146,7 @@ function VoiceForm({ v }: { v: CustomerVoice }) {
                 placeholder="Empty = “Hi Dana, it's CYG Finance's assistant — how can I help with your books?”"
               />
               <p className="text-xs text-muted-foreground">
-                Scheduled calls start with the overview or report instead.
+                Said in the default language. Scheduled calls start with the overview or report instead.
               </p>
             </div>
 
