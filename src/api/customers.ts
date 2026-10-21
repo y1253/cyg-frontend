@@ -15,7 +15,7 @@ export interface CustomerSummary {
   authType: CustomerAuthType;
   phone: string | null;
   /** How they prefer to be contacted (set on cygfinance.com, step12); null = not chosen. */
-  preferredContact?: 'EMAIL' | 'WHATSAPP' | 'SMS' | null;
+  preferredContact?: 'EMAIL' | 'WHATSAPP' | 'SMS' | 'CALL' | null;
   avatarUrl: string | null;
   /** Signed up. */
   createdAt: string;

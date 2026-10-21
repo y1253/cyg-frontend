@@ -17,7 +17,7 @@ export interface AiRule {
   sourceCustomer: { id: number; name: string; email: string } | null;
 }
 
-export type AiChannel = 'BOT' | 'SMS' | 'WHATSAPP' | 'EMAIL';
+export type AiChannel = 'BOT' | 'SMS' | 'WHATSAPP' | 'EMAIL' | 'VOICE';
 
 export interface AiAction {
   tool?: string;

@@ -18,7 +18,7 @@ import { CustomerAiCard } from './ai/CustomerAiCard';
 import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
 /** The customer's preferred contact method, as they chose it on cygfinance.com (step12). */
-const CONTACT_LABEL = { EMAIL: 'Email', WHATSAPP: 'WhatsApp', SMS: 'Text message' } as const;
+const CONTACT_LABEL = { EMAIL: 'Email', WHATSAPP: 'WhatsApp', SMS: 'Text message', CALL: 'Phone call' } as const;
 
 /** ADMIN: one public-site customer — profile, sales-tax setup and every statement they uploaded. */
 export function CustomerDetailPage() {
