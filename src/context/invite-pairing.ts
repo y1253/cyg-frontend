@@ -10,6 +10,13 @@
 export interface InviteMarkers {
   call: string | null;
   leg: string | null;
+  /**
+   * `X-Cyg-Dial`: a per-dial value the server puts on every leg it creates through
+   * `POST /Calls` to the shared SIP address — the dialler's own leg, an internal
+   * caller's leg, an added colleague's leg. Optional so a caller built before it exists
+   * (and the tests' older fixtures) still type-check as "absent".
+   */
+  dial?: string | null;
 }
 
 
@@ -23,6 +30,8 @@ export interface PairableEvent {
   callSid: string;
   /** Absent on an event from an older build — treated as inbound. */
   direction?: 'inbound' | 'outbound';
+  /** The `X-Cyg-Dial` value this event's leg carries. See `InviteMarkers.dial`. */
+  dialToken?: string | null;
 }
 
 /**
@@ -50,6 +59,12 @@ export function invitePairsWith(
   // Every other event is a company call, or an internal CALLER's own leg. Neither
   // carries a token, so an INVITE that carries one is somebody else's leg.
   if (markers.call != null) return false;
+  // step12 — a leg WE created to the shared SIP address names its own event exactly.
+  // Before this marker, two members of staff dialling within a second or two each
+  // auto-answered whichever unmarked INVITE arrived first: a coin flip that put A on
+  // B's customer (1,619 click-to-calls from 9 users all rang ONE SIP address). An
+  // INVITE carrying it is never anybody else's call, inbound events included.
+  if (markers.dial != null) return info.dialToken === markers.dial;
   // A company leg's marker is the call's own sid.
   if (markers.leg != null) return markers.leg === info.callSid;
 
@@ -76,6 +91,13 @@ export function invitePairsWith(
   // does not work, which is the fallback this whole mechanism exists to preserve. Requiring
   // an intent for those would break every inbound call on exactly the deployments that
   // most need the fallback.
+  //
+  // ⚠️ step12, still ADVISORY: an unmarked INVITE reaching an event that expects a dial
+  // marker falls back to `dialedHere`, exactly as before. Header delivery on a REST
+  // `POST /Calls` `To` URI is unverified; `pair()` reports which path matched to the
+  // server log (`[softphone] paired call dial|…`). Once production shows `dial`, an event
+  // with a `dialToken` must refuse unmarked INVITEs outright — that removes the coin flip
+  // for good.
   if (info.direction === 'outbound') return dialedHere;
   return true;
 }

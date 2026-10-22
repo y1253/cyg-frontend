@@ -46,6 +46,7 @@ import {
   hangUpCall,
   type ConferenceStatus,
   type TransferState,
+  reportPairing,
 } from '@/api/phone';
 import {
   fetchInternalTransferStatus,
@@ -130,7 +131,12 @@ function markersOf(invitation: Invitation): InviteMarkers {
       return null;
     }
   };
-  return { call: read('X-Cyg-Call'), leg: read('X-Cyg-Leg') };
+  return {
+    call: read('X-Cyg-Call'),
+    leg: read('X-Cyg-Leg'),
+    // step12: the per-dial marker on legs the server creates with `POST /Calls`.
+    dial: read('X-Cyg-Dial'),
+  };
 }
 
 
@@ -185,6 +191,12 @@ export interface IncomingCallInfo {
    * leg per browser and need no marker. See markerOf().
    */
   token?: string;
+  /**
+   * step12: the `X-Cyg-Dial` value the leg of THIS event carries — set on the dialler's
+   * own event (click-to-call, an internal caller) and on an added colleague's. Pairing
+   * gives an INVITE carrying that header only to the event naming the same value.
+   */
+  dialToken?: string;
   /**
    * Which family of call this is, so the client knows which API to act on.
    *
@@ -806,6 +818,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const activeIdRef = useRef<string | null>(null);
   const slotSeqRef = useRef(0);
   const switchBusyRef = useRef(false);
+  /** The switch in flight while `switchBusyRef` is set, so an answer can wait for it. */
+  const switchRunRef = useRef<Promise<void> | null>(null);
 
   /** INVITEs waiting for an event, and events waiting for an INVITE. Both are LISTS now. */
   const invitesRef = useRef<HeldInvite[]>([]);
@@ -1367,7 +1381,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
    * `X-Cyg-Leg` header actually arrives from SignalWire, which is still unverified.
    */
   const pair = useCallback(
-    (held: HeldInvite, info: IncomingCallInfo, path: 'marker' | 'order') => {
+    (
+      held: HeldInvite,
+      info: IncomingCallInfo,
+      path: 'dial' | 'marker' | 'call' | 'order' | 'dialed-here',
+    ) => {
       releaseInvite(held);
       eventsRef.current = eventsRef.current.filter((e) => e !== info);
 
@@ -1420,6 +1438,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       // `callSid` is here so a client log can be lined up against the server's own
       // `internal call X -> Y sid=...`; without it the two cannot be correlated.
       log('paired call', path, info.callSid, info.companyName, info.from, id);
+      // step12: the same fact on the SERVER log, so production says whether SignalWire
+      // delivers each marker — the evidence for making unmarked pairing strict.
+      if (tokenRef.current) {
+        const m = held.markers;
+        reportPairing(tokenRef.current, {
+          path,
+          callSid: info.callSid,
+          direction: info.direction,
+          headers:
+            [m.dial && 'dial', m.leg && 'leg', m.call && 'call']
+              .filter(Boolean)
+              .join(',') || undefined,
+        });
+      }
 
       if (info.direction === 'outbound') {
         // The user already clicked "Call"; making them then click "Answer" to reach the
@@ -1550,15 +1582,25 @@ Transferred by ${info.transferFrom.name}`
         // 33s release line — which carries no sid and no reason.
         log(
           'no pair for INVITE',
-          held.markers.leg ?? held.markers.call ?? 'unmarked',
+          held.markers.dial ?? held.markers.leg ?? held.markers.call ?? 'unmarked',
           `held=${invitesRef.current.length}`,
           `events=${eventsRef.current.length}`,
           `dialedHere=${fromThisTab}`,
         );
         continue;
       }
-      const exact = held.markers.call !== null || held.markers.leg !== null;
-      pair(held, info, exact ? 'marker' : 'order');
+      const m = held.markers;
+      const path =
+        m.call != null
+          ? 'call'
+          : m.dial != null
+            ? 'dial'
+            : m.leg != null
+              ? 'marker'
+              : info.direction === 'outbound'
+                ? 'dialed-here'
+                : 'order';
+      pair(held, info, path);
     }
   }, [pair]);
 
@@ -1571,10 +1613,14 @@ Transferred by ${info.transferFrom.name}`
   const pushEvent = useCallback(
     (info: IncomingCallInfo) => {
       if (slotList().some((s) => s.info.callSid === info.callSid)) return;
+      // Oldest FIRST (step12). `/pending-calls` answers newest-first, and `tryPair` takes
+      // held INVITEs oldest-first and the first event that fits — so appended in arrival
+      // order, two unmarked inbound calls paired crosswise and the agent answering caller
+      // A was put through to caller B.
       eventsRef.current = [
         ...eventsRef.current.filter((e) => e.callSid !== info.callSid),
         info,
-      ];
+      ].sort((a, b) => a.at - b.at);
       tryPair();
     },
     [slotList, tryPair],
@@ -1583,15 +1629,23 @@ Transferred by ${info.transferFrom.name}`
   const onInvite = useCallback(
     (invitation: Invitation) => {
       const markers = markersOf(invitation);
-      log('INVITE received', markers.leg ?? markers.call ?? 'unmarked');
+      log(
+        'INVITE received',
+        markers.dial ?? markers.leg ?? markers.call ?? 'unmarked',
+      );
 
       // Claimed ONCE, and scoped to the slot that is actually transferring. While a
       // transfer of ours is ringing, an UNMARKED INVITE is its fork coming back to us —
       // every browser shares one SIP credential — and it is the handle "Take it back"
-      // accepts. A MARKED INVITE is provably not our fork, since the transfer <Dial><Sip>
-      // deliberately carries none.
+      // accepts. An internal-call or dial-marked INVITE is provably not our fork: the
+      // transfer <Dial><Sip> carries neither (step12: it carries only `X-Cyg-Leg`).
       const transferring = slotIn('transferring');
-      if (transferring && !transferring.takeBackInvite && markers.call === null) {
+      if (
+        transferring &&
+        !transferring.takeBackInvite &&
+        markers.call === null &&
+        markers.dial == null
+      ) {
         transferring.takeBackInvite = invitation;
         setHasHeldInvite(true);
         invitation.stateChange.addListener((state) => {
@@ -1994,17 +2048,17 @@ Transferred by ${info.transferFrom.name}`
    * `teardownHold` re-enables it.
    */
   const switchTo = useCallback(
-    (callId: string) => {
-      if (switchBusyRef.current) return;
+    (callId: string): Promise<void> => {
+      if (switchBusyRef.current) return Promise.resolve();
       const target = slotsRef.current.get(callId);
-      if (!target || callId === activeIdRef.current) return;
+      if (!target || callId === activeIdRef.current) return Promise.resolve();
       switchBusyRef.current = true;
       // A real user gesture, which is what keeps audio playable — for the ringtone's
       // context AND the hold-music one, which are different contexts.
       unlockAudio();
       primeHoldAudio();
 
-      void (async () => {
+      const run = (async () => {
         try {
           const previous = activeSlot();
 
@@ -2036,9 +2090,12 @@ Transferred by ${info.transferFrom.name}`
           log('switch failed', err);
         } finally {
           switchBusyRef.current = false;
+          switchRunRef.current = null;
           publish();
         }
       })();
+      switchRunRef.current = run;
+      return run;
     },
     [activeSlot, holdSlot, publish, queueHold, resumeSlot],
   );
@@ -2056,16 +2113,27 @@ Transferred by ${info.transferFrom.name}`
       slot.answering = true;
       // Also the first reliable user gesture, which is what lets audio play at all.
       unlockAudio();
-      const wasActive = activeIdRef.current === callId;
-      if (!wasActive) switchTo(callId);
-      else stopRinging();
-      void slot.invitation
-        .accept({
-          sessionDescriptionHandlerOptions: {
-            constraints: { audio: true, video: false },
-          },
-        })
-        .catch(() => endSlot(callId, 'accept failed'));
+      const go = () => {
+        // The caller may have hung up while we waited for a switch in flight.
+        if (slotsRef.current.get(callId) !== slot) return;
+        if (activeIdRef.current === callId) stopRinging();
+        else void switchTo(callId);
+        void slot.invitation
+          .accept({
+            sessionDescriptionHandlerOptions: {
+              constraints: { audio: true, video: false },
+            },
+          })
+          .catch(() => endSlot(callId, 'accept failed'));
+      };
+      // ⚠️ step12: never accept while ANOTHER switch is still parking a call. `switchTo`
+      // drops a request while busy, so accepting anyway left the previous call un-muted
+      // and un-held — the agent live on two customers at once ("both got merged"). Wait
+      // for it, then switch to this call (which mutes the current one synchronously) and
+      // accept.
+      const inFlight = switchBusyRef.current ? switchRunRef.current : null;
+      if (inFlight) void inFlight.then(go, go);
+      else go();
     },
     [endSlot, switchTo],
   );

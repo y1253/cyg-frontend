@@ -286,6 +286,27 @@ export async function fetchPendingCalls(
   }
 }
 
+/**
+ * step12: tell the server which rule paired an INVITE with a call event, so the Hetzner
+ * log shows whether SignalWire delivers each SIP marker. Fire-and-forget: it never
+ * throws and never delays the call.
+ */
+export function reportPairing(
+  token: string,
+  body: {
+    path: 'dial' | 'marker' | 'call' | 'order' | 'dialed-here';
+    callSid: string;
+    direction?: 'inbound' | 'outbound';
+    headers?: string;
+  },
+): void {
+  void fetchWithAuth(token, `${API}/phone/softphone-log`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body),
+  }).catch(() => undefined);
+}
+
 export interface IncomingCallPayload {
   companyId: number;
   companyName: string;

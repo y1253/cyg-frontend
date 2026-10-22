@@ -91,3 +91,52 @@ describe('invitePairsWith — who may claim an INVITE', () => {
     });
   });
 });
+
+/**
+ * step12 — Hetzner showed 1,619 click-to-calls from 9 users all ringing ONE SIP address.
+ * Two members of staff dialling within a second or two each auto-answered whichever
+ * unmarked leg arrived first, and talked to the other's customer.
+ */
+describe('invitePairsWith — the X-Cyg-Dial marker (step12)', () => {
+  const dialled = (dial: string): InviteMarkers => ({ call: null, leg: null, dial });
+  const mine = event({ direction: 'outbound', callSid: 'sid-a', dialToken: 'dial-a' });
+  const theirs = event({ direction: 'outbound', callSid: 'sid-b', dialToken: 'dial-b' });
+
+  it("pairs a dialler's INVITE only with the event naming the same dial", () => {
+    expect(invitePairsWith(dialled('dial-a'), mine, true)).toBe(true);
+    expect(invitePairsWith(dialled('dial-b'), mine, true)).toBe(false);
+  });
+
+  it('two concurrent dials: each tab takes only its own leg, in either arrival order', () => {
+    // A's browser holds both INVITEs and only A's event.
+    expect(invitePairsWith(dialled('dial-b'), mine, true)).toBe(false);
+    expect(invitePairsWith(dialled('dial-a'), mine, true)).toBe(true);
+    // B's browser, the mirror image.
+    expect(invitePairsWith(dialled('dial-a'), theirs, true)).toBe(false);
+    expect(invitePairsWith(dialled('dial-b'), theirs, true)).toBe(true);
+  });
+
+  it('a dial-marked INVITE never pairs with a ringing INBOUND call', () => {
+    const inbound = event({ direction: 'inbound', callSid: 'sid-in' });
+    expect(invitePairsWith(dialled('dial-a'), inbound, false)).toBe(false);
+  });
+
+  it("an added colleague's inbound event pairs with its own dial-marked leg", () => {
+    const added = event({ direction: 'inbound', callSid: 'sid-c', dialToken: 'dial-c' });
+    expect(invitePairsWith(dialled('dial-c'), added, false)).toBe(true);
+  });
+
+  it('a dial-marked INVITE never answers an internal callee event', () => {
+    const callee = event({ direction: 'inbound', token: 'tok-1' });
+    expect(invitePairsWith(dialled('dial-a'), callee, false)).toBe(false);
+  });
+
+  it('an unmarked INVITE still falls back to dialedHere for a dial event (advisory for now)', () => {
+    expect(invitePairsWith(unmarked, mine, true)).toBe(true);
+    expect(invitePairsWith(unmarked, mine, false)).toBe(false);
+  });
+
+  it('a leg-marked INVITE does not pair with a dial event of another sid', () => {
+    expect(invitePairsWith(legged('sid-x'), mine, true)).toBe(false);
+  });
+});
