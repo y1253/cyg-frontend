@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CreditCard, Mail, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
+import { Coins, CreditCard, Mail, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's sections, in `?tab=` order (`CustomerSiteShell`). */
 export type CustomerSiteTab =
@@ -11,7 +11,8 @@ export type CustomerSiteTab =
   | 'voice'
   | 'pricing'
   | 'promo'
-  | 'payments';
+  | 'payments'
+  | 'costs';
 
 export const CUSTOMER_SITE_TABS: {
   key: CustomerSiteTab;
@@ -72,5 +73,11 @@ export const CUSTOMER_SITE_TABS: {
     label: 'Payments',
     icon: <Receipt size={15} />,
     blurb: 'Every Generate a customer paid for (or got free with a promo code).',
+  },
+  {
+    key: 'costs',
+    label: 'AI costs',
+    icon: <Coins size={15} />,
+    blurb: 'What each customer costs us in OpenAI — every AI call with its tokens and price, and the price of each model.',
   },
 ];

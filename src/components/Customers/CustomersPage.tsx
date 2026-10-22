@@ -21,6 +21,7 @@ import { VoicePanel } from './voice/VoicePanel';
 import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
+import { AiCostsPanel } from './costs/AiCostsPanel';
 
 type Sort = 'newest' | 'oldest' | 'active';
 
@@ -60,6 +61,7 @@ export function CustomersPage() {
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}
+      {tab === 'costs' && <AiCostsPanel />}
     </CustomerSiteShell>
   );
 }
