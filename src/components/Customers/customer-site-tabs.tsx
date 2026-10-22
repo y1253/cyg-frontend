@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CreditCard, Mail, MessageSquareText, Phone, Receipt, Sparkles, Tag, Users2 } from 'lucide-react';
+import { CreditCard, Mail, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's sections, in `?tab=` order (`CustomerSiteShell`). */
 export type CustomerSiteTab =
@@ -7,6 +7,7 @@ export type CustomerSiteTab =
   | 'numbers'
   | 'inbox'
   | 'ai'
+  | 'instructions'
   | 'voice'
   | 'pricing'
   | 'promo'
@@ -41,6 +42,12 @@ export const CUSTOMER_SITE_TABS: {
     label: 'AI rules',
     icon: <Sparkles size={15} />,
     blurb: 'Rules the AI assistant learned from customer chats. Firm-wide ones wait here for your approval.',
+  },
+  {
+    key: 'instructions',
+    label: 'AI instructions',
+    icon: <ShieldAlert size={15} />,
+    blurb: 'What the AI is told, the problems customers reported, and every fix the strong AI made — revert any of them.',
   },
   {
     key: 'voice',

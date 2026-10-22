@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Mail, MessageCircle, MessageSquareText, Phone, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bot, Mail, MessageCircle, MessageSquareText, Phone, ShieldAlert, Sparkles, Trash2 } from 'lucide-react';
 import type { AiAction, AiChannel, CustomerAi } from '@/api/aiRules';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,14 @@ const CHANNEL: Record<AiChannel, { label: string; icon: React.ReactNode; classNa
   WHATSAPP: { label: 'WhatsApp', icon: <MessageCircle size={11} />, className: 'border-emerald-200 text-emerald-700' },
   EMAIL: { label: 'Email', icon: <Mail size={11} />, className: 'border-amber-200 text-amber-700' },
   VOICE: { label: 'Phone', icon: <Phone size={11} />, className: 'border-violet-200 text-violet-700' },
+};
+
+const ESCALATION_LABEL: Record<string, string> = {
+  RUNNING: 'checking…',
+  FIXED: 'fixed',
+  NOT_AN_ISSUE: 'no mistake found',
+  UNSURE: 'unsure',
+  FAILED: 'check failed',
 };
 
 /**
@@ -113,6 +121,15 @@ function MessageRow({ m }: { m: CustomerAi['messages'][number] }) {
         <span className="ml-auto">{fmtDateTime(m.createdAt)}</span>
       </div>
       <p className="text-sm whitespace-pre-wrap">{m.text}</p>
+      {m.escalation && (
+        <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-800">
+          <ShieldAlert size={12} className="mt-px shrink-0" />
+          <span>
+            Reported a mistake — strong AI: {ESCALATION_LABEL[m.escalation.verdict] ?? m.escalation.verdict.toLowerCase()}
+            {m.escalation.summary && `. ${m.escalation.summary}`}
+          </span>
+        </p>
+      )}
       {m.warning && (
         <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
           <AlertTriangle size={12} className="mt-px shrink-0" />

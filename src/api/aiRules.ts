@@ -46,6 +46,8 @@ export interface CustomerAi {
     companyId: number | null;
     companyName: string | null;
     createdAt: string;
+    /** step12: this message reported a mistake and the strong AI checked it. */
+    escalation: { id: number; verdict: string; summary: string | null } | null;
   }>;
 }
 

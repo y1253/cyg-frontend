@@ -15,6 +15,7 @@ import { PaymentsPanel } from './billing/PaymentsPanel';
 import { CustomerSiteShell } from './CustomerSiteShell';
 import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
 import { IntakeNumbersPanel } from './intake/IntakeNumbersPanel';
+import { AiInstructionsPanel } from './ai/AiInstructionsPanel';
 import { AiRulesPanel } from './ai/AiRulesPanel';
 import { VoicePanel } from './voice/VoicePanel';
 import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
@@ -54,6 +55,7 @@ export function CustomersPage() {
       {tab === 'numbers' && <IntakeNumbersPanel />}
       {tab === 'inbox' && <CustomerInboxPanel />}
       {tab === 'ai' && <AiRulesPanel />}
+      {tab === 'instructions' && <AiInstructionsPanel />}
       {tab === 'voice' && <VoicePanel />}
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
