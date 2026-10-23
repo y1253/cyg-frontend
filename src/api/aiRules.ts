@@ -14,7 +14,7 @@ export interface AiRule {
   createdAt: string;
   reviewedAt: string | null;
   reviewedBy: { id: number; name: string } | null;
-  sourceCustomer: { id: number; name: string; email: string } | null;
+  sourceCustomer: { id: number; name: string; email: string | null } | null;
 }
 
 export type AiChannel = 'BOT' | 'SMS' | 'WHATSAPP' | 'EMAIL' | 'VOICE';

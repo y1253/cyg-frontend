@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useCustomers } from '@/hooks/useCustomers';
 import { cn } from '@/lib/utils';
 import { CustomerAvatar } from './CustomerAvatar';
-import { AUTH_LABEL, fmtAgo, fmtDateTime } from './customer-format';
+import { AUTH_LABEL, CREATED_WITH_LABEL, fmtAgo, fmtDateTime } from './customer-format';
 import { PaymentsPanel } from './billing/PaymentsPanel';
 import { CustomerSiteShell } from './CustomerSiteShell';
 import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
@@ -76,7 +76,7 @@ function CustomersList() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return customers
-      .filter(c => !q || c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q))
+      .filter(c => !q || c.name.toLowerCase().includes(q) || (c.email ?? '').toLowerCase().includes(q) || (c.phone ?? '').includes(q))
       .sort(SORTERS[sort]);
   }, [customers, search, sort]);
 
@@ -166,7 +166,7 @@ function CustomersList() {
                           {c.name}
                           {c.deletedAt && <Badge variant="outline" className="text-[10px]">Deleted</Badge>}
                         </p>
-                        <p className="text-muted-foreground truncate text-xs">{c.email}</p>
+                        <p className="text-muted-foreground truncate text-xs">{c.email ?? c.phone ?? 'No email yet'}</p>
                       </div>
                     </div>
                   </TableCell>
@@ -174,6 +174,11 @@ function CustomersList() {
                     <Badge variant="outline" className={c.authType === 'GOOGLE' ? 'border-sky-300 text-sky-700' : ''}>
                       {AUTH_LABEL[c.authType]}
                     </Badge>
+                    {c.createdWith && (
+                      <p className="text-muted-foreground mt-1 text-[11px] whitespace-nowrap">
+                        via {CREATED_WITH_LABEL[c.createdWith]}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell>
                     <p className="text-sm whitespace-nowrap">{fmtDateTime(c.createdAt)}</p>

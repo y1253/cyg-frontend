@@ -16,7 +16,7 @@ import { StatementRowsDialog } from './StatementRowsDialog';
 import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
 import { CustomerAiCard } from './ai/CustomerAiCard';
 import { CustomerAiCostCard } from './costs/CustomerAiCostCard';
-import { AUTH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
+import { AUTH_LABEL, CREATED_WITH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
 /** The customer's preferred contact method, as they chose it on cygfinance.com (step12). */
 const CONTACT_LABEL = { EMAIL: 'Email', WHATSAPP: 'WhatsApp', SMS: 'Text message', CALL: 'Phone call' } as const;
@@ -78,7 +78,7 @@ export function CustomerDetailPage() {
               <Badge variant="outline" className="border-emerald-300 text-emerald-700">Active</Badge>
             )}
           </div>
-          <p className="text-muted-foreground mt-0.5 text-sm">{c.email}</p>
+          <p className="text-muted-foreground mt-0.5 text-sm">{c.email ?? c.phone ?? 'No email yet'}</p>
           <p className="text-muted-foreground mt-1 text-xs">
             Signed up {fmtDateTime(c.createdAt)} · {fmtAgo(c.createdAt)}
           </p>
@@ -95,13 +95,14 @@ export function CustomerDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Field label="Email" icon={<Mail size={11} />} value={c.email} />
+            <Field label="Email" icon={<Mail size={11} />} value={c.email ?? '—'} />
             <Field label="Phone" icon={<Phone size={11} />} value={c.phone || '—'} />
             <Field
               label="Prefers"
               value={c.preferredContact ? CONTACT_LABEL[c.preferredContact] : 'No preference'}
             />
             <Field label="Signs in with" value={AUTH_LABEL[c.authType]} />
+            <Field label="Created with" value={c.createdWith ? CREATED_WITH_LABEL[c.createdWith] : '—'} />
             <Field label="Signed up" value={fmtDateTime(c.createdAt)} />
             <Field label="Last login" value={c.lastLoginAt ? fmtDateTime(c.lastLoginAt) : 'Never'} />
             <Field label="Bookkeeping" value={`${live.length} statement${live.length === 1 ? '' : 's'} · ${rows.toLocaleString()} rows`} />

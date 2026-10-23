@@ -29,7 +29,7 @@ export interface CustomerCostsResponse {
 }
 
 export interface CustomerCostDetail {
-  customer: { id: number; name: string; email: string };
+  customer: { id: number; name: string; email: string | null };
   total: CostTotals;
   byFeature: (CostTotals & { feature: string })[];
   byModel: (CostTotals & { model: string })[];

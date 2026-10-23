@@ -41,7 +41,7 @@ export type EscalationVerdict = 'RUNNING' | 'FIXED' | 'NOT_AN_ISSUE' | 'UNSURE' 
 /** A customer's complaint the regular AI handed to the strong AI. */
 export interface AiEscalation {
   id: number;
-  customer: { id: number; name: string; email: string } | null;
+  customer: { id: number; name: string; email: string | null } | null;
   companyName: string | null;
   channel: string;
   complaint: string;

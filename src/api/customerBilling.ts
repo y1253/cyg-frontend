@@ -55,7 +55,7 @@ export interface CustomerPayment {
   statementsQueued: number;
   stripePaymentIntentId: string | null;
   createdAt: string;
-  customer: { id: number; name: string; email: string };
+  customer: { id: number; name: string; email: string | null };
 }
 
 export interface CustomerPaymentsResponse {

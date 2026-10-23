@@ -113,7 +113,7 @@ function RuleRow({ rule }: { rule: AiRule }) {
               <Badge variant="outline" className="mr-1.5 border-indigo-200 px-1.5 py-0 text-[10px] text-indigo-700">
                 {rule.topic.toLowerCase()}
               </Badge>
-              {rule.sourceCustomer ? `From ${rule.sourceCustomer.name} (${rule.sourceCustomer.email})` : 'From a customer chat'}
+              {rule.sourceCustomer ? `From ${rule.sourceCustomer.name || 'a customer'}${rule.sourceCustomer.email ? ` (${rule.sourceCustomer.email})` : ''}` : 'From a customer chat'}
               {' · '}
               {fmtDateTime(rule.createdAt)}
               {rule.reviewedBy && ` · reviewed by ${rule.reviewedBy.name}`}

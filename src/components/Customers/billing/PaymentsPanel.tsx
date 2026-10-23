@@ -32,7 +32,7 @@ export function PaymentsPanel() {
     return payments.filter(
       p =>
         p.customer.name.toLowerCase().includes(q) ||
-        p.customer.email.toLowerCase().includes(q) ||
+        (p.customer.email ?? '').toLowerCase().includes(q) ||
         (p.promoCode ?? '').toLowerCase().includes(q) ||
         (p.cardLast4 ?? '').includes(q),
     );

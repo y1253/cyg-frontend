@@ -1,4 +1,4 @@
-import type { CustomerAuthType, StatementStatus } from '@/api/customers';
+import type { CustomerAuthType, CustomerCreatedWith, StatementStatus } from '@/api/customers';
 
 /** A moment (sign-up, upload, read) in the viewer's own time: "Oct 11, 2026, 3:42 PM". */
 export function fmtDateTime(iso: string | null): string {
@@ -51,6 +51,16 @@ export function initials(name: string): string {
 export const AUTH_LABEL: Record<CustomerAuthType, string> = {
   GOOGLE: 'Google',
   PASSWORD: 'Password',
+  PHONE: 'Phone code',
+};
+
+/** step12c: where the account was opened (`Customer.createdWith`). */
+export const CREATED_WITH_LABEL: Record<CustomerCreatedWith, string> = {
+  WEB_EMAIL: 'Website (email)',
+  GOOGLE: 'Website (Google)',
+  SMS: 'Text message',
+  WHATSAPP: 'WhatsApp',
+  CALL: 'Phone call',
 };
 
 /** Label + Tailwind classes per statement status — what the customer sees, plus the in-between states. */

@@ -6,13 +6,18 @@ const API = '/api';
  * The PUBLIC site's customers (cygfinance.com) — not staff, not client companies. ADMIN
  * only and read-only: the tables belong to the customer app.
  */
-export type CustomerAuthType = 'PASSWORD' | 'GOOGLE';
+export type CustomerAuthType = 'PASSWORD' | 'GOOGLE' | 'PHONE';
+
+/** step12c: where the account was opened; null = before step12c. */
+export type CustomerCreatedWith = 'WEB_EMAIL' | 'GOOGLE' | 'SMS' | 'WHATSAPP' | 'CALL';
 
 export interface CustomerSummary {
   id: number;
   name: string;
-  email: string;
+  /** step12c: null for an account opened by phone that has not added an email. */
+  email: string | null;
   authType: CustomerAuthType;
+  createdWith?: CustomerCreatedWith | null;
   phone: string | null;
   /** How they prefer to be contacted (set on cygfinance.com, step12); null = not chosen. */
   preferredContact?: 'EMAIL' | 'WHATSAPP' | 'SMS' | 'CALL' | null;

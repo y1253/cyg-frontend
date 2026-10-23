@@ -67,7 +67,7 @@ export interface CompanyDetail {
   /** "Should we track open (unpaid) bills?" — null = not answered. */
   trackOpenBills: boolean | null;
   /** The cygfinance.com account this company belongs to. */
-  customer: { id: number; name: string; email: string } | null;
+  customer: { id: number; name: string; email: string | null } | null;
   createdAt: string;
   deletedAt: string | null;
   contactInfo: {
