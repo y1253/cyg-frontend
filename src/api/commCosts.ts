@@ -160,6 +160,7 @@ export const PURPOSE_LABEL: Record<string, string> = {
   CONTACT_RELAY: 'Contact replies relayed',
   INTAKE: 'Received from the customer',
   STRONG_AI: 'Strong AI follow-ups',
+  FEATURE_DONE: 'Feature request done',
   OTHER: 'Other',
   INBOUND: 'Customer called us',
   REQUESTED: '“Call me” requests',

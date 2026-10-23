@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ExternalLink, Globe } from 'lucide-react';
 import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
 import { useAiRulePendingCount } from '@/hooks/useAiRules';
+import { useFeatureRequestOpenCount } from '@/hooks/useFeatureRequests';
 import { cn } from '@/lib/utils';
 
 /**
@@ -23,6 +24,8 @@ export function CustomerSiteShell({
 }) {
   // AI rules waiting for review — the "AI rules" tab carries the count.
   const pending = useAiRulePendingCount().data ?? 0;
+  // step12e: feature requests nobody has looked at yet.
+  const openRequests = useFeatureRequestOpenCount().data ?? 0;
   return (
     <div className="min-h-full bg-gradient-to-b from-indigo-50/80 via-indigo-50/20 to-transparent">
       <div className="mx-auto max-w-6xl p-4 sm:p-6">
@@ -64,6 +67,11 @@ export function CustomerSiteShell({
                 {t.key === 'ai' && pending > 0 && (
                   <span className="rounded-full bg-amber-400 px-1.5 text-[11px] leading-[18px] font-semibold text-amber-950">
                     {pending}
+                  </span>
+                )}
+                {t.key === 'requests' && openRequests > 0 && (
+                  <span className="rounded-full bg-amber-400 px-1.5 text-[11px] leading-[18px] font-semibold text-amber-950">
+                    {openRequests}
                   </span>
                 )}
               </Link>

@@ -48,6 +48,8 @@ export interface CustomerAi {
     createdAt: string;
     /** step12: this message reported a mistake and the strong AI checked it. */
     escalation: { id: number; verdict: string; summary: string | null } | null;
+    /** step12e: this message asked for something the app does not do yet. */
+    featureRequest: { id: number; summary: string; status: string } | null;
   }>;
 }
 

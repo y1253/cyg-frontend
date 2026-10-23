@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Mail, MessageCircle, MessageSquareText, Phone, ShieldAlert, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bot, Lightbulb, Mail, MessageCircle, MessageSquareText, Phone, ShieldAlert, Sparkles, Trash2 } from 'lucide-react';
 import type { AiAction, AiChannel, CustomerAi } from '@/api/aiRules';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -127,6 +127,14 @@ function MessageRow({ m }: { m: CustomerAi['messages'][number] }) {
           <span>
             Reported a mistake — strong AI: {ESCALATION_LABEL[m.escalation.verdict] ?? m.escalation.verdict.toLowerCase()}
             {m.escalation.summary && `. ${m.escalation.summary}`}
+          </span>
+        </p>
+      )}
+      {m.featureRequest && (
+        <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-800">
+          <Lightbulb size={12} className="mt-px shrink-0" />
+          <span>
+            Asked for a new feature: {m.featureRequest.summary} ({m.featureRequest.status.toLowerCase()})
           </span>
         </p>
       )}
