@@ -16,6 +16,7 @@ import { StatementRowsDialog } from './StatementRowsDialog';
 import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
 import { CustomerAiCard } from './ai/CustomerAiCard';
 import { CustomerAiCostCard } from './costs/CustomerAiCostCard';
+import { CustomerCommCostCard } from './costs/CustomerCommCostCard';
 import { AUTH_LABEL, CREATED_WITH_LABEL, STATUS_STYLE, fmtAgo, fmtDateTime, fmtPeriod, pct } from './customer-format';
 
 /** The customer's preferred contact method, as they chose it on cygfinance.com (step12). */
@@ -239,6 +240,7 @@ export function CustomerDetailPage() {
       <CustomerAiCard customerId={c.id} />
 
       <CustomerAiCostCard customerId={c.id} />
+      <CustomerCommCostCard customerId={c.id} />
 
       <StatementRowsDialog customerId={c.id} statement={open} onClose={() => setOpen(null)} />
     </div>

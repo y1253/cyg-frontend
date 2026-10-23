@@ -22,6 +22,7 @@ import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
 import { AiCostsPanel } from './costs/AiCostsPanel';
+import { CommCostsPanel } from './costs/CommCostsPanel';
 
 type Sort = 'newest' | 'oldest' | 'active';
 
@@ -62,6 +63,7 @@ export function CustomersPage() {
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}
       {tab === 'costs' && <AiCostsPanel />}
+      {tab === 'phone-costs' && <CommCostsPanel />}
     </CustomerSiteShell>
   );
 }
