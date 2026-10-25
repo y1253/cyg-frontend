@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Globe } from 'lucide-react';
-import { CUSTOMER_SITE_TABS, type CustomerSiteTab } from './customer-site-tabs';
+import { CUSTOMER_SITE_GROUPS, CUSTOMER_SITE_TABS, groupOf, tabHref, type CustomerSiteTab } from './customer-site-tabs';
 import { useAiRulePendingCount } from '@/hooks/useAiRules';
 import { useFeatureRequestOpenCount } from '@/hooks/useFeatureRequests';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,8 @@ import { cn } from '@/lib/utils';
 /**
  * The frame every Customer-site page sits in, so the public site's admin reads as its own
  * area rather than another staff page: an indigo band naming cygfinance.com and its own
- * sub-navigation (links, so a customer's detail page keeps the same tabs). Indigo is used
+ * sub-navigation (links, so a customer's detail page keeps the same tabs): four group tabs in
+ * the band, and pills under it for the pages of the open group — nothing scrolls sideways. Indigo is used
  * only here and on its sidebar entry — the rest of the staff app is teal.
  */
 export function CustomerSiteShell({
@@ -22,10 +23,12 @@ export function CustomerSiteShell({
   blurb?: string;
   children: ReactNode;
 }) {
-  // AI rules waiting for review — the "AI rules" tab carries the count.
+  // AI rules waiting for review — the Rules pill (and the AI assistant tab) carry the count.
   const pending = useAiRulePendingCount().data ?? 0;
   // step12e: feature requests nobody has looked at yet.
   const openRequests = useFeatureRequestOpenCount().data ?? 0;
+  // A customer's detail page (active null) sits under Customers.
+  const group = groupOf(active ?? 'customers');
   return (
     <div className="min-h-full bg-gradient-to-b from-indigo-50/80 via-indigo-50/20 to-transparent">
       <div className="mx-auto max-w-6xl p-4 sm:p-6">
@@ -49,37 +52,62 @@ export function CustomerSiteShell({
               <ExternalLink size={12} />
             </a>
           </div>
-          <nav className="flex gap-1 overflow-x-auto bg-indigo-900/60 px-3 py-2 [scrollbar-width:none] sm:px-4 [&::-webkit-scrollbar]:hidden">
-            {CUSTOMER_SITE_TABS.map((t) => (
-              <Link
-                key={t.key}
-                to={t.key === 'customers' ? '/admin/customers' : `/admin/customers?tab=${t.key}`}
-                replace={active !== null}
-                className={cn(
-                  'flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
-                  active === t.key
-                    ? 'bg-white text-indigo-950 shadow-sm'
-                    : 'text-indigo-200 hover:bg-white/10 hover:text-white',
-                )}
-              >
-                {t.icon}
-                {t.label}
-                {t.key === 'ai' && pending > 0 && (
-                  <span className="rounded-full bg-amber-400 px-1.5 text-[11px] leading-[18px] font-semibold text-amber-950">
-                    {pending}
-                  </span>
-                )}
-                {t.key === 'requests' && openRequests > 0 && (
-                  <span className="rounded-full bg-amber-400 px-1.5 text-[11px] leading-[18px] font-semibold text-amber-950">
-                    {openRequests}
-                  </span>
-                )}
-              </Link>
-            ))}
+          <nav className="flex flex-wrap gap-1 bg-indigo-900/60 px-3 py-2 sm:px-4">
+            {CUSTOMER_SITE_GROUPS.map((g) => {
+              const count = g.key === 'ai' ? pending + openRequests : 0;
+              return (
+                <Link
+                  key={g.key}
+                  to={tabHref(g.tabs[0])}
+                  replace={active !== null}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
+                    group.key === g.key
+                      ? 'bg-white text-indigo-950 shadow-sm'
+                      : 'text-indigo-200 hover:bg-white/10 hover:text-white',
+                  )}
+                >
+                  {g.icon}
+                  {g.label}
+                  {count > 0 && <CountBadge n={count} />}
+                </Link>
+              );
+            })}
           </nav>
         </div>
+        {active !== null && group.tabs.length > 1 && (
+          <div className="mb-5 flex flex-wrap gap-1.5">
+            {group.tabs.map((key) => {
+              const t = CUSTOMER_SITE_TABS.find((x) => x.key === key)!;
+              const count = key === 'ai' ? pending : key === 'requests' ? openRequests : 0;
+              return (
+                <Link
+                  key={key}
+                  to={tabHref(key)}
+                  replace
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors',
+                    active === key
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-white text-indigo-900 ring-1 ring-indigo-100 hover:bg-indigo-50',
+                  )}
+                >
+                  {t.icon}
+                  {t.label}
+                  {count > 0 && <CountBadge n={count} />}
+                </Link>
+              );
+            })}
+          </div>
+        )}
         {children}
       </div>
     </div>
+  );
+}
+
+function CountBadge({ n }: { n: number }) {
+  return (
+    <span className="rounded-full bg-amber-400 px-1.5 text-[11px] leading-[18px] font-semibold text-amber-950">{n}</span>
   );
 }
