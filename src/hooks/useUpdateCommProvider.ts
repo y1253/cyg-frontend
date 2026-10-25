@@ -9,6 +9,9 @@ export function useUpdateCommProvider() {
   return useMutation({
     mutationFn: ({ id, input }: { id: number; input: CommProviderInput }) => updateCommProvider(token!, id, input),
     // Every total may change (unpriced rows get a price).
-    onSettled: () => qc.invalidateQueries({ queryKey: ['comm-costs'] }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['comm-costs'] });
+      void qc.invalidateQueries({ queryKey: ['costs'] });
+    },
   });
 }

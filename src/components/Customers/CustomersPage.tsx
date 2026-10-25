@@ -22,8 +22,7 @@ import { VoicePanel } from './voice/VoicePanel';
 import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
-import { AiCostsPanel } from './costs/AiCostsPanel';
-import { CommCostsPanel } from './costs/CommCostsPanel';
+import { CostsPanel } from './costs/CostsPanel';
 
 type Sort = 'newest' | 'oldest' | 'active';
 
@@ -48,7 +47,8 @@ const SORTERS: Record<Sort, (a: CustomerSummary, b: CustomerSummary) => number> 
  */
 export function CustomersPage() {
   const [params] = useSearchParams();
-  const raw = params.get('tab');
+  // `phone-costs` was its own tab until the Costs tab merged it with AI costs; old links still land.
+  const raw = params.get('tab') === 'phone-costs' ? 'costs' : params.get('tab');
   const tab: CustomerSiteTab = CUSTOMER_SITE_TABS.some(t => t.key === raw) ? (raw as CustomerSiteTab) : 'customers';
   const current = CUSTOMER_SITE_TABS.find(t => t.key === tab)!;
 
@@ -64,8 +64,7 @@ export function CustomersPage() {
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}
-      {tab === 'costs' && <AiCostsPanel />}
-      {tab === 'phone-costs' && <CommCostsPanel />}
+      {tab === 'costs' && <CostsPanel />}
     </CustomerSiteShell>
   );
 }

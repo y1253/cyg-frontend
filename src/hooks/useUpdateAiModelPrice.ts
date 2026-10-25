@@ -9,6 +9,9 @@ export function useUpdateAiModelPrice() {
   return useMutation({
     mutationFn: ({ id, input }: { id: number; input: AiModelPriceInput }) => updateAiModelPrice(token!, id, input),
     // Every total may change (unpriced calls get a price).
-    onSettled: () => qc.invalidateQueries({ queryKey: ['ai-costs'] }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['ai-costs'] });
+      void qc.invalidateQueries({ queryKey: ['costs'] });
+    },
   });
 }

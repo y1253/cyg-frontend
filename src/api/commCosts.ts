@@ -115,12 +115,6 @@ const query = (r: CostRange) => {
   return s ? `?${s}` : '';
 };
 
-export async function fetchCommCosts(token: string, range: CostRange): Promise<CommCostsResponse> {
-  const res = await fetchWithAuth(token, `${API}/comm-costs/customers${query(range)}`);
-  await throwOnError(res, 'Could not load phone & text costs');
-  return res.json() as Promise<CommCostsResponse>;
-}
-
 export async function fetchCustomerCommCost(
   token: string,
   customerId: number,

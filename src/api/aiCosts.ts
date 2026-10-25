@@ -82,12 +82,6 @@ const query = (r: CostRange) => {
   return s ? `?${s}` : '';
 };
 
-export async function fetchCustomerCosts(token: string, range: CostRange): Promise<CustomerCostsResponse> {
-  const res = await fetchWithAuth(token, `${API}/ai-costs/customers${query(range)}`);
-  await throwOnError(res, 'Could not load AI costs');
-  return res.json() as Promise<CustomerCostsResponse>;
-}
-
 export async function fetchCustomerCost(
   token: string,
   customerId: number,

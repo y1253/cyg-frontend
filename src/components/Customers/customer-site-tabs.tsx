@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Coins, CreditCard, Lightbulb, Mail, MessageSquareText, Phone, PhoneCall, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
+import { Coins, CreditCard, Lightbulb, Mail, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's sections, in `?tab=` order (`CustomerSiteShell`). */
 export type CustomerSiteTab =
@@ -13,8 +13,7 @@ export type CustomerSiteTab =
   | 'pricing'
   | 'promo'
   | 'payments'
-  | 'costs'
-  | 'phone-costs';
+  | 'costs';
 
 export const CUSTOMER_SITE_TABS: {
   key: CustomerSiteTab;
@@ -84,14 +83,8 @@ export const CUSTOMER_SITE_TABS: {
   },
   {
     key: 'costs',
-    label: 'AI costs',
+    label: 'Costs',
     icon: <Coins size={15} />,
-    blurb: 'What each customer costs us in OpenAI — every AI call with its tokens and price, and the price of each model.',
-  },
-  {
-    key: 'phone-costs',
-    label: 'Phone & text costs',
-    icon: <PhoneCall size={15} />,
-    blurb: 'What each customer costs us in SignalWire and WhatsApp — every text, WhatsApp and call with its price, and each provider’s prices.',
+    blurb: 'What each customer costs us — AI, texts, WhatsApp and calls — with every provider’s prices.',
   },
 ];
