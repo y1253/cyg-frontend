@@ -6,7 +6,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 export interface AiInstruction {
   id: number;
   key: string;
-  /** ASSISTANT | ATTACHMENT_READER | MATCHER | STATEMENT_READER | PRODUCT_CATEGORIZER | BANK_FEED_CATEGORIZER */
+  /** ASSISTANT | ATTACHMENT_READER | MATCHER | STATEMENT_READER | PRODUCT_CATEGORIZER | BANK_FEED_CATEGORIZER | SALES */
   target: string;
   title: string;
   text: string;

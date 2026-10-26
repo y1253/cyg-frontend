@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Loader2, Phone, PhoneOff } from 'lucide-react';
+import { Check, Loader2, Megaphone, Phone, PhoneOff } from 'lucide-react';
 import type { AiVoiceOption, CustomerVoice } from '@/api/customerVoice';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -72,7 +72,7 @@ function VoiceForm({ v }: { v: CustomerVoice }) {
             <p className="font-semibold">{v.enabled ? 'The AI answers calls' : 'The AI phone is off'}</p>
             <p className="text-sm text-muted-foreground">
               {v.enabled
-                ? `Customers who call ${v.numbers.length ? v.numbers.join(', ') : 'a receipt number'} from the phone on their account talk to the AI assistant. Unknown callers are told to create an account.`
+                ? `Customers who call ${v.numbers.length ? v.numbers.join(', ') : 'a receipt number'} from the phone on their account talk to the AI assistant. ${v.salesEnabled ? 'Callers with no account talk to the AI salesperson.' : 'Unknown callers are texted a sign-up offer.'}`
                 : 'Receipt numbers answer "this number only accepts text messages", and no scheduled message calls anyone.'}
             </p>
           </div>
@@ -86,6 +86,8 @@ function VoiceForm({ v }: { v: CustomerVoice }) {
           </Button>
         </CardContent>
       </Card>
+
+      <SalespersonCard v={v} />
 
       <form onSubmit={submit}>
         <Card>
@@ -176,5 +178,45 @@ function VoiceForm({ v }: { v: CustomerVoice }) {
         </Card>
       </form>
     </div>
+  );
+}
+
+/**
+ * step12f: the AI salesperson. On = a phone with no account that texts, WhatsApps or calls a
+ * receipt number gets a real conversation that tries to sign them up — only inside the thread
+ * or call THEY started (it never calls or texts first). Sign-up stays the texted "Reply YES".
+ * Off = the fixed sign-up offer. Its conversations are on the Prospects tab.
+ */
+function SalespersonCard({ v }: { v: CustomerVoice }) {
+  const save = useUpdateCustomerVoice();
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-center gap-4 py-5">
+        <span
+          className={cn(
+            'flex size-10 items-center justify-center rounded-xl',
+            v.salesEnabled ? 'bg-indigo-50 text-indigo-700' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          <Megaphone size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">{v.salesEnabled ? 'The AI salesperson is on' : 'The AI salesperson is off'}</p>
+          <p className="text-sm text-muted-foreground">
+            {v.salesEnabled
+              ? `Anyone without an account who texts or WhatsApps a receipt number gets a real conversation about CYG Finance and is offered to sign up${v.enabled ? ', and callers talk to it on the phone' : ' (turn the AI phone on for calls too)'}. It only answers — it never calls or texts anyone first.`
+              : 'People without an account get the fixed "Reply YES to open an account" text.'}
+          </p>
+        </div>
+        <Button
+          variant={v.salesEnabled ? 'outline' : 'default'}
+          disabled={save.isPending}
+          onClick={() => save.mutate({ salesEnabled: !v.salesEnabled })}
+        >
+          {save.isPending && <Loader2 size={15} className="animate-spin" />}
+          {v.salesEnabled ? 'Turn off' : 'Turn on'}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

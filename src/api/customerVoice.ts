@@ -6,6 +6,8 @@ export type AiLanguageOption = { id: string; label: string };
 
 export type CustomerVoice = {
   enabled: boolean;
+  /** step12f: phones with no account (text, WhatsApp, call) talk to the AI salesperson. */
+  salesEnabled: boolean;
   voice: string;
   /** null = the generated "Hi <first name>…". */
   greeting: string | null;
@@ -19,7 +21,7 @@ export type CustomerVoice = {
   numbers: string[];
 };
 
-export type CustomerVoiceChange = Partial<Pick<CustomerVoice, 'enabled' | 'voice' | 'greeting' | 'maxMinutes' | 'language'>>;
+export type CustomerVoiceChange = Partial<Pick<CustomerVoice, 'enabled' | 'salesEnabled' | 'voice' | 'greeting' | 'maxMinutes' | 'language'>>;
 
 const URL = '/api/customer-voice';
 

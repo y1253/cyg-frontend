@@ -141,5 +141,6 @@ export const FEATURE_LABEL: Record<string, string> = {
   BANK_ROWS: 'Categorizing bank-feed rows',
   VOICE: 'AI phone calls',
   SCHEDULE: 'Scheduled messages',
+  SALES: 'AI salesperson (no account)',
   OTHER: 'Other',
 };

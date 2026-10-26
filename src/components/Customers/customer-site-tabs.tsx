@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Coins, CreditCard, Inbox, Lightbulb, Mail, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
+import { Coins, CreditCard, Inbox, Lightbulb, Mail, Megaphone, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's pages, by `?tab=` key (`CustomerSiteShell`). */
 export type CustomerSiteTab =
@@ -10,6 +10,7 @@ export type CustomerSiteTab =
   | 'instructions'
   | 'requests'
   | 'voice'
+  | 'prospects'
   | 'pricing'
   | 'promo'
   | 'payments'
@@ -50,6 +51,12 @@ export const CUSTOMER_SITE_TABS: {
     label: 'Phone',
     icon: <Phone size={14} />,
     blurb: 'Customers can call the receipt numbers and talk to the AI assistant — pick its voice here.',
+  },
+  {
+    key: 'prospects',
+    label: 'Prospects',
+    icon: <Megaphone size={14} />,
+    blurb: 'People with no account who texted or called — what the AI salesperson told them, and who signed up.',
   },
   {
     key: 'numbers',
@@ -102,7 +109,7 @@ export const CUSTOMER_SITE_GROUPS: {
   tabs: CustomerSiteTab[];
 }[] = [
   { key: 'customers', label: 'Customers', icon: <Users2 size={15} />, tabs: ['customers'] },
-  { key: 'ai', label: 'AI assistant', icon: <Sparkles size={15} />, tabs: ['ai', 'instructions', 'requests', 'voice'] },
+  { key: 'ai', label: 'AI assistant', icon: <Sparkles size={15} />, tabs: ['ai', 'instructions', 'requests', 'voice', 'prospects'] },
   { key: 'inbound', label: 'Inbound', icon: <Inbox size={15} />, tabs: ['numbers', 'inbox'] },
   { key: 'money', label: 'Money', icon: <Coins size={15} />, tabs: ['pricing', 'promo', 'payments', 'costs'] },
 ];

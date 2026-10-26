@@ -19,6 +19,7 @@ import { AiInstructionsPanel } from './ai/AiInstructionsPanel';
 import { AiRulesPanel } from './ai/AiRulesPanel';
 import { FeatureRequestsPanel } from './requests/FeatureRequestsPanel';
 import { VoicePanel } from './voice/VoicePanel';
+import { ProspectsPanel } from './prospects/ProspectsPanel';
 import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
 import { PricingPanel } from './billing/PricingPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
@@ -61,6 +62,7 @@ export function CustomersPage() {
       {tab === 'instructions' && <AiInstructionsPanel />}
       {tab === 'requests' && <FeatureRequestsPanel />}
       {tab === 'voice' && <VoicePanel />}
+      {tab === 'prospects' && <ProspectsPanel />}
       {tab === 'pricing' && <PricingPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}

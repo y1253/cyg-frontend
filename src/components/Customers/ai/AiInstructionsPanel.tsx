@@ -23,6 +23,7 @@ const TARGET_LABELS: Record<string, string> = {
   STATEMENT_READER: 'Reading statements',
   PRODUCT_CATEGORIZER: 'Receipt item categories',
   BANK_FEED_CATEGORIZER: 'Bank-feed categories',
+  SALES: 'Salesperson (people with no account)',
 };
 
 const VERDICT: Record<EscalationVerdict, { label: string; className: string }> = {
