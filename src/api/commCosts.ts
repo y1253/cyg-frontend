@@ -151,6 +151,7 @@ export const PURPOSE_LABEL: Record<string, string> = {
   SCHEDULE: 'Scheduled reports',
   AI_SCHEDULE: 'AI schedules',
   SIGNUP_OFFER: 'Sign-up offers',
+  SALES_TEXT: 'Salesperson texts on calls',
   CONTACT_RELAY: 'Contact replies relayed',
   INTAKE: 'Received from the customer',
   STRONG_AI: 'Strong AI follow-ups',
