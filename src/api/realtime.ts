@@ -27,6 +27,8 @@ export const REALTIME_TOPICS = [
   'assignments',
   /** This user's session was ended server-side. Only wakes the channel; see below. */
   'session',
+  /** step12: a company's AI agents were created or deleted. */
+  'agents',
 ] as const;
 
 export type RealtimeTopic = (typeof REALTIME_TOPICS)[number];

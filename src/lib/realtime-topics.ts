@@ -130,6 +130,10 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     // is refused (`fetchRealtime`), and the socket is closed with 4401.
     case 'session':
       return [];
+
+    // step12: an agent was created or deleted for this company.
+    case 'agents':
+      return perCompany('agents');
   }
 
   // An unrecognised topic is a NEWER SERVER talking to an older bundle — this is an
