@@ -2200,6 +2200,9 @@ export function CompanyDetailPage() {
   // can't be persisted) are still there when the user comes back. Companies whose
   // Communications tab is never opened mount nothing and make no Gmail calls.
   const [commVisited, setCommVisited] = useState(() => (getStoredUI().tab ?? 'tasks') === 'communications');
+  // The Agents tab is kept the same way (step11 part 2): an agent's live browser stream,
+  // its open chat and the steps seen so far survive a visit to another tab.
+  const [agentsVisited, setAgentsVisited] = useState(() => (getStoredUI().tab ?? 'tasks') === 'agents');
 
   // Every tab body renders into the one scroll container below, so its scrollTop is
   // clobbered by whichever tab is showing. Park each tab's offset on the way out and
@@ -2213,6 +2216,7 @@ export function CompanyDetailPage() {
   const handleTabChange = useCallback((next: Tab) => {
     if (contentRef.current) scrollByTab.current[tab] = contentRef.current.scrollTop;
     if (next === 'communications') setCommVisited(true);
+    if (next === 'agents') setAgentsVisited(true);
     setTab(next);
   }, [tab]);
 
@@ -2330,6 +2334,7 @@ export function CompanyDetailPage() {
     const g = getGlobalUI();
     setTab(s.tab ?? 'tasks');
     setCommVisited((s.tab ?? 'tasks') === 'communications');
+    setAgentsVisited((s.tab ?? 'tasks') === 'agents');
     scrollByTab.current = {};
     setTaskSort(g.taskSort ?? 'priority');
     setHeaderCollapsed(g.headerCollapsed ?? false);
@@ -2360,6 +2365,7 @@ export function CompanyDetailPage() {
     // step11: an agent's popup lands on the Agents tab (AgentsTab opens the chat).
     if (pendingOpen.scope === 'agent') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAgentsVisited(true);
       setTab('agents');
       return;
     }
@@ -3330,8 +3336,13 @@ export function CompanyDetailPage() {
           <CustomerRulesSection companyId={companyId} canEdit={isAdmin} />
         )}
 
-        {/* ── Agents tab (step12) ── */}
-        {tab === 'agents' && <AgentsTab companyId={companyId} canEdit={isAdmin} />}
+        {/* ── Agents tab (step12; kept mounted once visited, like Communications below —
+            the live browser stream keeps running while another tab is open) ── */}
+        {agentsVisited && (
+          <div className={tab === 'agents' ? 'contents' : 'hidden'}>
+            <AgentsTab key={companyId} companyId={companyId} canEdit={isAdmin} />
+          </div>
+        )}
 
         {/* ── Schedules tab ── */}
         {tab === 'schedules' && (

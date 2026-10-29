@@ -284,6 +284,10 @@ function AgentDetail({
   onTab: (tab: DetailTab) => void;
 }) {
   const isManager = agent.role === 'MANAGER';
+  // The Browser panel stays mounted once opened (hidden on the other tabs), so its live
+  // stream and the steps seen so far survive a look at the chat or the work log.
+  const [browserSeen, setBrowserSeen] = useState(tab === 'browser');
+  if (tab === 'browser' && !browserSeen) setBrowserSeen(true);
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
     ...(isManager ? [] : [{ key: 'browser' as const, label: 'Browser' }]),
@@ -322,8 +326,10 @@ function AgentDetail({
         {tab === 'chat' && (
           <AgentChatPanel companyId={companyId} agentId={agent.id} agentName={agent.name} />
         )}
-        {tab === 'browser' && !isManager && (
-          <AgentBrowserPanel companyId={companyId} agentId={agent.id} />
+        {browserSeen && !isManager && (
+          <div className={tab === 'browser' ? undefined : 'hidden'}>
+            <AgentBrowserPanel companyId={companyId} agentId={agent.id} />
+          </div>
         )}
         {tab === 'rules' &&
           canManage &&
