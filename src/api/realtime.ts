@@ -31,6 +31,8 @@ export const REALTIME_TOPICS = [
   'agents',
   /** step12: a message in a staff <-> agent chat. */
   'agent-messages',
+  /** step11: an agent wrote to staff — carries the popup (`lib/agent-notify-bus.ts`). */
+  'agent-notify',
 ] as const;
 
 export type RealtimeTopic = (typeof REALTIME_TOPICS)[number];

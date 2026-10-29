@@ -20,7 +20,13 @@ export const SW_MESSAGE_SOURCE = 'cyg-call-action';
  * window on it), and the page turns it into navigation. See `showDesktopNotification`.
  */
 export type NotificationRoute =
-  | { kind: 'company'; companyId: number; tab: 'messages' | 'communications' }
+  | {
+      kind: 'company';
+      companyId: number;
+      tab: 'messages' | 'communications' | 'agents';
+      /** step11: with tab 'agents' — whose chat to open. */
+      agentId?: number;
+    }
   | { kind: 'dashboard' };
 
 export function notificationsSupported(): boolean {

@@ -180,7 +180,9 @@ export type OpenRequest =
       target:
         | { kind: 'message'; threadId: number; messageId: number }
         | { kind: 'call'; sid: string };
-    };
+    }
+  /** step11: an agent's chat, from its popup. Opens the company's Agents tab on it. */
+  | { scope: 'agent'; companyId: number; agentId: number };
 
 /** An `OpenRequest` stamped with a sequence number so a repeat click is not a no-op. */
 export type PendingOpen = OpenRequest & { seq: number };

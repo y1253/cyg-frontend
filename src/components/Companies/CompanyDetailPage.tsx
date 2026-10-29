@@ -2357,7 +2357,12 @@ export function CompanyDetailPage() {
     // during render instead would snap back to the previous tab the moment the
     // Communications tab consumed and cleared the request. The `[companyId]` effect above
     // has the same shape for the same reason.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // step11: an agent's popup lands on the Agents tab (AgentsTab opens the chat).
+    if (pendingOpen.scope === 'agent') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab('agents');
+      return;
+    }
     setCommVisited(true);
     setTab('communications');
   }, [pendingOpen, companyId]);

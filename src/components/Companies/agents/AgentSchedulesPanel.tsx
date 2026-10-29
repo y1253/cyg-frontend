@@ -41,7 +41,7 @@ function fmt(iso: string | null) {
 
 /**
  * step12: what an agent does on its own clock ("every Monday at 9:00, check the bank
- * feeds"). Times are Toronto time. Kept and run by the agents server.
+ * feeds"). Times are New York time. Kept and run by the agents server.
  */
 export function AgentSchedulesPanel({
   companyId,
@@ -57,7 +57,7 @@ export function AgentSchedulesPanel({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        Work the agent starts on its own, at a time you set (Toronto time).
+        Work the agent starts on its own, at a time you set (New York time).
       </p>
 
       {schedules.isLoading ? (

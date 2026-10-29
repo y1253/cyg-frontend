@@ -139,6 +139,11 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     // step12: a message in a staff <-> agent chat.
     case 'agent-messages':
       return perCompany('agent-messages');
+
+    // step11: the popup is raised from the payload (useRealtime → agent-notify-bus); the
+    // chat and the list refresh like any agent message.
+    case 'agent-notify':
+      return perCompany('agent-messages', 'agents');
   }
 
   // An unrecognised topic is a NEWER SERVER talking to an older bundle — this is an

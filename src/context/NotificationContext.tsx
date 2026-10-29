@@ -33,6 +33,7 @@ import {
 } from '@/hooks/useNewMessageNotifier';
 import { writePendingCommSelection } from '@/components/Companies/communications/useCommUiState';
 import type { OpenRequest, PendingOpen } from '@/components/Layout/unread-feed';
+import { agentNoticeTitle, onAgentNotice } from '@/lib/agent-notify-bus';
 
 const PREFS_KEY = 'cyg-notify';
 
@@ -401,7 +402,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   /** Focus this window and land on a company page, on the tab that has the message. */
   const openCompany = useCallback(
-    (companyId: number, tab: 'messages' | 'communications') => {
+    (companyId: number, tab: 'messages' | 'communications' | 'agents') => {
       // CompanyDetailPage seeds its active tab from this key on mount and re-reads it
       // when companyId changes, so writing it first is what makes the deep link land
       // on the right tab. Merge, don't overwrite — the same object holds other UI state.
@@ -438,7 +439,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setPendingOpen({ ...input, seq: ++openSeq.current });
       openCompany(
         input.companyId,
-        input.scope === 'internal' ? 'messages' : 'communications',
+        input.scope === 'internal'
+          ? 'messages'
+          : input.scope === 'agent'
+            ? 'agents'
+            : 'communications',
       );
     },
     [openCompany],
@@ -473,12 +478,45 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         navigate('/dashboard');
         return;
       }
+      if (route.tab === 'agents' && route.agentId) {
+        requestOpen({
+          scope: 'agent',
+          companyId: route.companyId,
+          agentId: route.agentId,
+        });
+        return;
+      }
       openCompany(route.companyId, route.tab);
     };
 
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-  }, [navigate, openCompany]);
+  }, [navigate, openCompany, requestOpen]);
+
+  // ── step11: an AI agent wrote to staff — pushed over the realtime channel ───
+  // `useRealtime` (inside SoftphoneProvider, which this provider wraps) hands the
+  // `agent-notify` payload over through `agent-notify-bus`. Every agent message pops up,
+  // the "what I did" lines too (the user's choice); a click opens that agent's chat.
+  useEffect(
+    () =>
+      onAgentNotice((n) => {
+        const open = { scope: 'agent' as const, companyId: n.companyId, agentId: n.agentId };
+        notifyPush({
+          source: `agent:${n.companyId}`,
+          title: agentNoticeTitle(n),
+          body: n.body,
+          tag: `cyg-agent-${n.agentId}`,
+          onClick: () => requestOpen(open),
+          route: {
+            kind: 'company',
+            companyId: n.companyId,
+            tab: 'agents',
+            agentId: n.agentId,
+          },
+        });
+      }),
+    [notifyPush, requestOpen],
+  );
 
   // ── Internal messages: instant, via the per-user stream ────────────────────
   const internalDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(

@@ -357,3 +357,61 @@ export function fetchAgentRun(
     'Failed to load the run',
   );
 }
+
+// ── What the agent learned (step11) ─────────────────────────────────────────
+
+export type LearningKind = 'RULE' | 'PROCEDURE' | 'FACT' | 'LESSON';
+
+/** One of the agent's own notes — written by the agent, read into every run. */
+export interface AgentLearning {
+  id: number;
+  kind: LearningKind;
+  text: string;
+  sourceScope: string | null;
+  sourceConversationId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function fetchAgentLearnings(
+  token: string,
+  companyId: number,
+  agentId: number,
+): Promise<AgentLearning[]> {
+  return get(
+    token,
+    `${base(companyId)}/${agentId}/learnings`,
+    'Failed to load what the agent learned',
+  );
+}
+
+export function updateAgentLearning(
+  token: string,
+  companyId: number,
+  agentId: number,
+  learningId: number,
+  text: string,
+): Promise<AgentLearning> {
+  return send(
+    token,
+    `${base(companyId)}/${agentId}/learnings/${learningId}`,
+    'PATCH',
+    { text },
+    'Failed to save the note',
+  );
+}
+
+export function deleteAgentLearning(
+  token: string,
+  companyId: number,
+  agentId: number,
+  learningId: number,
+): Promise<void> {
+  return send(
+    token,
+    `${base(companyId)}/${agentId}/learnings/${learningId}`,
+    'DELETE',
+    undefined,
+    'Failed to delete the note',
+  );
+}

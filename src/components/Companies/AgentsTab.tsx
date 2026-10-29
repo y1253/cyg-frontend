@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bot, Crown, MessageSquare, MonitorPlay, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,8 +20,10 @@ import { AgentChatPanel } from './agents/AgentChatPanel';
 import { AgentRulesPanel } from './agents/AgentRulesPanel';
 import { AgentSchedulesPanel } from './agents/AgentSchedulesPanel';
 import { AgentActivityPanel } from './agents/AgentActivityPanel';
+import { AgentLearningsPanel } from './agents/AgentLearningsPanel';
+import { useNotifications } from '@/context/NotificationContext';
 
-type DetailTab = 'chat' | 'rules' | 'schedules' | 'activity';
+type DetailTab = 'chat' | 'rules' | 'schedules' | 'learnings' | 'activity';
 
 /**
  * step12: the company's AI agents. The company manager (created with the first agent)
@@ -47,8 +49,21 @@ export function AgentsTab({
   const list = agents.data ?? [];
   const manager = list.find((a) => a.role === 'MANAGER') ?? null;
   const workers = list.filter((a) => a.role === 'WORKER');
-  const selected =
-    list.find((a) => a.id === selectedId) ?? (canEdit ? manager : null);
+  const selected = list.find((a) => a.id === selectedId) ?? manager;
+
+  // step11: an agent's popup was clicked — open that agent's chat, once per click.
+  const { pendingOpen, clearPendingOpen } = useNotifications();
+  const appliedSeq = useRef(0);
+  useEffect(() => {
+    if (!pendingOpen || pendingOpen.scope !== 'agent') return;
+    if (pendingOpen.companyId !== companyId) return;
+    if (appliedSeq.current === pendingOpen.seq) return;
+    appliedSeq.current = pendingOpen.seq;
+    // An external request channel (the popup), the case set-state-in-effect exempts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedId(pendingOpen.agentId);
+    clearPendingOpen();
+  }, [pendingOpen, companyId, clearPendingOpen]);
 
   const openCreate = () => {
     setEditing(null);
@@ -122,8 +137,13 @@ export function AgentsTab({
         </div>
       )}
 
-      {canEdit && selected && (
-        <AgentDetail key={selected.id} companyId={companyId} agent={selected} />
+      {selected && (
+        <AgentDetail
+          key={selected.id}
+          companyId={companyId}
+          agent={selected}
+          canManage={canEdit}
+        />
       )}
 
       <Card className="border-dashed">
@@ -188,12 +208,12 @@ function AgentRow({
             <p className="truncate text-xs text-muted-foreground">{a.description}</p>
           )}
         </div>
+        <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onSelect}>
+          <MessageSquare className="mr-1 size-4" />
+          {isManager ? 'Company chat' : 'Open'}
+        </Button>
         {canEdit && (
           <>
-            <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onSelect}>
-              <MessageSquare className="mr-1 size-4" />
-              {isManager ? 'Company chat' : 'Open'}
-            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -219,13 +239,30 @@ function AgentRow({
   );
 }
 
-function AgentDetail({ companyId, agent }: { companyId: number; agent: Agent }) {
+/**
+ * One agent: its chat (everyone who can see the company — they are the ones it notifies),
+ * its work log, and for management its rules, schedules and what it learned.
+ */
+function AgentDetail({
+  companyId,
+  agent,
+  canManage,
+}: {
+  companyId: number;
+  agent: Agent;
+  canManage: boolean;
+}) {
   const isManager = agent.role === 'MANAGER';
   const [tab, setTab] = useState<DetailTab>('chat');
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
-    { key: 'rules', label: isManager ? 'Company rules' : 'Rules' },
-    ...(isManager ? [] : [{ key: 'schedules' as const, label: 'Schedules' }]),
+    ...(canManage
+      ? [
+          { key: 'rules' as const, label: isManager ? 'Company rules' : 'Rules' },
+          ...(isManager ? [] : [{ key: 'schedules' as const, label: 'Schedules' }]),
+          { key: 'learnings' as const, label: 'What it learned' },
+        ]
+      : []),
     { key: 'activity', label: 'Work log' },
   ];
 
@@ -255,6 +292,7 @@ function AgentDetail({ companyId, agent }: { companyId: number; agent: Agent }) 
           <AgentChatPanel companyId={companyId} agentId={agent.id} agentName={agent.name} />
         )}
         {tab === 'rules' &&
+          canManage &&
           (isManager ? (
             <AgentRulesPanel
               companyId={companyId}
@@ -268,8 +306,11 @@ function AgentDetail({ companyId, agent }: { companyId: number; agent: Agent }) 
               intro={`Rules for ${agent.name} only, on top of the company's rules.`}
             />
           ))}
-        {tab === 'schedules' && !isManager && (
+        {tab === 'schedules' && canManage && !isManager && (
           <AgentSchedulesPanel companyId={companyId} agentId={agent.id} />
+        )}
+        {tab === 'learnings' && canManage && (
+          <AgentLearningsPanel companyId={companyId} agentId={agent.id} />
         )}
         {tab === 'activity' && <AgentActivityPanel companyId={companyId} agentId={agent.id} />}
       </CardContent>

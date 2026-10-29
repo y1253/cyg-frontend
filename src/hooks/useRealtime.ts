@@ -13,6 +13,7 @@ import { handleUnauthorized } from '@/api/client';
 import type { IncomingCallPayload } from '@/api/phone';
 import { RESET_KEYS, keysFor } from '@/lib/realtime-topics';
 import { setRealtimeConnected } from '@/lib/realtime-status';
+import { agentNoticeOf, emitAgentNotice } from '@/lib/agent-notify-bus';
 
 /** Backoff ceiling, matching `useInternalMessageStream`. */
 const MAX_BACKOFF_MS = 30_000;
@@ -99,6 +100,11 @@ export function useRealtime(
         // pair an INVITE rather than a hint to go and look.
         const call = callEventOf(event);
         if (call) handlerRef.current?.(call);
+        // step11: an agent wrote to staff — the event carries what the popup shows.
+        if (event.topic === 'agent-notify') {
+          const notice = agentNoticeOf(event.payload);
+          if (notice) emitAgentNotice(notice);
+        }
         invalidate(keysFor(event));
       }
     };
