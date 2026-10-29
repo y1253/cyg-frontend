@@ -42,6 +42,9 @@ export interface Agent {
   approvalMode: ApprovalMode;
   /** Open todos this agent is on. */
   openTodos: number;
+  /** step11 part 2: its browser is open right now — staff can watch it live. */
+  onBrowser: boolean;
+  onBrowserSince: string | null;
   createdAt: string;
   createdBy: { id: number; name: string } | null;
 }
@@ -110,12 +113,21 @@ export interface AgentScheduleInput {
   enabled?: boolean;
 }
 
+/**
+ * step11 part 2: where a conversation line came from — CHAT = staff wrote (or answered),
+ * API = the internal app notified the agent, SCHEDULE = its own schedule. The agent's own
+ * lines carry the type of what woke the run.
+ */
+export type AgentMessageType = 'CHAT' | 'API' | 'SCHEDULE';
+
 export interface AgentRun {
   id: number;
   kind: 'CHAT' | 'TASK' | 'CHANNEL' | 'SCHEDULE';
+  type: AgentMessageType;
   title: string;
   todoId: number | null;
-  status: 'RUNNING' | 'WAITING' | 'DONE' | 'FAILED';
+  /** SKIPPED = written down, needed no work (another agent already has it). */
+  status: 'RUNNING' | 'WAITING' | 'DONE' | 'FAILED' | 'SKIPPED';
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -124,10 +136,12 @@ export interface AgentRun {
 export interface AgentRunDetail {
   id: number;
   kind: AgentRun['kind'];
+  type: AgentMessageType;
   title: string;
   status: AgentRun['status'];
   messages: {
     role: 'user' | 'assistant' | 'tool';
+    type: AgentMessageType;
     content: string | null;
     toolCalls?: { name: string; arguments: string }[];
   }[];
@@ -413,5 +427,81 @@ export function deleteAgentLearning(
     'DELETE',
     undefined,
     'Failed to delete the note',
+  );
+}
+
+// ── The agent's browser, live (step11 part 2) ───────────────────────────────
+
+/** A 60-second ticket to watch the agent's browser on the agents server. */
+export interface BrowserTicket {
+  wsUrl: string;
+  ticket: string;
+}
+
+export function fetchBrowserTicket(
+  token: string,
+  companyId: number,
+  agentId: number,
+): Promise<BrowserTicket> {
+  return send(
+    token,
+    `${base(companyId)}/${agentId}/browser/ticket`,
+    'POST',
+    {},
+    'Could not open the live browser',
+  );
+}
+
+/** One step the agent took on its browser. */
+export interface BrowserAction {
+  action: 'open' | 'click' | 'type' | 'press' | 'snapshot';
+  detail: string;
+  url: string | null;
+  at: string;
+}
+
+/** One stretch of the agent on its browser ("on web" → finished). */
+export interface BrowserSession {
+  id: number;
+  startedAt: string;
+  finishedAt: string | null;
+  actionCount: number;
+}
+
+export interface BrowserSessionDetail {
+  id: number;
+  startedAt: string;
+  finishedAt: string | null;
+  actions: {
+    id: number;
+    action: BrowserAction['action'];
+    detail: string;
+    url: string | null;
+    createdAt: string;
+  }[];
+}
+
+export function fetchBrowserSessions(
+  token: string,
+  companyId: number,
+  agentId: number,
+): Promise<BrowserSession[]> {
+  return get(
+    token,
+    `${base(companyId)}/${agentId}/browser-sessions`,
+    'Failed to load the browser sessions',
+  );
+}
+
+export function fetchBrowserSession(
+  token: string,
+  companyId: number,
+  agentId: number,
+  sessionId: number,
+): Promise<BrowserSessionDetail> {
+  return get(
+    token,
+    `${base(companyId)}/${agentId}/browser-sessions/${sessionId}`,
+    'Failed to load the browser session',
   );
 }

@@ -134,7 +134,8 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     // step12: an agent was created or deleted for this company.
     // Also when one takes or finishes a task: the Tasks tab shows who is on each todo.
     case 'agents':
-      return perCompany('agents', 'company', 'agent-activity');
+      // step11 part 2: also when an agent goes on / off its browser.
+      return perCompany('agents', 'company', 'agent-activity', 'agent-browser-sessions');
 
     // step12: a message in a staff <-> agent chat.
     case 'agent-messages':

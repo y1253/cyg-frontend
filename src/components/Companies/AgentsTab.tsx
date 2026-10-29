@@ -21,9 +21,10 @@ import { AgentRulesPanel } from './agents/AgentRulesPanel';
 import { AgentSchedulesPanel } from './agents/AgentSchedulesPanel';
 import { AgentActivityPanel } from './agents/AgentActivityPanel';
 import { AgentLearningsPanel } from './agents/AgentLearningsPanel';
+import { AgentBrowserPanel } from './agents/AgentBrowserPanel';
 import { useNotifications } from '@/context/NotificationContext';
 
-type DetailTab = 'chat' | 'rules' | 'schedules' | 'learnings' | 'activity';
+type DetailTab = 'chat' | 'browser' | 'rules' | 'schedules' | 'learnings' | 'activity';
 
 /**
  * step12: the company's AI agents. The company manager (created with the first agent)
@@ -45,6 +46,12 @@ export function AgentsTab({
   const [editing, setEditing] = useState<Agent | null>(null);
   const [toDelete, setToDelete] = useState<Agent | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Which part of the selected agent is open — here so "Watch live" can open the Browser.
+  const [tab, setTab] = useState<DetailTab>('chat');
+  const select = (id: number, next: DetailTab = 'chat') => {
+    setSelectedId(id);
+    setTab(next);
+  };
 
   const list = agents.data ?? [];
   const manager = list.find((a) => a.role === 'MANAGER') ?? null;
@@ -62,6 +69,7 @@ export function AgentsTab({
     // An external request channel (the popup), the case set-state-in-effect exempts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedId(pendingOpen.agentId);
+    setTab('chat');
     clearPendingOpen();
   }, [pendingOpen, companyId, clearPendingOpen]);
 
@@ -113,7 +121,7 @@ export function AgentsTab({
               agent={manager}
               selected={selected?.id === manager.id}
               canEdit={canEdit}
-              onSelect={() => setSelectedId(manager.id)}
+              onSelect={() => select(manager.id)}
               onEdit={() => openEdit(manager)}
               onDelete={workers.length === 0 ? () => setToDelete(manager) : undefined}
             />
@@ -124,7 +132,8 @@ export function AgentsTab({
               agent={a}
               selected={selected?.id === a.id}
               canEdit={canEdit}
-              onSelect={() => setSelectedId(a.id)}
+              onSelect={() => select(a.id)}
+              onWatch={() => select(a.id, 'browser')}
               onEdit={() => openEdit(a)}
               onDelete={() => setToDelete(a)}
             />
@@ -143,16 +152,10 @@ export function AgentsTab({
           companyId={companyId}
           agent={selected}
           canManage={canEdit}
+          tab={tab}
+          onTab={setTab}
         />
       )}
-
-      <Card className="border-dashed">
-        <CardContent className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
-          <MonitorPlay className="size-5 shrink-0" />
-          Live browser stream — coming soon. You will be able to watch each agent's browser
-          here.
-        </CardContent>
-      </Card>
 
       <AgentFormDialog
         companyId={companyId}
@@ -174,6 +177,7 @@ function AgentRow({
   selected,
   canEdit,
   onSelect,
+  onWatch,
   onEdit,
   onDelete,
 }: {
@@ -181,6 +185,8 @@ function AgentRow({
   selected: boolean;
   canEdit: boolean;
   onSelect: () => void;
+  /** step11 part 2: open this agent's live browser. Workers only (the manager has none). */
+  onWatch?: () => void;
   onEdit: () => void;
   onDelete?: () => void;
 }) {
@@ -198,6 +204,15 @@ function AgentRow({
             <span className="truncate font-medium">{a.name}</span>
             {isManager && <Badge variant="secondary">Company manager</Badge>}
             <Badge variant="outline">{approvalModeLabel(a.approvalMode)}</Badge>
+            {a.onBrowser && (
+              <Badge className="gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-800">
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                </span>
+                On browser
+              </Badge>
+            )}
             {a.openTodos > 0 && (
               <Badge variant="secondary">
                 {a.openTodos} open task{a.openTodos === 1 ? '' : 's'}
@@ -208,6 +223,17 @@ function AgentRow({
             <p className="truncate text-xs text-muted-foreground">{a.description}</p>
           )}
         </div>
+        {onWatch && a.onBrowser && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+            onClick={onWatch}
+          >
+            <MonitorPlay className="mr-1 size-4" />
+            Watch live
+          </Button>
+        )}
         <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onSelect}>
           <MessageSquare className="mr-1 size-4" />
           {isManager ? 'Company chat' : 'Open'}
@@ -241,21 +267,26 @@ function AgentRow({
 
 /**
  * One agent: its chat (everyone who can see the company — they are the ones it notifies),
- * its work log, and for management its rules, schedules and what it learned.
+ * its live browser (workers; step11 part 2), its work log, and for management its rules,
+ * schedules and what it learned.
  */
 function AgentDetail({
   companyId,
   agent,
   canManage,
+  tab,
+  onTab: setTab,
 }: {
   companyId: number;
   agent: Agent;
   canManage: boolean;
+  tab: DetailTab;
+  onTab: (tab: DetailTab) => void;
 }) {
   const isManager = agent.role === 'MANAGER';
-  const [tab, setTab] = useState<DetailTab>('chat');
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
+    ...(isManager ? [] : [{ key: 'browser' as const, label: 'Browser' }]),
     ...(canManage
       ? [
           { key: 'rules' as const, label: isManager ? 'Company rules' : 'Rules' },
@@ -290,6 +321,9 @@ function AgentDetail({
 
         {tab === 'chat' && (
           <AgentChatPanel companyId={companyId} agentId={agent.id} agentName={agent.name} />
+        )}
+        {tab === 'browser' && !isManager && (
+          <AgentBrowserPanel companyId={companyId} agentId={agent.id} />
         )}
         {tab === 'rules' &&
           canManage &&
