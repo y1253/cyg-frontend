@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { createAgent } from '@/api/agents';
+import { createAgent, type AgentInput } from '@/api/agents';
 
 export function useCreateAgent(companyId: number) {
   const { token } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => createAgent(token!, companyId, name),
+    mutationFn: (input: AgentInput) => createAgent(token!, companyId, input),
     onSettled: () => qc.invalidateQueries({ queryKey: ['agents', companyId] }),
   });
 }

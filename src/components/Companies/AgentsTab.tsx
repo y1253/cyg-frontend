@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, MonitorPlay, Plus, Trash2 } from 'lucide-react';
+import { Bot, Crown, MessageSquare, MonitorPlay, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -11,24 +11,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { useAgents } from '@/hooks/useAgents';
-import { useCreateAgent } from '@/hooks/useCreateAgent';
 import { useDeleteAgent } from '@/hooks/useDeleteAgent';
-import type { Agent } from '@/api/agents';
+import { approvalModeLabel, type Agent } from '@/api/agents';
+import { cn } from '@/lib/utils';
+import { AgentFormDialog } from './agents/AgentFormDialog';
+import { AgentChatPanel } from './agents/AgentChatPanel';
+import { AgentRulesPanel } from './agents/AgentRulesPanel';
+import { AgentSchedulesPanel } from './agents/AgentSchedulesPanel';
+import { AgentActivityPanel } from './agents/AgentActivityPanel';
 
-function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
+type DetailTab = 'chat' | 'rules' | 'schedules' | 'activity';
 
 /**
- * step12: the company's AI agents. Each one is registered on the agents server and reads
- * this company with its own token. Management creates and deletes them; deleting revokes
- * the token at once. The live browser stream comes in a later step.
+ * step12: the company's AI agents. The company manager (created with the first agent)
+ * hands every due task and every new email, text, WhatsApp and call to the right worker;
+ * the workers do the work, through the internal API and their own browser. Staff talk to
+ * each one in its chat — the manager's is the company chat — and set when it must ask
+ * first (its approval mode), its rules and its schedules. Management only, except the
+ * list itself.
  */
 export function AgentsTab({
   companyId,
@@ -38,21 +39,38 @@ export function AgentsTab({
   canEdit: boolean;
 }) {
   const agents = useAgents(companyId);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Agent | null>(null);
   const [toDelete, setToDelete] = useState<Agent | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const list = agents.data ?? [];
+  const manager = list.find((a) => a.role === 'MANAGER') ?? null;
+  const workers = list.filter((a) => a.role === 'WORKER');
+  const selected =
+    list.find((a) => a.id === selectedId) ?? (canEdit ? manager : null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+  const openEdit = (a: Agent) => {
+    setEditing(a);
+    setFormOpen(true);
+  };
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <div className="flex max-w-4xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Agents</h2>
           <p className="text-sm text-muted-foreground">
-            AI agents working on this company. They can read its details, tasks and
-            communications.
+            AI agents working on this company: its due tasks, emails, texts, WhatsApp and
+            calls. The company manager hands each one to the right agent.
           </p>
         </div>
         {canEdit && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1 size-4" />
             Create agent
           </Button>
@@ -63,48 +81,49 @@ export function AgentsTab({
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : agents.isError ? (
         <p className="text-sm text-destructive">{(agents.error as Error).message}</p>
-      ) : !agents.data?.length ? (
+      ) : list.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <Bot className="size-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
               No agents yet.
-              {canEdit ? ' Create one to start.' : ''}
+              {canEdit ? ' Create one to start — a company manager comes with it.' : ''}
             </p>
           </CardContent>
         </Card>
       ) : (
         <div className="flex flex-col gap-2">
-          {agents.data.map((a) => (
-            <Card key={a.id}>
-              <CardContent className="flex items-center gap-3 py-3">
-                <Bot className="size-5 shrink-0 text-[#3BBFB4]" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate font-medium">{a.name}</span>
-                    {a.remoteAgentId != null && (
-                      <Badge variant="secondary">Agent #{a.remoteAgentId}</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Created {fmtDateTime(a.createdAt)}
-                    {a.createdBy ? ` by ${a.createdBy.name}` : ''}
-                  </p>
-                </div>
-                {canEdit && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Delete ${a.name}`}
-                    onClick={() => setToDelete(a)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+          {manager && (
+            <AgentRow
+              agent={manager}
+              selected={selected?.id === manager.id}
+              canEdit={canEdit}
+              onSelect={() => setSelectedId(manager.id)}
+              onEdit={() => openEdit(manager)}
+              onDelete={workers.length === 0 ? () => setToDelete(manager) : undefined}
+            />
+          )}
+          {workers.map((a) => (
+            <AgentRow
+              key={a.id}
+              agent={a}
+              selected={selected?.id === a.id}
+              canEdit={canEdit}
+              onSelect={() => setSelectedId(a.id)}
+              onEdit={() => openEdit(a)}
+              onDelete={() => setToDelete(a)}
+            />
           ))}
+          {manager && workers.length === 0 && (
+            <p className="text-xs text-amber-700">
+              The manager only hands out work — create an agent to do it.
+            </p>
+          )}
         </div>
+      )}
+
+      {canEdit && selected && (
+        <AgentDetail key={selected.id} companyId={companyId} agent={selected} />
       )}
 
       <Card className="border-dashed">
@@ -115,10 +134,11 @@ export function AgentsTab({
         </CardContent>
       </Card>
 
-      <CreateAgentDialog
+      <AgentFormDialog
         companyId={companyId}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
+        agent={editing}
+        open={formOpen}
+        onOpenChange={setFormOpen}
       />
       <DeleteAgentDialog
         companyId={companyId}
@@ -129,68 +149,131 @@ export function AgentsTab({
   );
 }
 
-function CreateAgentDialog({
-  companyId,
-  open,
-  onOpenChange,
+function AgentRow({
+  agent: a,
+  selected,
+  canEdit,
+  onSelect,
+  onEdit,
+  onDelete,
 }: {
-  companyId: number;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  agent: Agent;
+  selected: boolean;
+  canEdit: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete?: () => void;
 }) {
-  const create = useCreateAgent(companyId);
-  const [name, setName] = useState('');
+  const isManager = a.role === 'MANAGER';
+  return (
+    <Card className={cn(selected && 'ring-2 ring-[#3BBFB4]')}>
+      <CardContent className="flex items-center gap-3 py-3">
+        {isManager ? (
+          <Crown className="size-5 shrink-0 text-amber-500" />
+        ) : (
+          <Bot className="size-5 shrink-0 text-[#3BBFB4]" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate font-medium">{a.name}</span>
+            {isManager && <Badge variant="secondary">Company manager</Badge>}
+            <Badge variant="outline">{approvalModeLabel(a.approvalMode)}</Badge>
+            {a.openTodos > 0 && (
+              <Badge variant="secondary">
+                {a.openTodos} open task{a.openTodos === 1 ? '' : 's'}
+              </Badge>
+            )}
+          </div>
+          {a.description && !isManager && (
+            <p className="truncate text-xs text-muted-foreground">{a.description}</p>
+          )}
+        </div>
+        {canEdit && (
+          <>
+            <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onSelect}>
+              <MessageSquare className="mr-1 size-4" />
+              {isManager ? 'Company chat' : 'Open'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Edit ${a.name}`}
+              onClick={onEdit}
+            >
+              <Pencil className="size-4" />
+            </Button>
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Delete ${a.name}`}
+                onClick={onDelete}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
-  const close = (next: boolean) => {
-    if (!next) {
-      setName('');
-      create.reset();
-    }
-    onOpenChange(next);
-  };
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    create.mutate(trimmed, { onSuccess: () => close(false) });
-  };
+function AgentDetail({ companyId, agent }: { companyId: number; agent: Agent }) {
+  const isManager = agent.role === 'MANAGER';
+  const [tab, setTab] = useState<DetailTab>('chat');
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
+    { key: 'rules', label: isManager ? 'Company rules' : 'Rules' },
+    ...(isManager ? [] : [{ key: 'schedules' as const, label: 'Schedules' }]),
+    { key: 'activity', label: 'Work log' },
+  ];
 
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <DialogContent>
-        <form onSubmit={submit} className="flex flex-col gap-4">
-          <DialogHeader>
-            <DialogTitle>Create agent</DialogTitle>
-            <DialogDescription>
-              The agent is set up on the agents server with access to this company's data.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="agent-name">Name</Label>
-            <Input
-              id="agent-name"
-              value={name}
-              maxLength={191}
-              autoFocus
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Bookkeeping assistant"
+    <Card>
+      <CardContent className="flex flex-col gap-3 py-4">
+        <div className="flex flex-wrap items-center gap-1 border-b pb-2">
+          <span className="mr-2 text-sm font-semibold">{agent.name}</span>
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'rounded-md px-3 py-1 text-sm transition-colors',
+                tab === t.key
+                  ? 'bg-[#3BBFB4]/15 font-medium text-teal-900'
+                  : 'text-muted-foreground hover:bg-muted',
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'chat' && (
+          <AgentChatPanel companyId={companyId} agentId={agent.id} agentName={agent.name} />
+        )}
+        {tab === 'rules' &&
+          (isManager ? (
+            <AgentRulesPanel
+              companyId={companyId}
+              agentId={null}
+              intro="Rules for this company. Every agent of the company follows them, and they override the firm's general instructions."
             />
-          </div>
-          {create.isError && (
-            <p className="text-sm text-destructive">{(create.error as Error).message}</p>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => close(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!name.trim() || create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          ) : (
+            <AgentRulesPanel
+              companyId={companyId}
+              agentId={agent.id}
+              intro={`Rules for ${agent.name} only, on top of the company's rules.`}
+            />
+          ))}
+        {tab === 'schedules' && !isManager && (
+          <AgentSchedulesPanel companyId={companyId} agentId={agent.id} />
+        )}
+        {tab === 'activity' && <AgentActivityPanel companyId={companyId} agentId={agent.id} />}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -219,7 +302,8 @@ function DeleteAgentDialog({
         <DialogHeader>
           <DialogTitle>Delete {agent?.name}?</DialogTitle>
           <DialogDescription>
-            Its access to this company stops at once. This cannot be undone.
+            Its access to this company stops at once and its open tasks go back to nobody.
+            This cannot be undone.
           </DialogDescription>
         </DialogHeader>
         {del.isError && (

@@ -4,7 +4,7 @@ import { CustomerRulesSection } from './CustomerRulesSection';
 import { AgentsTab } from './AgentsTab';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, Ban, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, GripVertical, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
+import { Archive, Ban, Bot, CalendarIcon, ChevronDown, ChevronUp, Eye, EyeOff, ExternalLink, GripHorizontal, GripVertical, Pencil, Plus, Power, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import {
   DndContext,
@@ -449,6 +449,15 @@ function TodoRow({
               {!todo.resolved && badge.label && (
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${badge.className}`}>
                   {(tier === 'overdue' || tier === 'urgent') && todo.dueDate ? overdueLabel(todo.dueDate) : badge.label}
+                </span>
+              )}
+              {todo.assignedAgent && (
+                <span
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-[#3BBFB4]/10 text-teal-800 border-[#3BBFB4]/40"
+                  title={todo.resolved ? `Done by ${todo.assignedAgent.name}` : `${todo.assignedAgent.name} is on it`}
+                >
+                  <Bot className="size-3" />
+                  {todo.assignedAgent.name}
                 </span>
               )}
             </div>

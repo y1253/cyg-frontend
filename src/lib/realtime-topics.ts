@@ -132,8 +132,13 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
       return [];
 
     // step12: an agent was created or deleted for this company.
+    // Also when one takes or finishes a task: the Tasks tab shows who is on each todo.
     case 'agents':
-      return perCompany('agents');
+      return perCompany('agents', 'company', 'agent-activity');
+
+    // step12: a message in a staff <-> agent chat.
+    case 'agent-messages':
+      return perCompany('agent-messages');
   }
 
   // An unrecognised topic is a NEWER SERVER talking to an older bundle — this is an

@@ -50,6 +50,8 @@ export interface TodoItem {
   resolvedAt: string | null;
   snoozedUntil: string | null;
   task: { id: number; title: string; description: string | null; isSnoozable: boolean; orderNumber: number | null };
+  /** step12: the AI agent working on it (or that did it). */
+  assignedAgent?: { id: number; name: string } | null;
 }
 
 export interface CompanyDetail {
