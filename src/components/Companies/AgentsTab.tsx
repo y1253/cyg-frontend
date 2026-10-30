@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Crown, MessageSquare, MonitorPlay, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Bot, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -13,26 +12,20 @@ import {
 } from '@/components/ui/dialog';
 import { useAgents } from '@/hooks/useAgents';
 import { useDeleteAgent } from '@/hooks/useDeleteAgent';
-import { approvalModeLabel, type Agent } from '@/api/agents';
-import { cn } from '@/lib/utils';
+import type { Agent } from '@/api/agents';
 import { AgentFormDialog } from './agents/AgentFormDialog';
-import { AgentChatPanel } from './agents/AgentChatPanel';
-import { AgentRulesPanel } from './agents/AgentRulesPanel';
-import { AgentSchedulesPanel } from './agents/AgentSchedulesPanel';
-import { AgentActivityPanel } from './agents/AgentActivityPanel';
-import { AgentLearningsPanel } from './agents/AgentLearningsPanel';
-import { AgentBrowserPanel } from './agents/AgentBrowserPanel';
+import { AgentCard } from './agents/AgentCard';
+import { AgentView } from './agents/AgentView';
 import { useNotifications } from '@/context/NotificationContext';
-
-type DetailTab = 'chat' | 'browser' | 'rules' | 'schedules' | 'learnings' | 'activity';
 
 /**
  * step12: the company's AI agents. The company manager (created with the first agent)
  * hands every due task and every new email, text, WhatsApp and call to the right worker;
- * the workers do the work, through the internal API and their own browser. Staff talk to
- * each one in its chat — the manager's is the company chat — and set when it must ask
- * first (its approval mode), its rules and its schedules. Management only, except the
- * list itself.
+ * the workers do the work, through the internal API and their own browser.
+ *
+ * step11 redesign (2026-10-30): two screens. The LIST shows one card per agent; clicking
+ * one opens that agent ALONE — its chat on one side and, with the Live view switch on
+ * (the default), its browser streaming on the other — with Back to return to the list.
  */
 export function AgentsTab({
   companyId,
@@ -46,19 +39,14 @@ export function AgentsTab({
   const [editing, setEditing] = useState<Agent | null>(null);
   const [toDelete, setToDelete] = useState<Agent | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  // Which part of the selected agent is open — here so "Watch live" can open the Browser.
-  const [tab, setTab] = useState<DetailTab>('chat');
-  const select = (id: number, next: DetailTab = 'chat') => {
-    setSelectedId(id);
-    setTab(next);
-  };
 
   const list = agents.data ?? [];
   const manager = list.find((a) => a.role === 'MANAGER') ?? null;
   const workers = list.filter((a) => a.role === 'WORKER');
-  const selected = list.find((a) => a.id === selectedId) ?? manager;
+  // A deleted agent simply drops back to the list.
+  const selected = list.find((a) => a.id === selectedId) ?? null;
 
-  // step11: an agent's popup was clicked — open that agent's chat, once per click.
+  // step11: an agent's popup was clicked — open that agent, once per click.
   const { pendingOpen, clearPendingOpen } = useNotifications();
   const appliedSeq = useRef(0);
   useEffect(() => {
@@ -69,7 +57,6 @@ export function AgentsTab({
     // An external request channel (the popup), the case set-state-in-effect exempts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedId(pendingOpen.agentId);
-    setTab('chat');
     clearPendingOpen();
   }, [pendingOpen, companyId, clearPendingOpen]);
 
@@ -82,14 +69,46 @@ export function AgentsTab({
     setFormOpen(true);
   };
 
+  const dialogs = (
+    <>
+      <AgentFormDialog
+        companyId={companyId}
+        agent={editing}
+        open={formOpen}
+        onOpenChange={setFormOpen}
+      />
+      <DeleteAgentDialog
+        companyId={companyId}
+        agent={toDelete}
+        onClose={() => setToDelete(null)}
+      />
+    </>
+  );
+
+  if (selected) {
+    return (
+      <>
+        <AgentView
+          key={selected.id}
+          companyId={companyId}
+          agent={selected}
+          canManage={canEdit}
+          onBack={() => setSelectedId(null)}
+          onEdit={() => openEdit(selected)}
+        />
+        {dialogs}
+      </>
+    );
+  }
+
   return (
-    <div className="flex max-w-4xl flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Agents</h2>
           <p className="text-sm text-muted-foreground">
-            AI agents working on this company: its due tasks, emails, texts, WhatsApp and
-            calls. The company manager hands each one to the right agent.
+            AI agents working on this company. Click one to talk to it and watch what it
+            does.
           </p>
         </div>
         {canEdit && (
@@ -115,246 +134,38 @@ export function AgentsTab({
           </CardContent>
         </Card>
       ) : (
-        <div className="flex flex-col gap-2">
-          {manager && (
-            <AgentRow
-              agent={manager}
-              selected={selected?.id === manager.id}
-              canEdit={canEdit}
-              onSelect={() => select(manager.id)}
-              onEdit={() => openEdit(manager)}
-              onDelete={workers.length === 0 ? () => setToDelete(manager) : undefined}
-            />
-          )}
-          {workers.map((a) => (
-            <AgentRow
-              key={a.id}
-              agent={a}
-              selected={selected?.id === a.id}
-              canEdit={canEdit}
-              onSelect={() => select(a.id)}
-              onWatch={() => select(a.id, 'browser')}
-              onEdit={() => openEdit(a)}
-              onDelete={() => setToDelete(a)}
-            />
-          ))}
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {manager && (
+              <AgentCard
+                agent={manager}
+                canEdit={canEdit}
+                onOpen={() => setSelectedId(manager.id)}
+                onEdit={() => openEdit(manager)}
+                onDelete={workers.length === 0 ? () => setToDelete(manager) : undefined}
+              />
+            )}
+            {workers.map((a) => (
+              <AgentCard
+                key={a.id}
+                agent={a}
+                canEdit={canEdit}
+                onOpen={() => setSelectedId(a.id)}
+                onEdit={() => openEdit(a)}
+                onDelete={() => setToDelete(a)}
+              />
+            ))}
+          </div>
           {manager && workers.length === 0 && (
             <p className="text-xs text-amber-700">
               The manager only hands out work — create an agent to do it.
             </p>
           )}
-        </div>
+        </>
       )}
 
-      {selected && (
-        <AgentDetail
-          key={selected.id}
-          companyId={companyId}
-          agent={selected}
-          canManage={canEdit}
-          tab={tab}
-          onTab={setTab}
-        />
-      )}
-
-      <AgentFormDialog
-        companyId={companyId}
-        agent={editing}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-      />
-      <DeleteAgentDialog
-        companyId={companyId}
-        agent={toDelete}
-        onClose={() => setToDelete(null)}
-      />
+      {dialogs}
     </div>
-  );
-}
-
-function AgentRow({
-  agent: a,
-  selected,
-  canEdit,
-  onSelect,
-  onWatch,
-  onEdit,
-  onDelete,
-}: {
-  agent: Agent;
-  selected: boolean;
-  canEdit: boolean;
-  onSelect: () => void;
-  /** step11 part 2: open this agent's live browser. Workers only (the manager has none). */
-  onWatch?: () => void;
-  onEdit: () => void;
-  onDelete?: () => void;
-}) {
-  const isManager = a.role === 'MANAGER';
-  return (
-    <Card className={cn(selected && 'ring-2 ring-[#3BBFB4]')}>
-      <CardContent className="flex items-center gap-3 py-3">
-        {isManager ? (
-          <Crown className="size-5 shrink-0 text-amber-500" />
-        ) : (
-          <Bot className="size-5 shrink-0 text-[#3BBFB4]" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate font-medium">{a.name}</span>
-            {isManager && <Badge variant="secondary">Company manager</Badge>}
-            <Badge variant="outline">{approvalModeLabel(a.approvalMode)}</Badge>
-            {a.onBrowser && (
-              <Badge className="gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-800">
-                <span className="relative flex size-2">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-                </span>
-                On browser
-              </Badge>
-            )}
-            {a.openTodos > 0 && (
-              <Badge variant="secondary">
-                {a.openTodos} open task{a.openTodos === 1 ? '' : 's'}
-              </Badge>
-            )}
-          </div>
-          {a.description && !isManager && (
-            <p className="truncate text-xs text-muted-foreground">{a.description}</p>
-          )}
-        </div>
-        {onWatch && a.onBrowser && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
-            onClick={onWatch}
-          >
-            <MonitorPlay className="mr-1 size-4" />
-            Watch live
-          </Button>
-        )}
-        <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onSelect}>
-          <MessageSquare className="mr-1 size-4" />
-          {isManager ? 'Company chat' : 'Open'}
-        </Button>
-        {canEdit && (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Edit ${a.name}`}
-              onClick={onEdit}
-            >
-              <Pencil className="size-4" />
-            </Button>
-            {onDelete && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Delete ${a.name}`}
-                onClick={onDelete}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * One agent: its chat (everyone who can see the company — they are the ones it notifies),
- * its live browser (workers; step11 part 2), its work log, and for management its rules,
- * schedules and what it learned.
- */
-function AgentDetail({
-  companyId,
-  agent,
-  canManage,
-  tab,
-  onTab: setTab,
-}: {
-  companyId: number;
-  agent: Agent;
-  canManage: boolean;
-  tab: DetailTab;
-  onTab: (tab: DetailTab) => void;
-}) {
-  const isManager = agent.role === 'MANAGER';
-  // The Browser panel stays mounted once opened (hidden on the other tabs), so its live
-  // stream and the steps seen so far survive a look at the chat or the work log.
-  const [browserSeen, setBrowserSeen] = useState(tab === 'browser');
-  if (tab === 'browser' && !browserSeen) setBrowserSeen(true);
-  const tabs: { key: DetailTab; label: string }[] = [
-    { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
-    ...(isManager ? [] : [{ key: 'browser' as const, label: 'Browser' }]),
-    ...(canManage
-      ? [
-          { key: 'rules' as const, label: isManager ? 'Company rules' : 'Rules' },
-          ...(isManager ? [] : [{ key: 'schedules' as const, label: 'Schedules' }]),
-          { key: 'learnings' as const, label: 'What it learned' },
-        ]
-      : []),
-    { key: 'activity', label: 'Work log' },
-  ];
-
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 py-4">
-        <div className="flex flex-wrap items-center gap-1 border-b pb-2">
-          <span className="mr-2 text-sm font-semibold">{agent.name}</span>
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={cn(
-                'rounded-md px-3 py-1 text-sm transition-colors',
-                tab === t.key
-                  ? 'bg-[#3BBFB4]/15 font-medium text-teal-900'
-                  : 'text-muted-foreground hover:bg-muted',
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'chat' && (
-          <AgentChatPanel companyId={companyId} agentId={agent.id} agentName={agent.name} />
-        )}
-        {browserSeen && !isManager && (
-          <div className={tab === 'browser' ? undefined : 'hidden'}>
-            <AgentBrowserPanel companyId={companyId} agentId={agent.id} />
-          </div>
-        )}
-        {tab === 'rules' &&
-          canManage &&
-          (isManager ? (
-            <AgentRulesPanel
-              companyId={companyId}
-              agentId={null}
-              intro="Rules for this company. Every agent of the company follows them, and they override the firm's general instructions."
-            />
-          ) : (
-            <AgentRulesPanel
-              companyId={companyId}
-              agentId={agent.id}
-              intro={`Rules for ${agent.name} only, on top of the company's rules.`}
-            />
-          ))}
-        {tab === 'schedules' && canManage && !isManager && (
-          <AgentSchedulesPanel companyId={companyId} agentId={agent.id} />
-        )}
-        {tab === 'learnings' && canManage && (
-          <AgentLearningsPanel companyId={companyId} agentId={agent.id} />
-        )}
-        {tab === 'activity' && <AgentActivityPanel companyId={companyId} agentId={agent.id} />}
-      </CardContent>
-    </Card>
   );
 }
 

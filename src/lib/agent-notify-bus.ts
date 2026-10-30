@@ -17,6 +17,8 @@ export interface AgentNotice {
   kind: 'MESSAGE' | 'QUESTION' | 'APPROVAL_REQUEST' | 'TASK_UPDATE' | string;
   todoId: number | null;
   body: string;
+  /** step11: an Ask-always agent asks whether it may answer a ringing call. */
+  callOffer: boolean;
 }
 
 type Listener = (notice: AgentNotice) => void;
@@ -55,13 +57,15 @@ export function agentNoticeOf(payload: unknown): AgentNotice | null {
     kind: typeof p.kind === 'string' ? p.kind : 'MESSAGE',
     todoId: typeof p.todoId === 'number' ? p.todoId : null,
     body: p.body,
+    callOffer: p.callOffer === true,
   };
 }
 
 /** The popup's title: who, where, and whether it waits on somebody. */
 export function agentNoticeTitle(n: AgentNotice): string {
-  const what =
-    n.kind === 'APPROVAL_REQUEST'
+  const what = n.callOffer
+    ? ' wants to answer a call'
+    : n.kind === 'APPROVAL_REQUEST'
       ? ' asks for approval'
       : n.kind === 'QUESTION'
         ? ' has a question'

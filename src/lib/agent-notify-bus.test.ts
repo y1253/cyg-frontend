@@ -15,6 +15,7 @@ const notice = {
   kind: 'QUESTION',
   todoId: null,
   body: 'Which account?',
+  callOffer: false,
 };
 
 describe('agent-notify-bus', () => {
@@ -57,5 +58,13 @@ describe('agent-notify-bus', () => {
     expect(agentNoticeTitle({ ...notice, kind: 'TASK_UPDATE' })).toBe(
       '🤖 Bookkeeper · Acme',
     );
+  });
+
+  it('marks a call offer, so its popup can carry Answer buttons', () => {
+    const offer = agentNoticeOf({ ...notice, kind: 'APPROVAL_REQUEST', callOffer: true });
+    expect(offer?.callOffer).toBe(true);
+    expect(agentNoticeTitle(offer!)).toBe('🤖 Bookkeeper wants to answer a call · Acme');
+    // anything but a literal true is not an offer
+    expect(agentNoticeOf({ ...notice, callOffer: 'yes' })?.callOffer).toBe(false);
   });
 });

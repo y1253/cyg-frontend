@@ -36,13 +36,27 @@ function duration(from: string, to: string | null) {
  * step11 part 2: watch the agent's browser live, inside the company's Agents tab — the page
  * as it is now and every step it takes — plus its past sessions on the browser. View only.
  */
-export function AgentBrowserPanel({ companyId, agentId }: { companyId: number; agentId: number }) {
+export function AgentBrowserPanel({
+  companyId,
+  agentId,
+  stacked = false,
+}: {
+  companyId: number;
+  agentId: number;
+  /** step11: in a half-width column the steps go under the page, not beside it. */
+  stacked?: boolean;
+}) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const live = useAgentBrowserStream(companyId, agentId, imgRef);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+      <div
+        className={cn(
+          'grid gap-3',
+          !stacked && 'lg:grid-cols-[minmax(0,1fr)_16rem]',
+        )}
+      >
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center gap-2 text-sm">
             {live.onBrowser ? (
@@ -89,7 +103,12 @@ export function AgentBrowserPanel({ companyId, agentId }: { companyId: number; a
 
         <div className="flex min-h-0 flex-col gap-2">
           <p className="text-sm font-medium">What it is doing</p>
-          <ol className="flex max-h-[28rem] flex-col gap-1.5 overflow-y-auto rounded-md border p-2 text-xs">
+          <ol
+            className={cn(
+              'flex flex-col gap-1.5 overflow-y-auto rounded-md border p-2 text-xs',
+              stacked ? 'max-h-60' : 'max-h-[28rem]',
+            )}
+          >
             {live.actions.length === 0 && <li className="text-muted-foreground">No steps yet.</li>}
             {[...live.actions].reverse().map((a, i) => (
               <ActionLine key={`${a.at}-${i}`} action={a.action} detail={a.detail} at={a.at} />

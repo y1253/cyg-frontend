@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTabMissedCallBadge } from '@/hooks/useTabMissedCallBadge';
 import { fetchLatestPreview } from '@/api/communications';
 import { messagePreview } from '@/lib/notificationText';
@@ -22,7 +23,7 @@ import {
   type NotificationRoute,
 } from '@/lib/desktopNotification';
 import { playMessageChime, unlockAudio } from '@/lib/notificationSound';
-import { Toaster, type AppToast } from '@/components/ui/toast';
+import { Toaster, type AppToast, type AppToastAction } from '@/components/ui/toast';
 import {
   useInternalMessageStream,
   type InternalMessageEvent,
@@ -33,7 +34,12 @@ import {
 } from '@/hooks/useNewMessageNotifier';
 import { writePendingCommSelection } from '@/components/Companies/communications/useCommUiState';
 import type { OpenRequest, PendingOpen } from '@/components/Layout/unread-feed';
-import { agentNoticeTitle, onAgentNotice } from '@/lib/agent-notify-bus';
+import {
+  agentNoticeTitle,
+  onAgentNotice,
+  type AgentNotice,
+} from '@/lib/agent-notify-bus';
+import { sendAgentMessage } from '@/api/agents';
 
 const PREFS_KEY = 'cyg-notify';
 
@@ -128,6 +134,8 @@ interface NotificationValue {
     title: string;
     body: string;
     onClick?: () => void;
+    actions?: AppToastAction[];
+    durationMs?: number;
   }) => void;
   /** Announce a message a push stream just delivered. See `notify` for the rules. */
   notifyPush: (input: {
@@ -199,6 +207,7 @@ const CallNotifyCtx = createContext<CallNotifier | null>(null);
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { token } = useAuth();
+  const queryClient = useQueryClient();
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
   const [permission, setPermission] = useState<
     NotificationPermission | 'unsupported'
@@ -262,7 +271,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   /** Newest wins: keep the stack short enough to read at a glance. */
   const pushToast = useCallback(
-    (input: { title: string; body: string; onClick?: () => void }) => {
+    (input: {
+      title: string;
+      body: string;
+      onClick?: () => void;
+      actions?: AppToastAction[];
+      durationMs?: number;
+    }) => {
       const id = ++toastSeq.current;
       setToasts((prev) => [...prev.slice(-(MAX_TOASTS - 1)), { id, ...input }]);
     },
@@ -295,13 +310,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
        * different JS realm.
        */
       route?: NotificationRoute;
+      actions?: AppToastAction[];
+      durationMs?: number;
     }) => {
       // The in-app toast fires ABOVE the focus check on purpose. `whileActive` is
       // there to stop a desktop notification interrupting someone who is already
       // working — but a toast in exactly that situation is the whole point of it,
       // and it is the only alert a focused user can actually see. The pref keeps
       // gating the chime and the OS notification below.
-      pushToast({ title: input.title, body: input.body, onClick: input.onClick });
+      pushToast({
+        title: input.title,
+        body: input.body,
+        onClick: input.onClick,
+        actions: input.actions,
+        durationMs: input.durationMs,
+      });
 
       if (document.hasFocus() && !prefsRef.current.whileActive) return;
 
@@ -356,6 +379,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       tag: string;
       onClick?: () => void;
       route?: NotificationRoute;
+      actions?: AppToastAction[];
+      durationMs?: number;
     }) => {
       suppressRef.current.set(input.source, Date.now());
       notify(input);
@@ -493,6 +518,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
   }, [navigate, openCompany, requestOpen]);
 
+  /** step11: Approve / Deny an agent's offer to take a ringing call, from its toast. */
+  const answerCallOffer = useCallback(
+    (n: AgentNotice, approved: boolean) => {
+      const t = tokenRef.current;
+      if (!t) return;
+      sendAgentMessage(t, n.companyId, n.agentId, {
+        body: approved ? 'Approved' : 'Denied',
+        kind: 'APPROVAL_ANSWER',
+        replyToId: n.messageId,
+        approved,
+      })
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: ['agent-messages', n.companyId] }),
+        )
+        .catch((err: unknown) =>
+          pushToast({
+            title: 'Could not answer the agent',
+            body: err instanceof Error ? err.message : 'Please try again from its chat.',
+          }),
+        );
+    },
+    [pushToast, queryClient],
+  );
+
   // ── step11: an AI agent wrote to staff — pushed over the realtime channel ───
   // `useRealtime` (inside SoftphoneProvider, which this provider wraps) hands the
   // `agent-notify` payload over through `agent-notify-bus`. Every agent message pops up,
@@ -513,9 +562,24 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             tab: 'agents',
             agentId: n.agentId,
           },
+          // step11: the call is ringing NOW — answer the offer from the popup itself, and
+          // keep it up about as long as a call rings.
+          ...(n.callOffer && n.messageId
+            ? {
+                durationMs: 30_000,
+                actions: [
+                  {
+                    label: 'Let agent answer',
+                    primary: true,
+                    onClick: () => answerCallOffer(n, true),
+                  },
+                  { label: 'No', onClick: () => answerCallOffer(n, false) },
+                ],
+              }
+            : {}),
         });
       }),
-    [notifyPush, requestOpen],
+    [notifyPush, requestOpen, answerCallOffer],
   );
 
   // ── Internal messages: instant, via the per-user stream ────────────────────

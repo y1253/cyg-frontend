@@ -10,6 +10,16 @@ export interface AppToast {
   title: string;
   body: string;
   onClick?: () => void;
+  /** step11: buttons on the card (an agent asking to take a ringing call). */
+  actions?: AppToastAction[];
+  /** How long it stays; the default suits a message, not a question. */
+  durationMs?: number;
+}
+
+export interface AppToastAction {
+  label: string;
+  primary?: boolean;
+  onClick: () => void;
 }
 
 /** Long enough to read and click, short enough not to pile up. */
@@ -26,9 +36,9 @@ function ToastCard({
   // toast, and depending on the object would restart this one's timer each time.
   // `onDismiss` is a stable useCallback, so listing it costs nothing.
   useEffect(() => {
-    const t = setTimeout(() => onDismiss(toast.id), TOAST_MS);
+    const t = setTimeout(() => onDismiss(toast.id), toast.durationMs ?? TOAST_MS);
     return () => clearTimeout(t);
-  }, [toast.id, onDismiss]);
+  }, [toast.id, toast.durationMs, onDismiss]);
 
   const clickable = !!toast.onClick;
 
@@ -66,6 +76,29 @@ function ToastCard({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{toast.title}</p>
           <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{toast.body}</p>
+          {toast.actions && toast.actions.length > 0 && (
+            <div className="mt-2 flex gap-2">
+              {toast.actions.map((a) => (
+                <button
+                  key={a.label}
+                  type="button"
+                  // The card itself is clickable; an action must not also open it.
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    a.onClick();
+                    onDismiss(toast.id);
+                  }}
+                  className={
+                    a.primary
+                      ? 'rounded-md bg-[#3BBFB4] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#33a89e]'
+                      : 'rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted'
+                  }
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <button
           type="button"
