@@ -148,6 +148,11 @@ function RunTranscript({
         <li key={i} className="flex items-start gap-2">
           <TypeTag type={m.type} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {m.role === 'assistant' && m.model && (
+              <span className="w-fit rounded border border-violet-200 bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                {m.model}
+              </span>
+            )}
             {m.role === 'assistant' && m.toolCalls?.length ? (
               m.toolCalls.map((c, j) => (
                 <code

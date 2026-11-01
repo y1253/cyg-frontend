@@ -135,7 +135,17 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     // Also when one takes or finishes a task: the Tasks tab shows who is on each todo.
     case 'agents':
       // step11 part 2: also when an agent goes on / off its browser.
-      return perCompany('agents', 'company', 'agent-activity', 'agent-browser-sessions');
+      // step11: also when one writes a schedule's team note or a task's description.
+      return [
+        ...perCompany(
+          'agents',
+          'company',
+          'agent-activity',
+          'agent-browser-sessions',
+          'task-schedules',
+        ),
+        ['tasks'],
+      ];
 
     // step12: a message in a staff <-> agent chat.
     case 'agent-messages':

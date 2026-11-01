@@ -142,6 +142,8 @@ export interface AgentRunDetail {
   messages: {
     role: 'user' | 'assistant' | 'tool';
     type: AgentMessageType;
+    /** step11: the model that wrote an assistant line (gpt-6-luna, gpt-4.1…). */
+    model?: string | null;
     content: string | null;
     toolCalls?: { name: string; arguments: string }[];
   }[];

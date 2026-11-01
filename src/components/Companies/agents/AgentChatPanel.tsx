@@ -45,7 +45,9 @@ export function AgentChatPanel({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const body = draft.trim();
-    if (!body) return;
+    // Enter submits the form even while a send is on its way (the button is disabled,
+    // the key is not): a double Enter sent one text twice and started two agent runs.
+    if (!body || send.isPending) return;
     send.mutate(
       { body, kind: 'MESSAGE', replyToId: answering?.id },
       {
