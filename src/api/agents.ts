@@ -157,6 +157,21 @@ async function failed(res: Response, fallback: string): Promise<never> {
   throw new Error(msg || fallback);
 }
 
+/**
+ * A 200 whose body is not JSON (an nginx page during a restart, a service-worker reply)
+ * must never surface the parser's "Unexpected token '<' … is not valid JSON" — staff saw
+ * that under the live browser (2026-11-01). It becomes the request's own message.
+ */
+function parseBody<T>(text: string, status: number, fallback: string): T {
+  if (!text) return null as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    console.warn(`[agents] not JSON (HTTP ${status}): ${text.slice(0, 200)}`);
+    throw new Error(`${fallback} (unexpected answer from the server — try again)`);
+  }
+}
+
 async function send<T>(
   token: string,
   url: string,
@@ -170,14 +185,13 @@ async function send<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) return failed(res, fallback);
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
+  return parseBody<T>(await res.text(), res.status, fallback);
 }
 
 async function get<T>(token: string, url: string, fallback: string): Promise<T> {
   const res = await fetchWithAuth(token, url);
   if (!res.ok) return failed(res, fallback);
-  return res.json() as Promise<T>;
+  return parseBody<T>(await res.text(), res.status, fallback);
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────

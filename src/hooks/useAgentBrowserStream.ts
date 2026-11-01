@@ -135,10 +135,12 @@ export function useAgentBrowserStream(
           setState('connecting');
           retry = setTimeout(() => void connect(), RETRY_MS);
         };
-      } catch (err) {
+      } catch {
         if (stopped) return;
-        setState('error');
-        setError((err as Error).message);
+        // A failed ticket (the API restarting, a blip) is not the viewer's problem to
+        // read: keep "connecting" and dial again. 'error' is only "not allowed".
+        setState('connecting');
+        setError('Could not open the live browser — retrying…');
         retry = setTimeout(() => void connect(), RETRY_MS * 3);
       }
     };

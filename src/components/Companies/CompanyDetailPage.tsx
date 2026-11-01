@@ -52,6 +52,7 @@ import { useAssignCompany } from '@/hooks/useAssignCompany';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
 import { canManage } from '@/lib/roles';
+import { DataSourcesCard } from './DataSourcesCard';
 import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
@@ -3024,6 +3025,9 @@ export function CompanyDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* step11: where the company's data lives (books, invoices, bank…) */}
+            <DataSourcesCard companyId={company.id} canEdit={isAdmin} />
 
             {/* Billing (admin only) */}
             {isAdmin && (

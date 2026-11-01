@@ -154,7 +154,9 @@ export function AgentBrowserPanel({
               </span>
             ) : (
               <span className="text-muted-foreground">
-                {live.state === 'connecting' ? 'Connecting…' : 'Not on the browser right now'}
+                {live.state === 'connecting'
+                  ? (live.error ?? 'Connecting…')
+                  : 'Not on the browser right now'}
               </span>
             )}
             {live.url && (

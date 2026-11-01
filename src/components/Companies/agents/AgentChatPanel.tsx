@@ -6,6 +6,7 @@ import type { AgentMessage } from '@/api/agents';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useSendAgentMessage } from '@/hooks/useSendAgentMessage';
 import { cn } from '@/lib/utils';
+import { DictateButton } from '../DictateButton';
 
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -119,6 +120,12 @@ export function AgentChatPanel({
               }
             }}
             placeholder={`Write to ${agentName}…`}
+          />
+          {/* step11: speak instead of type (the AI dictation every composer has). Appends,
+              so dictating twice adds a second sentence. */}
+          <DictateButton
+            disabled={send.isPending}
+            onText={(text) => setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text))}
           />
           <Button type="submit" size="icon" disabled={!draft.trim() || send.isPending}>
             <Send className="size-4" />
