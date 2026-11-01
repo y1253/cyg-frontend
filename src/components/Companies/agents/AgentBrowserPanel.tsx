@@ -1,6 +1,22 @@
-import { useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Globe, MonitorPlay } from 'lucide-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type WheelEvent,
+} from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Globe,
+  MonitorPlay,
+  MousePointerClick,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { picturePoint } from '@/lib/picture-point';
 import type { BrowserAction } from '@/api/agents';
 import { useAgentBrowserStream } from '@/hooks/useAgentBrowserStream';
 import { useBrowserSession, useBrowserSessions } from '@/hooks/useBrowserSessions';
@@ -32,9 +48,21 @@ function duration(from: string, to: string | null) {
   return min ? `${min}m ${sec}s` : `${sec}s`;
 }
 
+/** Keys sent by name; any other single character is typed as text. */
+const NAMED_KEYS = new Set([
+  'Enter', 'Tab', 'Backspace', 'Delete', 'Escape',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown',
+]);
+/** Typed characters are sent in small batches, not one message per key. */
+const TEXT_BATCH_MS = 150;
+
 /**
  * step11 part 2: watch the agent's browser live, inside the company's Agents tab — the page
- * as it is now and every step it takes — plus its past sessions on the browser. View only.
+ * as it is now and every step it takes — plus its past sessions on the browser.
+ *
+ * step11 (2026-11-01): the "Control" switch lets the viewer click, scroll and type on the
+ * agent's real page (an "I'm not a robot" CAPTCHA it cannot solve). One person at a time;
+ * the agent's own browser steps wait while someone is in control.
  */
 export function AgentBrowserPanel({
   companyId,
@@ -47,7 +75,64 @@ export function AgentBrowserPanel({
   stacked?: boolean;
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const live = useAgentBrowserStream(companyId, agentId, imgRef);
+  const { control, input } = live;
+  const driving = control.on && control.mine && live.onBrowser;
+  const pending = useRef('');
+  const flush = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Typing goes to the page the moment control is taken.
+  useEffect(() => {
+    if (driving) boxRef.current?.focus();
+  }, [driving]);
+
+  // Leaving the panel hands control back on its own: the stream's socket closes, and
+  // the agents server releases control with it.
+
+  const point = (e: MouseEvent | WheelEvent) => {
+    const img = imgRef.current;
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    return picturePoint(
+      { x: e.clientX - rect.left, y: e.clientY - rect.top },
+      { width: rect.width, height: rect.height },
+      { width: img.naturalWidth, height: img.naturalHeight },
+    );
+  };
+
+  const onClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (!driving) return;
+    const p = point(e);
+    if (p) input.click(p.x, p.y);
+    boxRef.current?.focus();
+  };
+
+  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (!driving) return;
+    const p = point(e);
+    input.wheel(p?.x ?? 0.5, p?.y ?? 0.5, e.deltaY);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!driving || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (NAMED_KEYS.has(e.key)) {
+      e.preventDefault();
+      if (pending.current) {
+        input.text(pending.current);
+        pending.current = '';
+      }
+      input.key(e.key);
+    } else if (e.key.length === 1) {
+      e.preventDefault();
+      pending.current += e.key;
+      if (flush.current) clearTimeout(flush.current);
+      flush.current = setTimeout(() => {
+        if (pending.current) input.text(pending.current);
+        pending.current = '';
+      }, TEXT_BATCH_MS);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -78,13 +163,47 @@ export function AgentBrowserPanel({
                 <span className="truncate">{live.url}</span>
               </span>
             )}
+            {live.onBrowser && (
+              <div className="ml-auto flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1">
+                <Switch
+                  id={`browser-control-${agentId}`}
+                  checked={driving}
+                  disabled={control.on && !control.mine}
+                  onCheckedChange={(on) => input.setControl(on)}
+                />
+                <Label
+                  htmlFor={`browser-control-${agentId}`}
+                  className="cursor-pointer text-xs"
+                >
+                  {control.on && !control.mine ? `${control.by ?? 'Someone'} is in control` : 'Control'}
+                </Label>
+              </div>
+            )}
           </div>
-          <div className="relative aspect-[1280/900] w-full overflow-hidden rounded-md border bg-muted/40">
+          {driving && (
+            <p className="flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              <MousePointerClick className="size-3.5 shrink-0" />
+              You are controlling the browser — click, scroll and type on the picture. The agent
+              waits. Turn Control off when you are done.
+            </p>
+          )}
+          <div
+            ref={boxRef}
+            tabIndex={driving ? 0 : -1}
+            onClick={onClick}
+            onWheel={onWheel}
+            onKeyDown={onKeyDown}
+            className={cn(
+              'relative aspect-[1280/900] w-full overflow-hidden rounded-md border bg-muted/40 outline-none',
+              driving && 'cursor-crosshair ring-2 ring-amber-400',
+            )}
+          >
             <img
               ref={imgRef}
               alt="The agent's browser"
+              draggable={false}
               className={cn(
-                'absolute inset-0 size-full object-contain',
+                'absolute inset-0 size-full select-none object-contain',
                 !(live.onBrowser && live.hasFrame) && 'invisible',
               )}
             />
