@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { picturePoint } from './picture-point';
+import { picturePoint, picturePointClamped } from './picture-point';
 
 describe('picturePoint', () => {
   const natural = { width: 1280, height: 900 };
@@ -21,5 +21,23 @@ describe('picturePoint', () => {
 
   it('is null before the first picture', () => {
     expect(picturePoint({ x: 1, y: 1 }, { width: 10, height: 10 }, { width: 0, height: 0 })).toBeNull();
+  });
+});
+
+describe('picturePointClamped (step13)', () => {
+  const natural = { width: 1280, height: 900 };
+  const box = { width: 640, height: 450 };
+
+  it('keeps a drag that leaves the picture on its edge', () => {
+    expect(picturePointClamped({ x: -40, y: 225 }, box, natural)).toEqual({ x: 0, y: 0.5 });
+    expect(picturePointClamped({ x: 900, y: 600 }, box, natural)).toEqual({ x: 1, y: 1 });
+  });
+
+  it('is the same point inside the picture', () => {
+    expect(picturePointClamped({ x: 320, y: 225 }, box, natural)).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it('is null before the picture has a size', () => {
+    expect(picturePointClamped({ x: 1, y: 1 }, box, { width: 0, height: 0 })).toBeNull();
   });
 });

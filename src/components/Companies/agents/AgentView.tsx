@@ -60,6 +60,9 @@ export function AgentView({
   const [section, setSection] = useState<Section>('chat');
   const [liveView, setLiveView] = useState(() => readLiveView(agent.id));
   const showLive = !isManager && liveView;
+  // step13: the agent's open tabs — with two or more the live view takes the full width.
+  const [liveTabs, setLiveTabs] = useState(0);
+  const wideLive = showLive && liveTabs > 1;
 
   const sections: { key: Section; label: string }[] = [
     { key: 'chat', label: isManager ? 'Company chat' : 'Chat' },
@@ -176,7 +179,13 @@ export function AgentView({
         </Card>
 
         {showLive && (
-          <Card className="min-w-0 lg:sticky lg:top-4">
+          <Card
+            className={cn(
+              'min-w-0',
+              // step13: several tabs at once = a split view — it gets the full width.
+              wideLive ? 'lg:col-span-2' : 'lg:sticky lg:top-4',
+            )}
+          >
             <CardContent className="flex flex-col gap-3 py-4">
               <div className="flex items-center gap-2">
                 <MonitorPlay className="size-4 text-muted-foreground" />
@@ -188,7 +197,12 @@ export function AgentView({
                   </span>
                 )}
               </div>
-              <AgentBrowserPanel companyId={companyId} agentId={agent.id} stacked />
+              <AgentBrowserPanel
+                companyId={companyId}
+                agentId={agent.id}
+                stacked={!wideLive}
+                onTabCount={setLiveTabs}
+              />
             </CardContent>
           </Card>
         )}

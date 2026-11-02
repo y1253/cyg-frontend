@@ -479,6 +479,8 @@ export interface BrowserAction {
 /** One stretch of the agent on its browser ("on web" → finished). */
 export interface BrowserSession {
   id: number;
+  /** step13: one session per tab — the name the agent gave it (null = before tabs). */
+  tab?: string | null;
   startedAt: string;
   finishedAt: string | null;
   actionCount: number;
