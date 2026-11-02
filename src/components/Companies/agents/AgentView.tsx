@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { approvalModeLabel, type Agent } from '@/api/agents';
+import { approvalModeLabel, communicationBadge, type Agent } from '@/api/agents';
 import { cn } from '@/lib/utils';
 import { AgentAvatar, LiveDot } from './AgentCard';
 import { AgentChatPanel } from './AgentChatPanel';
@@ -90,6 +90,16 @@ export function AgentView({
               <h2 className="truncate text-base font-semibold">{agent.name}</h2>
               {isManager && <Badge variant="secondary">Company manager</Badge>}
               <Badge variant="outline">{approvalModeLabel(agent.approvalMode)}</Badge>
+              {communicationBadge(agent.communicationMode) && (
+                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                  {communicationBadge(agent.communicationMode)}
+                </Badge>
+              )}
+              {agent.aiProvider === 'CLAUDE' && (
+                <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-800">
+                  Claude
+                </Badge>
+              )}
               {agent.openTodos > 0 && (
                 <Badge variant="secondary">
                   {agent.openTodos} open task{agent.openTodos === 1 ? '' : 's'}

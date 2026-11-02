@@ -2,7 +2,7 @@ import { Bot, ChevronRight, Crown, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { approvalModeLabel, type Agent } from '@/api/agents';
+import { approvalModeLabel, communicationBadge, type Agent } from '@/api/agents';
 import { cn } from '@/lib/utils';
 
 /** A pulsing green dot: the agent's browser is open right now. */
@@ -109,6 +109,16 @@ export function AgentCard({
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge variant="outline">{approvalModeLabel(a.approvalMode)}</Badge>
+            {communicationBadge(a.communicationMode) && (
+              <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                {communicationBadge(a.communicationMode)}
+              </Badge>
+            )}
+            {a.aiProvider === 'CLAUDE' && (
+              <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-800">
+                Claude
+              </Badge>
+            )}
             {a.onBrowser && (
               <Badge className="gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-800">
                 <LiveDot />

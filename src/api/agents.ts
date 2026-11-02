@@ -31,6 +31,62 @@ export function approvalModeLabel(mode: ApprovalMode): string {
   return APPROVAL_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
 
+/** step2.md (2026-11-02): whether the agent answers / places calls and sends messages. */
+export type CommunicationMode = 'ALL_ON' | 'ALL_OFF' | 'CALLS_OFF' | 'MESSAGES_OFF';
+
+export const COMMUNICATION_MODES: {
+  value: CommunicationMode;
+  label: string;
+  hint: string;
+  /** Short badge text; null = nothing worth a badge (all on). */
+  badge: string | null;
+}[] = [
+  {
+    value: 'ALL_ON',
+    label: 'Calls + messages on',
+    hint: 'It answers and places phone calls, and sends texts, WhatsApp and emails.',
+    badge: null,
+  },
+  {
+    value: 'CALLS_OFF',
+    label: 'Messages only (no calls)',
+    hint: 'It never picks up the phone or calls anyone — calls ring staff. It still answers texts, WhatsApp and emails.',
+    badge: 'No calls',
+  },
+  {
+    value: 'MESSAGES_OFF',
+    label: 'Calls only (no messages)',
+    hint: 'It answers the phone, but gets no texts, WhatsApp or emails and never sends one — staff handle those.',
+    badge: 'No messages',
+  },
+  {
+    value: 'ALL_OFF',
+    label: 'Everything off',
+    hint: 'No calls and no messages to anyone. It still does its tasks and talks to you in its chat.',
+    badge: 'Calls + messages off',
+  },
+];
+
+export function communicationBadge(mode: CommunicationMode | undefined): string | null {
+  return COMMUNICATION_MODES.find((m) => m.value === mode)?.badge ?? null;
+}
+
+/** step2.md: the AI the agent runs on. */
+export type AiProvider = 'OPENAI' | 'CLAUDE';
+
+export const AI_PROVIDERS: { value: AiProvider; label: string; hint: string }[] = [
+  {
+    value: 'OPENAI',
+    label: 'OpenAI',
+    hint: 'The GPT models, picked per step (fast for forms, stronger when it is stuck).',
+  },
+  {
+    value: 'CLAUDE',
+    label: 'Claude (Opus 5.5)',
+    hint: "Anthropic's Claude Opus 5.5 for all its work. On phone calls the voice stays OpenAI's.",
+  },
+];
+
 export interface Agent {
   id: number;
   companyId: number;
@@ -40,6 +96,10 @@ export interface Agent {
   role: AgentRole;
   description: string | null;
   approvalMode: ApprovalMode;
+  /** step2.md: calls / messages on or off. */
+  communicationMode: CommunicationMode;
+  /** step2.md: OpenAI or Claude. */
+  aiProvider: AiProvider;
   /** Open todos this agent is on. */
   openTodos: number;
   /** step11 part 2: its browser is open right now — staff can watch it live. */
@@ -53,6 +113,8 @@ export interface AgentInput {
   name: string;
   description?: string;
   approvalMode?: ApprovalMode;
+  communicationMode?: CommunicationMode;
+  aiProvider?: AiProvider;
 }
 
 export type AgentMessageKind =

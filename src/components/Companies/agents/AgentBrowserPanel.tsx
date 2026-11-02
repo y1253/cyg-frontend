@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +19,13 @@ import {
 } from '@/hooks/useAgentBrowserStream';
 import { useBrowserSession, useBrowserSessions } from '@/hooks/useBrowserSessions';
 import { cn } from '@/lib/utils';
+import {
+  clampSplit,
+  layoutKey,
+  parseLayout,
+  splitAt,
+  type LiveLayout,
+} from '@/lib/live-layout';
 import { RemoteScreen } from './RemoteScreen';
 
 const ACTION_LABEL: Record<BrowserAction['action'], string> = {
@@ -79,12 +86,31 @@ export function AgentBrowserPanel({
 }) {
   const live = useAgentBrowserStream(companyId, agentId);
   const { tabs, mine, setFocus } = live;
-  /** The tab the viewer clicked to see big; null = the split view. */
-  const [picked, setPicked] = useState<number | null>(null);
+  /**
+   * step11.md (2026-11-02): the viewer's layout — all tabs the same size, or one big with
+   * the others beside it, the split dragged by the viewer. Kept per viewer in the browser.
+   */
+  const [layout, setLayout] = useState<LiveLayout>(() => {
+    try {
+      return parseLayout(localStorage.getItem(layoutKey(agentId)));
+    } catch {
+      return parseLayout(null);
+    }
+  });
   const [full, setFull] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
 
-  // The tab shown big: the one this viewer controls, else the one clicked while it is open.
+  useEffect(() => {
+    try {
+      localStorage.setItem(layoutKey(agentId), JSON.stringify(layout));
+    } catch {
+      // A private window: the layout lasts for this visit only.
+    }
+  }, [agentId, layout]);
+
+  // The tab shown big: the one this viewer controls, else the one picked while it is open.
+  const picked = layout.mode === 'big' ? layout.bigId : null;
   const focusId = mine ?? (tabs.some((t) => t.pageId === picked) ? picked : null);
   const focused = tabs.find((t) => t.pageId === focusId) ?? null;
 
@@ -99,7 +125,29 @@ export function AgentBrowserPanel({
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
-  const show = (pageId: number | null) => setPicked(pageId);
+  const show = (pageId: number | null) =>
+    setLayout((l) =>
+      pageId === null ? { ...l, mode: 'equal' } : { ...l, mode: 'big', bigId: pageId },
+    );
+
+  /** Dragging the line between the big tab and the others. */
+  const onSplitDown = (e: PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onSplitMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const box = rowRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const split = splitAt(e.clientX, box.left, box.width);
+    setLayout((l) => (l.split === split ? l : { ...l, split }));
+  };
+  const onSplitKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0;
+    if (!step) return;
+    e.preventDefault();
+    setLayout((l) => ({ ...l, split: clampSplit(l.split + step) }));
+  };
 
   const toggleFull = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -149,7 +197,7 @@ export function AgentBrowserPanel({
               {focused && tabs.length > 1 && mine === null && (
                 <Button variant="outline" size="sm" onClick={() => show(null)}>
                   <LayoutGrid className="mr-1 size-3.5" />
-                  All tabs
+                  Equal size
                 </Button>
               )}
               {tabs.length > 0 && (
@@ -181,38 +229,55 @@ export function AgentBrowserPanel({
                 ? live.error
                 : 'The page shows here as soon as the agent opens its browser.'}
             </div>
-          ) : focused ? (
-            <div className="flex flex-col gap-2">
-              <TabTile
-                tab={focused}
-                stream={live}
-                big
-                someoneElse={someoneElse(focused)}
-              />
-              {tabs.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto pb-1">
+          ) : focused && tabs.length > 1 ? (
+            // step11.md: one tab big, the others beside it (under it on a narrow screen);
+            // the line between them is dragged to make the big one bigger or smaller.
+            <div
+              ref={rowRef}
+              style={{ '--split': `${layout.split}%` } as React.CSSProperties}
+              className="flex flex-col gap-3 lg:flex-row lg:gap-0"
+            >
+              <div className="min-w-0 lg:shrink-0 lg:basis-[var(--split)] lg:pr-1.5">
+                <TabTile
+                  tab={focused}
+                  stream={live}
+                  big
+                  fit={full}
+                  someoneElse={someoneElse(focused)}
+                  onEqual={mine === null ? () => show(null) : undefined}
+                />
+              </div>
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Drag to make the big tab bigger or smaller"
+                aria-valuemin={45}
+                aria-valuemax={85}
+                aria-valuenow={layout.split}
+                tabIndex={0}
+                onPointerDown={onSplitDown}
+                onPointerMove={onSplitMove}
+                onKeyDown={onSplitKey}
+                className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center outline-none lg:flex"
+              >
+                <span className="h-16 w-1 rounded-full bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
+              </div>
+              <div className="relative min-w-0 lg:flex-1">
+                <div className="grid grid-cols-2 gap-3 lg:absolute lg:inset-0 lg:flex lg:flex-col lg:overflow-y-auto lg:pl-1.5">
                   {tabs
                     .filter((t) => t.pageId !== focused.pageId)
                     .map((t) => (
-                      <button
+                      <TabTile
                         key={t.pageId}
-                        type="button"
-                        className="w-40 shrink-0 text-left"
-                        onClick={() => show(t.pageId)}
-                      >
-                        <span className="block truncate text-xs font-medium">{t.name}</span>
-                        <RemoteScreen
-                          pageId={t.pageId}
-                          stream={live}
-                          driving={false}
-                          hasFrame={live.framed.has(t.pageId)}
-                          onBrowser={live.onBrowser}
-                          label={`Tab ${t.name}`}
-                        />
-                      </button>
+                        tab={t}
+                        stream={live}
+                        big={false}
+                        someoneElse={someoneElse(t)}
+                        onOpen={mine === null ? () => show(t.pageId) : undefined}
+                      />
                     ))}
                 </div>
-              )}
+              </div>
             </div>
           ) : (
             <div className={cn('grid gap-3', gridCols(tabs.length))}>
@@ -222,6 +287,7 @@ export function AgentBrowserPanel({
                   tab={t}
                   stream={live}
                   big={tabs.length === 1}
+                  fit={full && tabs.length === 1}
                   someoneElse={someoneElse(t)}
                   onOpen={tabs.length > 1 ? () => show(t.pageId) : undefined}
                 />
@@ -264,15 +330,21 @@ function TabTile({
   tab,
   stream,
   big,
+  fit = false,
   someoneElse,
   onOpen,
+  onEqual,
 }: {
   tab: LiveTab;
   stream: AgentBrowserStream;
   big: boolean;
+  /** step11.md: full screen — the picture is kept within the screen's height. */
+  fit?: boolean;
   someoneElse: boolean;
-  /** Show this tab big (the split view). */
+  /** Make this tab the big one. */
   onOpen?: () => void;
+  /** step11.md: the big tab — back to all tabs the same size. */
+  onEqual?: () => void;
 }) {
   const driving = stream.mine === tab.pageId && stream.onBrowser;
   return (
@@ -306,9 +378,20 @@ function TabTile({
               size="sm"
               className="h-6 px-1.5"
               onClick={onOpen}
-              title="Show this tab big"
+              title="Make this tab bigger"
             >
               <Maximize2 className="size-3" />
+            </Button>
+          )}
+          {onEqual && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5"
+              onClick={onEqual}
+              title="All tabs the same size"
+            >
+              <LayoutGrid className="size-3" />
             </Button>
           )}
         </div>
@@ -319,16 +402,18 @@ function TabTile({
           <span className="truncate">{tab.url}</span>
         </span>
       )}
-      <RemoteScreen
-        pageId={tab.pageId}
-        stream={stream}
-        driving={driving}
-        hasFrame={stream.framed.has(tab.pageId)}
-        onBrowser={stream.onBrowser}
-        label={`The agent's browser — ${tab.name}`}
-        onPick={onOpen}
-        className={cn(!big && onOpen && !driving && 'cursor-zoom-in')}
-      />
+      <div className={cn(fit && 'mx-auto w-full max-w-[calc((100dvh-9rem)*1.4222)]')}>
+        <RemoteScreen
+          pageId={tab.pageId}
+          stream={stream}
+          driving={driving}
+          hasFrame={stream.framed.has(tab.pageId)}
+          onBrowser={stream.onBrowser}
+          label={`The agent's browser — ${tab.name}`}
+          onPick={onOpen}
+          className={cn(!big && onOpen && !driving && 'cursor-zoom-in')}
+        />
+      </div>
     </div>
   );
 }

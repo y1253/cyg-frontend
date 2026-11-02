@@ -11,22 +11,40 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { APPROVAL_MODES, type Agent, type ApprovalMode } from '@/api/agents';
+import {
+  AI_PROVIDERS,
+  APPROVAL_MODES,
+  COMMUNICATION_MODES,
+  type Agent,
+  type AiProvider,
+  type ApprovalMode,
+  type CommunicationMode,
+} from '@/api/agents';
 import { useCreateAgent } from '@/hooks/useCreateAgent';
 import { useUpdateAgent } from '@/hooks/useUpdateAgent';
 import { cn } from '@/lib/utils';
 
-/** The approval mode, as three cards with a sentence each — staff pick one at a glance. */
-export function ApprovalModePicker({
+/** A choice as cards with a sentence each — staff pick one at a glance. */
+function OptionCards<T extends string>({
+  options,
   value,
   onChange,
+  label,
+  columns = 1,
 }: {
-  value: ApprovalMode;
-  onChange: (mode: ApprovalMode) => void;
+  options: { value: T; label: string; hint: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  label: string;
+  columns?: 1 | 2;
 }) {
   return (
-    <div className="flex flex-col gap-2" role="radiogroup" aria-label="Approval mode">
-      {APPROVAL_MODES.map((m) => (
+    <div
+      className={cn('grid gap-2', columns === 2 && 'sm:grid-cols-2')}
+      role="radiogroup"
+      aria-label={label}
+    >
+      {options.map((m) => (
         <button
           key={m.value}
           type="button"
@@ -45,6 +63,24 @@ export function ApprovalModePicker({
         </button>
       ))}
     </div>
+  );
+}
+
+/** The approval mode, as three cards with a sentence each — staff pick one at a glance. */
+export function ApprovalModePicker({
+  value,
+  onChange,
+}: {
+  value: ApprovalMode;
+  onChange: (mode: ApprovalMode) => void;
+}) {
+  return (
+    <OptionCards
+      options={APPROVAL_MODES}
+      value={value}
+      onChange={onChange}
+      label="Approval mode"
+    />
   );
 }
 
@@ -68,12 +104,16 @@ export function AgentFormDialog({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [mode, setMode] = useState<ApprovalMode>('ASK_SECURITY');
+  const [comm, setComm] = useState<CommunicationMode>('ALL_ON');
+  const [ai, setAi] = useState<AiProvider>('OPENAI');
 
   useEffect(() => {
     if (!open) return;
     setName(agent?.name ?? '');
     setDescription(agent?.description ?? '');
     setMode(agent?.approvalMode ?? 'ASK_SECURITY');
+    setComm(agent?.communicationMode ?? 'ALL_ON');
+    setAi(agent?.aiProvider ?? 'OPENAI');
     create.reset();
     update.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on open only
@@ -88,6 +128,9 @@ export function AgentFormDialog({
       name: name.trim(),
       description: description.trim(),
       approvalMode: mode,
+      // step2.md: the manager never talks to customers — its mode is not shown or changed.
+      ...(isManager ? {} : { communicationMode: comm }),
+      aiProvider: ai,
     };
     if (!input.name) return;
     const done = { onSuccess: () => onOpenChange(false) };
@@ -142,6 +185,30 @@ export function AgentFormDialog({
           <div className="flex flex-col gap-2">
             <Label>When should it ask you first?</Label>
             <ApprovalModePicker value={mode} onChange={setMode} />
+          </div>
+
+          {!isManager && (
+            <div className="flex flex-col gap-2">
+              <Label>Calls and messages</Label>
+              <OptionCards
+                options={COMMUNICATION_MODES}
+                value={comm}
+                onChange={setComm}
+                label="Calls and messages"
+                columns={2}
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <Label>AI it runs on</Label>
+            <OptionCards
+              options={AI_PROVIDERS}
+              value={ai}
+              onChange={setAi}
+              label="AI it runs on"
+              columns={2}
+            />
           </div>
 
           {mutation.isError && (
