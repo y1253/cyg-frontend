@@ -35,8 +35,8 @@ function errorText(error: unknown): string {
 }
 
 /**
- * The A2P 10DLC campaign line under a US number, or null when there is nothing to say
- * (a Canadian number, or an older server that does not report the state).
+ * The A2P 10DLC campaign line under a US or Canadian number, or null when there is
+ * nothing to say (another country, or an older server that does not report the state).
  *
  * The state is the provider's RAW order state — its vocabulary beyond `pending` is
  * undocumented — so anything unrecognised is shown verbatim rather than guessed at.
@@ -45,16 +45,25 @@ function campaignLine(
   country: string | null | undefined,
   state: string | null | undefined,
 ): { text: string; tone: 'muted' | 'ok' | 'error' } | null {
-  if (country !== 'US') return null;
+  if (country !== 'US' && country !== 'CA') return null;
   const s = (state ?? '').toLowerCase();
   if (s === '') return { text: '10DLC: queued for assignment', tone: 'muted' };
   if (s === 'failed') {
     return { text: '10DLC assignment failed — retrying automatically', tone: 'error' };
   }
-  if (['pending', 'processing', 'in_progress', 'submitted'].includes(s)) {
+  if (s === 'number-failed') {
+    return {
+      text: '10DLC: carriers have not accepted this number yet — texts to US phones are refused until they do',
+      tone: 'error',
+    };
+  }
+  // `processed` is the ORDER; the number itself may still be pending (2026-11-01).
+  if (
+    ['pending', 'processing', 'in_progress', 'submitted', 'processed', 'number-pending'].includes(s)
+  ) {
     return { text: '10DLC: assignment pending — texting starts once approved', tone: 'muted' };
   }
-  if (['assigned', 'completed', 'complete', 'success', 'processed'].includes(s)) {
+  if (['assigned', 'completed', 'complete', 'success'].includes(s)) {
     return { text: '10DLC: assigned — texting enabled', tone: 'ok' };
   }
   return { text: `10DLC: ${state}`, tone: 'muted' };
