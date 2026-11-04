@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   CheckCircle2,
+  Loader2,
   MailOpen,
   Phone,
   PhoneIncoming,
@@ -69,6 +70,10 @@ export function InternalCallDetail({
 }) {
   const { data, isLoading } = useInternalCallRecordings(call.sid);
   const recordings = data?.recordings;
+  // A recording SignalWire has not filed yet would 404 in an <audio>; it waits instead.
+  const playable = recordings?.filter((r) => r.ready !== false) ?? [];
+  const processing =
+    !!data?.pending || !!recordings?.some((r) => r.ready === false);
   // Your own call is read and completed by definition, so those two controls would be
   // buttons that do nothing — the same reason the row hides them.
   const own = call.direction === 'outbound';
@@ -190,12 +195,15 @@ export function InternalCallDetail({
           </p>
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : !recordings || recordings.length === 0 ? (
+          ) : playable.length === 0 && processing ? (
+            <RecordingProcessing />
+          ) : playable.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No recording for this call.
             </p>
           ) : (
-            recordings.map((r) => (
+            <>
+            {playable.map((r) => (
               <div key={r.sid} className="flex flex-col gap-1">
                 {/*
                   Points at OUR server, not SignalWire, whose media URL carries no
@@ -213,7 +221,9 @@ export function InternalCallDetail({
                   {r.createdAt && ` · ${formatEmailDate(r.createdAt)}`}
                 </span>
               </div>
-            ))
+            ))}
+            {processing && <RecordingProcessing />}
+            </>
           )}
         </div>
 
@@ -222,6 +232,17 @@ export function InternalCallDetail({
     </div>
   );
 }
+
+/** SignalWire files a long call's audio minutes after it ends — say so, never "none". */
+function RecordingProcessing() {
+  return (
+    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" aria-hidden />
+      Recording is still processing — loading…
+    </p>
+  );
+}
+
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (

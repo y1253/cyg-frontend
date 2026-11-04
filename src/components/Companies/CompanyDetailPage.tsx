@@ -54,6 +54,7 @@ import { useAuth } from '@/context/AuthContext';
 import { canManage, isSuperAdmin } from '@/lib/roles';
 import { DataSourcesCard } from './DataSourcesCard';
 import { QuickBooksCard } from './QuickBooksCard';
+import { BankFeedsCard } from './BankFeedsCard';
 import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
@@ -3032,6 +3033,9 @@ export function CompanyDetailPage() {
 
             {/* step2.md: QuickBooks Online through the API — an admin connects it */}
             <QuickBooksCard companyId={company.id} canConnect={isSuperAdmin(user)} />
+
+            {/* step2.md: bank feeds through Plaid — an admin connects the bank login */}
+            <BankFeedsCard companyId={company.id} canConnect={isSuperAdmin(user)} />
 
             {/* Billing (admin only) */}
             {isAdmin && (

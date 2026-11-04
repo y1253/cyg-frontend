@@ -7,7 +7,11 @@ import { fetchWithAuth } from './client';
  * Server: `agents` module.
  */
 export type AgentRole = 'MANAGER' | 'WORKER';
-export type ApprovalMode = 'ASK_ALWAYS' | 'AUTONOMOUS' | 'ASK_SECURITY';
+export type ApprovalMode =
+  | 'ASK_ALWAYS'
+  | 'AUTONOMOUS'
+  | 'ASK_SECURITY'
+  | 'ASK_COMPLETE';
 
 export const APPROVAL_MODES: { value: ApprovalMode; label: string; hint: string }[] = [
   {
@@ -19,6 +23,11 @@ export const APPROVAL_MODES: { value: ApprovalMode; label: string; hint: string 
     value: 'ASK_ALWAYS',
     label: 'Ask before any action',
     hint: 'Every send, completion or change on a website waits for your approval in its chat.',
+  },
+  {
+    value: 'ASK_COMPLETE',
+    label: 'Ask before completing a task only',
+    hint: 'Does all the work on its own, but waits for your approval in its chat before it marks a task done (or reopens one).',
   },
   {
     value: 'AUTONOMOUS',

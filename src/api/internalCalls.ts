@@ -67,6 +67,10 @@ export interface InternalCallRecording {
   createdAt: string | null;
   /** Per-recording playback token, NOT the session token. */
   token: string;
+  /** SignalWire's status (`completed`, `in-progress`, `processing`, …). */
+  status?: string;
+  /** False while SignalWire is still filing it — its media cannot play yet. */
+  ready?: boolean;
 }
 
 async function throwOnError(res: Response, fallback: string) {
@@ -152,6 +156,8 @@ export async function startInternalCall(
 
 export interface InternalCallRecordingsResult {
   recordings: InternalCallRecording[];
+  /** The recording is not filed yet — see `CallRecordingsResult.pending`. */
+  pending?: boolean;
   summary: CallSummary | null;
 }
 

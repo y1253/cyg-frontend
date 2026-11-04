@@ -487,6 +487,10 @@ export interface CallRecording {
   createdAt: string | null;
   /** Bound to this recording and short-lived — see recordingUrl. */
   token: string;
+  /** SignalWire's status (`completed`, `in-progress`, `processing`, …). */
+  status?: string;
+  /** False while SignalWire is still filing it — its media cannot play yet. */
+  ready?: boolean;
 }
 
 /**
@@ -511,6 +515,11 @@ export interface CallSummary {
 
 export interface CallRecordingsResult {
   recordings: CallRecording[];
+  /**
+   * The recording is not filed yet (SignalWire files a long call's audio minutes after
+   * it ends). The view says "still processing" and the hook polls every 10s.
+   */
+  pending?: boolean;
   /** Null when summarisation is switched off, or the call predates the feature. */
   summary: CallSummary | null;
 }

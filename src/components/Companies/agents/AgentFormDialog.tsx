@@ -66,7 +66,7 @@ function OptionCards<T extends string>({
   );
 }
 
-/** The approval mode, as three cards with a sentence each — staff pick one at a glance. */
+/** The approval mode, as cards with a sentence each — staff pick one at a glance. */
 export function ApprovalModePicker({
   value,
   onChange,
