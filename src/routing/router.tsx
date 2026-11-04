@@ -21,6 +21,7 @@ import { GmailSuccessPage } from '../components/Gmail/GmailSuccessPage';
 import { GmailErrorPage } from '../components/Gmail/GmailErrorPage';
 import { MicrosoftSuccessPage } from '../components/Microsoft/MicrosoftSuccessPage';
 import { MicrosoftErrorPage } from '../components/Microsoft/MicrosoftErrorPage';
+import { QuickBooksResultPage } from '../components/QuickBooks/QuickBooksResultPage';
 // PHASE 2a SPIKE — throwaway, remove with SipSpikePage.
 import { SipSpikePage } from '../components/Phone/SipSpikePage';
 
@@ -44,6 +45,15 @@ export const router = createBrowserRouter([
   {
     path: '/microsoft/error',
     element: <MicrosoftErrorPage />,
+  },
+  {
+    // step2.md: Intuit's sign-in popup lands here (QuickBooksController.callback).
+    path: '/quickbooks/success',
+    element: <QuickBooksResultPage ok />,
+  },
+  {
+    path: '/quickbooks/error',
+    element: <QuickBooksResultPage ok={false} />,
   },
   {
     // PHASE 2a SPIKE — throwaway. Unauthenticated on purpose: it takes its SIP

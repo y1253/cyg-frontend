@@ -51,8 +51,9 @@ import { useUsers } from '@/hooks/useUsers';
 import { useAssignCompany } from '@/hooks/useAssignCompany';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
-import { canManage } from '@/lib/roles';
+import { canManage, isSuperAdmin } from '@/lib/roles';
 import { DataSourcesCard } from './DataSourcesCard';
+import { QuickBooksCard } from './QuickBooksCard';
 import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
@@ -3028,6 +3029,9 @@ export function CompanyDetailPage() {
 
             {/* step11: where the company's data lives (books, invoices, bank…) */}
             <DataSourcesCard companyId={company.id} canEdit={isAdmin} />
+
+            {/* step2.md: QuickBooks Online through the API — an admin connects it */}
+            <QuickBooksCard companyId={company.id} canConnect={isSuperAdmin(user)} />
 
             {/* Billing (admin only) */}
             {isAdmin && (
