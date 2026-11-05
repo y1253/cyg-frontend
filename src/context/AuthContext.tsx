@@ -8,6 +8,7 @@ import {
 import type { ReactNode } from 'react';
 import { serverLogout, type AuthUser } from '../api/auth';
 import { clearPresence } from '../api/phone';
+import { idleRemainingMs, shouldWriteActivity } from '@/lib/idle-timer';
 
 // How long the app sits idle before signing the user out. Read in two places
 // that must agree: the live idle timer below, and the cold-start check against
@@ -108,14 +109,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!token) return;
 
     let timer: ReturnType<typeof setTimeout>;
+    let lastWrite = 0;
 
-    function resetTimer() {
+    // step2.md (2026-11-05): ONE idle window for all tabs. The timer re-reads the shared
+    // `lastActivity` when it fires, so a background tab never signs out the tab that is
+    // in use (they share one server session). See `lib/idle-timer.ts`.
+    function arm(ms: number) {
       clearTimeout(timer);
-      localStorage.setItem('lastActivity', Date.now().toString());
       timer = setTimeout(() => {
+        const left = idleRemainingMs(
+          localStorage.getItem('lastActivity'),
+          Date.now(),
+          TIMEOUT_MS,
+        );
+        if (left > 0) {
+          arm(left);
+          return;
+        }
         logout('IDLE');
         window.location.href = '/login';
-      }, TIMEOUT_MS);
+      }, ms);
+    }
+
+    function resetTimer() {
+      const now = Date.now();
+      // Throttled: it used to write localStorage synchronously on every mousemove.
+      if (!shouldWriteActivity(lastWrite, now)) return;
+      lastWrite = now;
+      localStorage.setItem('lastActivity', now.toString());
+      arm(TIMEOUT_MS);
     }
 
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];

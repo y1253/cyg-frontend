@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { useRealtimeDownFor } from '@/lib/realtime-status';
 import { useNotifications } from '@/context/NotificationContext';
 import { useComposer } from '@/context/ComposerContext';
 import { fetchDraft } from '@/api/drafts';
@@ -627,6 +628,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   };
 
   // ── SSE: real-time inbox updates ───────────────────────────────────────────
+  const sseFallback = useRealtimeDownFor();
   // Closed while the tab is hidden — all it does then is mark a disabled query
   // stale (which re-enabling does anyway) and flash a banner nobody can see. The
   // unread/uncompleted badges are driven by their own count queries, which keep
@@ -634,7 +636,12 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
   useEffect(() => {
     // SSE is a Gmail-only push channel (Pub/Sub). Outlook has no equivalent here —
     // it relies on the 15s polling on the email/chat queries instead.
-    if (!active || !account || !token || provider !== 'GOOGLE') return;
+    // step2.md (2026-11-05): a FALLBACK only — opened while the realtime socket is down.
+    // The socket's `email` topic already invalidates the same queries, and each open
+    // stream held one of Chrome's six per-host connections shared by every tab. While the
+    // socket is up the "new email" popup comes from the inbox-summary poll diff instead.
+    if (!active || !account || !token || provider !== 'GOOGLE' || !sseFallback)
+      return;
     const es = new EventSource(
       `/api/gmail/companies/${companyId}/events?token=${encodeURIComponent(token)}`,
     );
@@ -692,6 +699,7 @@ export function CommunicationsTab({ companyId, isAdmin, assignedToMe, active }: 
     provider,
     notifyPush,
     suppressSource,
+    sseFallback,
   ]);
 
   const handleConnect = useCallback(

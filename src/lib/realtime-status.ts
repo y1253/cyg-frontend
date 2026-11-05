@@ -12,7 +12,7 @@
  * dozen hooks read it, and none of them should need a provider in scope to do so.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 /**
  * How often a poll still runs while the channel is up. Not zero: it is the backstop for
@@ -51,4 +51,31 @@ export function backstopMs(normalMs: number, isConnected: boolean): number {
 /** `backstopMs` for a hook: re-renders (and so re-arms the poll) when the channel flips. */
 export function useBackstop(normalMs: number): number {
   return backstopMs(normalMs, useRealtimeConnected());
+}
+
+/**
+ * How long the channel must have been down before a tab opens its SSE streams
+ * (step2.md, 2026-11-05).
+ *
+ * The three SSE streams (phone events, internal messages, Gmail push) are now only a
+ * FALLBACK: each one held one of Chrome's six HTTP/1.1 connections per host — shared by
+ * every tab — for as long as the tab was open, so two or three tabs stalled every other
+ * request in all of them. The WebSocket carries the same events. The grace keeps a page
+ * load (socket not up yet) or a quick redial from opening and closing three streams.
+ */
+export const SSE_FALLBACK_AFTER_MS = 10_000;
+
+/** True once the channel has been down for `ms` straight; false the moment it is up. */
+export function useRealtimeDownFor(ms: number = SSE_FALLBACK_AFTER_MS): boolean {
+  const connected = useRealtimeConnected();
+  const [down, setDown] = useState(false);
+  useEffect(() => {
+    if (connected) return;
+    const id = setTimeout(() => setDown(true), ms);
+    return () => {
+      clearTimeout(id);
+      setDown(false);
+    };
+  }, [connected, ms]);
+  return down && !connected;
 }

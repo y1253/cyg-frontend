@@ -18,6 +18,8 @@ export interface AppTaskSchedule {
   userNote: string | null;
   isImportant: boolean;
   startDate: string | null;
+  /** "HH:mm" New York — the todo is created at this time on its due day. */
+  timeOfDay: string;
   nextTodoDate: string | null;
   createdAt: string;
   deletedAt: string | null;
@@ -42,6 +44,7 @@ export async function createSchedule(
     cycleNth?: number;
     note?: string;
     startDate?: string;
+    timeOfDay?: string;
   },
 ): Promise<AppTaskSchedule> {
   const res = await fetchWithAuth(token, BASE, {
@@ -66,6 +69,7 @@ export async function updateSchedule(
     cycleNth?: number | null;
     note?: string | null;
     startDate?: string | null;
+    timeOfDay?: string;
   },
 ): Promise<AppTaskSchedule> {
   const res = await fetchWithAuth(token, `${BASE}/${id}`, {

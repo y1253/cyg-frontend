@@ -13,7 +13,7 @@ import { useTasks } from "@/hooks/useTasks";
 import { useCreateSchedule } from "@/hooks/useTaskSchedules";
 import type { CycleType } from "@/api/taskSchedules";
 import { MonthDaySelect } from "@/components/ui/MonthDaySelect";
-import { WEEKDAYS, ORDINALS, MONTHS, monthDayLabel } from "@/lib/cycle";
+import { WEEKDAYS, ORDINALS, MONTHS, monthDayLabel, DEFAULT_TIME_OF_DAY } from "@/lib/cycle";
 
 interface Props {
   open: boolean;
@@ -28,6 +28,7 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
   const [cycleDay, setCycleDay] = useState("1");
   const [cycleNth, setCycleNth] = useState("1");
   const [scheduleNote, setScheduleNote] = useState("");
+  const [timeOfDay, setTimeOfDay] = useState(DEFAULT_TIME_OF_DAY);
 
   const { data: tasks = [] } = useTasks();
   const scheduleMutation = useCreateSchedule(companyId);
@@ -43,13 +44,20 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
       setCycleDay("1");
       setCycleNth("1");
       setScheduleNote("");
+      setTimeOfDay(DEFAULT_TIME_OF_DAY);
       scheduleMutation.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function buildSchedulePayload() {
-    const base = { taskId: Number(taskId), companyId, cycleType, note: scheduleNote.trim() || undefined };
+    const base = {
+      taskId: Number(taskId),
+      companyId,
+      cycleType,
+      note: scheduleNote.trim() || undefined,
+      timeOfDay: timeOfDay || DEFAULT_TIME_OF_DAY,
+    };
     if (cycleType === "DAYS") {
       return { ...base, cycle: Number(cycleDays) || 30 };
     }
@@ -254,6 +262,21 @@ export function AddTaskDialog({ open, onOpenChange, companyId }: Props) {
                 </p>
               </div>
             )}
+
+            {/* Time of day (New York) */}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="add-schedule-time">Time</Label>
+              <Input
+                id="add-schedule-time"
+                type="time"
+                value={timeOfDay}
+                onChange={(e) => setTimeOfDay(e.target.value)}
+                className="w-36"
+              />
+              <p className="text-xs text-muted-foreground">
+                The task appears at this time (New York) on its due day.
+              </p>
+            </div>
 
             {/* Note */}
             <div className="flex flex-col gap-1.5">

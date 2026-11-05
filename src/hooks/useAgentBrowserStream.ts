@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePageHiddenFor } from '@/hooks/usePageHiddenFor';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { fetchBrowserTicket, type BrowserAction } from '@/api/agents';
@@ -75,9 +76,13 @@ export function useAgentBrowserStream(companyId: number, agentId: number) {
   const refCallbacks = useRef(new Map<number, (el: HTMLImageElement | null) => void>());
   const framedRef = useRef(new Set<number>());
   const focusRef = useRef<number | null>(null);
+  // step2.md (2026-11-05): the live view streams screen frames non-stop, and the Agents
+  // tab stays mounted once visited — so a background browser tab kept decoding pictures
+  // nobody saw. Closed after 15s hidden; the last frame of each tab stays on screen.
+  const backgrounded = usePageHiddenFor(15_000);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || backgrounded) return;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
@@ -189,7 +194,7 @@ export function useAgentBrowserStream(companyId: number, agentId: number) {
       wsRef.current = null;
       ws?.close();
     };
-  }, [token, companyId, agentId, queryClient]);
+  }, [token, companyId, agentId, queryClient, backgrounded]);
 
   /** Send one message to the agents server (input only counts while in control). */
   const send = useCallback((message: Record<string, unknown>) => {

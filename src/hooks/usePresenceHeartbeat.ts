@@ -24,14 +24,17 @@ const BEAT_MS = 20_000;
  * are both visible within a render instead of up to twenty seconds later, which is the
  * whole point of showing it next to a call button. Restarting the timer on a flip costs
  * nothing — it happens twice a call.
+ *
+ * step2.md (2026-11-05): `enabled` is false in every tab but the one holding the phone
+ * (`lib/softphone-tabs.ts`) — that tab knows `busy`, and one beat per browser is enough.
  */
-export function usePresenceHeartbeat(busy: boolean): void {
+export function usePresenceHeartbeat(busy: boolean, enabled = true): void {
   const { token } = useAuth();
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !enabled) return;
     void postPresence(token, busy);
     const id = setInterval(() => void postPresence(token, busy), BEAT_MS);
     return () => clearInterval(id);
-  }, [token, busy]);
+  }, [token, busy, enabled]);
 }

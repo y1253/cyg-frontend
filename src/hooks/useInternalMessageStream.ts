@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { internalEventsUrl } from '@/api/internalMessages';
+import { useRealtimeDownFor } from '@/lib/realtime-status';
+import { onInternalMessageNotice } from '@/lib/internal-message-bus';
 
 /** Display-only metadata the server attaches to a `new-message` event. All fields
  *  are optional so an older server (which sent only `{type}`) still works. */
@@ -23,6 +25,13 @@ const MAX_BACKOFF_MS = 30_000;
  * `AppLayout`) it survives every route change and there is still only one
  * EventSource per tab.
  *
+ * step2.md (2026-11-05): the EventSource is now a FALLBACK, opened only while the
+ * realtime socket has been down for a while (`useRealtimeDownFor`). Every open stream
+ * held one of Chrome's six per-host connections, shared by ALL tabs, so a few tabs
+ * stalled the whole app. While the socket is up the popup comes from its
+ * `internal-message` event (`lib/internal-message-bus.ts`) and the invalidations from
+ * `keysFor`.
+ *
  * `onNewMessage` must be identity-stable or the effect will tear down and rebuild
  * the connection on every render.
  */
@@ -37,8 +46,17 @@ export function useInternalMessageStream(
     handlerRef.current = onNewMessage;
   }, [onNewMessage]);
 
+  // The socket's copy of the popup. Always listening: while the fallback stream is open
+  // the socket is down, so the two never both deliver one message.
+  useEffect(
+    () => onInternalMessageNotice((meta) => handlerRef.current(meta)),
+    [],
+  );
+
+  const fallback = useRealtimeDownFor();
+
   useEffect(() => {
-    if (!token) return;
+    if (!token || !fallback) return;
 
     let es: EventSource | null = null;
     let retry = 0;
@@ -99,5 +117,5 @@ export function useInternalMessageStream(
       clearTimeout(timer);
       es?.close();
     };
-  }, [token, qc]);
+  }, [token, qc, fallback]);
 }

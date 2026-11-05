@@ -83,7 +83,7 @@ import type { TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
 import type { CompanyNote } from '@/api/notes';
-import { CYCLE_TYPE_LABELS } from '@/lib/cycle';
+import { CYCLE_TYPE_LABELS, DEFAULT_TIME_OF_DAY, timeOfDayLabel } from '@/lib/cycle';
 import { indexedSelectItems, selectItems } from '@/lib/select-items';
 
 // ─── Global localStorage helpers ─────────────────────────────────────────────
@@ -1653,6 +1653,7 @@ function SchedulesSection({
   const [editCycleNth, setEditCycleNth] = useState(1);
   const [editNote, setEditNote] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
+  const [editTimeOfDay, setEditTimeOfDay] = useState(DEFAULT_TIME_OF_DAY);
   const [userNoteEditId, setUserNoteEditId] = useState<number | null>(null);
   const [userNoteInput, setUserNoteInput] = useState('');
   const [search, setSearch] = useState('');
@@ -1886,6 +1887,16 @@ function SchedulesSection({
                 </div>
                 <p className="text-[10px] text-muted-foreground">Past dates will backfill all todos up to today.</p>
               </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs text-muted-foreground">Time (New York)</span>
+                <Input
+                  type="time"
+                  value={editTimeOfDay}
+                  onChange={e => setEditTimeOfDay(e.target.value)}
+                  className="h-7 w-32 text-xs"
+                />
+                <p className="text-[10px] text-muted-foreground">The task appears at this time on its due day.</p>
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
@@ -1900,7 +1911,14 @@ function SchedulesSection({
                       cycleNth?: number | null;
                       note: string | null;
                       startDate: string | null;
-                    } = { id: s.id, cycleType: editCycleType, note: editNote.trim() || null, startDate: editStartDate || null };
+                      timeOfDay: string;
+                    } = {
+                      id: s.id,
+                      cycleType: editCycleType,
+                      note: editNote.trim() || null,
+                      startDate: editStartDate || null,
+                      timeOfDay: editTimeOfDay || DEFAULT_TIME_OF_DAY,
+                    };
 
                     if (editCycleType === 'DAYS') {
                       const n = Number(editCycle);
@@ -1940,7 +1958,7 @@ function SchedulesSection({
               <p className="text-xs text-muted-foreground">{formatCycle(s)}</p>
               {s.nextTodoDate && (
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Next: {formatDate(s.nextTodoDate)}
+                  Next: {formatDate(s.nextTodoDate)} · {timeOfDayLabel(s.timeOfDay)}
                 </p>
               )}
               {isAdmin && s.startDate && (
@@ -2082,6 +2100,7 @@ function SchedulesSection({
                     setEditCycleNth(s.cycleNth ?? 1);
                     setEditNote(s.note ?? '');
                     setEditStartDate(s.startDate ? s.startDate.slice(0, 10) : '');
+                    setEditTimeOfDay(s.timeOfDay ?? DEFAULT_TIME_OF_DAY);
                   }}
                   className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >

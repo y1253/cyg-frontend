@@ -79,3 +79,14 @@ export function monthDayLabel(value: number | string): string {
   if (n === LAST_DAY_OF_MONTH) return "the last day";
   return `the ${n}${ordinalSuffix(n)}`;
 }
+
+/** step2.md (2026-11-05): a schedule's time of day ("HH:mm", New York). */
+export const DEFAULT_TIME_OF_DAY = "09:00";
+
+/** "09:00" → "9:00 AM". */
+export function timeOfDayLabel(value: string | null | undefined): string {
+  const [h, m] = (value ?? DEFAULT_TIME_OF_DAY).split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return timeOfDayLabel(DEFAULT_TIME_OF_DAY);
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}

@@ -90,6 +90,18 @@ import {
 } from '@/lib/notificationSound';
 import { isDtmfKey } from '@/lib/dtmf';
 import { CallOverlay } from '@/components/Phone/CallOverlay';
+import { useSoftphoneTab } from '@/hooks/useSoftphoneTab';
+import { markDialedHere } from '@/lib/dialIntent';
+import { useRealtimeDownFor } from '@/lib/realtime-status';
+import {
+  ASYNC_ACTIONS,
+  DIAL_DONE,
+  DIAL_PLACED,
+  RelayClient,
+  SW_ACTION,
+  type TabMessage,
+  type ToneKind,
+} from '@/lib/softphone-tabs';
 
 /**
  * The outgoing audio sender on a live call, or undefined.
@@ -782,6 +794,33 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const notifyCall = useCallNotifier();
 
+  /**
+   * step2.md (2026-11-05): ONE tab holds the phone (`lib/softphone-tabs.ts`). Only the
+   * holder (or a `solo` tab in a browser without Web Locks) runs the ENGINE below — the
+   * SIP UserAgent, the SSE fallback, pairing, the heartbeat. A follower runs none of it:
+   * it shows the holder's state and relays its button presses (see the bottom of this
+   * provider).
+   */
+  const tab = useSoftphoneTab(!!token);
+  const engineOn = tab.role !== 'follower';
+  const engineOnRef = useRef(engineOn);
+  useEffect(() => {
+    engineOnRef.current = engineOn;
+  }, [engineOn]);
+  /** A follower's line to the holder. Read by the SW handler, so it is up here. */
+  const relay = useMemo(
+    () => new RelayClient(tab.tabId, tab.post),
+    [tab.tabId, tab.post],
+  );
+  const relayRef = useRef(relay);
+  useEffect(() => {
+    relayRef.current = relay;
+  }, [relay]);
+  const toneHereRef = useRef(tab.toneHere);
+  useEffect(() => {
+    toneHereRef.current = tab.toneHere;
+  }, [tab.toneHere]);
+
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
   const [calls, setCalls] = useState<CallView[]>([]);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
@@ -806,7 +845,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   // `calls` rather than `phase`: an agent with one call parked and another live is busy
   // on both, and `phase` only ever describes the active one.
-  usePresenceHeartbeat(calls.length > 0);
+  usePresenceHeartbeat(calls.length > 0, engineOn);
 
   const uaRef = useRef<UserAgent | null>(null);
   const regRef = useRef<Registerer | null>(null);
@@ -870,25 +909,40 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
    * The branches are mutually exclusive on the ACTIVE slot's phase, so the ringtone and
    * the call-waiting pips can never sound together.
    */
-  const syncTones = useCallback(() => {
-    const active = activeSlot();
-    const othersRinging = slotList().some(
-      (s) => s !== active && s.phase === 'ringing',
-    );
-    if (
-      active?.phase === 'ringing' &&
-      !active.answering &&
-      active.info.direction !== 'outbound'
-    ) {
+  const toneKindRef = useRef<ToneKind>(null);
+  const tabRingingRef = useRef(false);
+  /** Sound `kind` here only if this is the tab the user is in; silence otherwise. */
+  const applyTone = useCallback((kind: ToneKind) => {
+    const here = toneHereRef.current();
+    if (here && kind === 'ring') {
       stopCallWaitingTone();
       startRinging();
-    } else if (active && othersRinging) {
+    } else if (here && kind === 'waiting') {
       stopRinging();
       startCallWaitingTone();
     } else {
       stopRinging();
       stopCallWaitingTone();
     }
+  }, []);
+
+  const syncTones = useCallback(() => {
+    const active = activeSlot();
+    const othersRinging = slotList().some(
+      (s) => s !== active && s.phase === 'ringing',
+    );
+    // step2.md (2026-11-05): the KIND is derived here; whether it sounds in THIS tab is
+    // `applyTone`'s call — the tab the user is in plays it (`isToneTab`), and that may
+    // be a follower, which gets the kind in the snapshot.
+    toneKindRef.current =
+      active?.phase === 'ringing' &&
+      !active.answering &&
+      active.info.direction !== 'outbound'
+        ? 'ring'
+        : active && othersRinging
+          ? 'waiting'
+          : null;
+    applyTone(toneKindRef.current);
 
     /**
      * The browser TAB, flashing for the same window the ringtone sounds for.
@@ -906,15 +960,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
      * `SoftphoneProvider`, so it cannot read call state without inverting the provider
      * order. `tab-badge` owns the element and both callers declare state into it.
      */
-    setTabRinging(
-      slotList().some(
-        (s) =>
-          s.phase === 'ringing' &&
-          !s.answering &&
-          s.info.direction !== 'outbound',
-      ),
+    tabRingingRef.current = slotList().some(
+      (s) =>
+        s.phase === 'ringing' &&
+        !s.answering &&
+        s.info.direction !== 'outbound',
     );
-  }, [activeSlot, slotList]);
+    setTabRinging(tabRingingRef.current);
+  }, [activeSlot, slotList, applyTone]);
 
   /**
    * Rebuild the render-visible snapshot from the registry. The ONE way state changes.
@@ -1612,6 +1665,8 @@ Transferred by ${info.transferFrom.name}`
    */
   const pushEvent = useCallback(
     (info: IncomingCallInfo) => {
+      // A follower holds no INVITEs; the holder pairs every call (step2.md 2026-11-05).
+      if (!engineOnRef.current) return;
       if (slotList().some((s) => s.info.callSid === info.callSid)) return;
       // Oldest FIRST (step12). `/pending-calls` answers newest-first, and `tryPair` takes
       // held INVITEs oldest-first and the first event that fits — so appended in arrival
@@ -1725,8 +1780,10 @@ Transferred by ${info.transferFrom.name}`
   }, [onInvite]);
 
   // ── SIP registration, on mount ────────────────────────────────────────────
+  // Only in the tab holding the phone (step2.md 2026-11-05) — every registered tab got
+  // every INVITE and rang on its own.
   useEffect(() => {
-    if (!token) return;
+    if (!token || !engineOn) return;
     let cancelled = false;
 
     void (async () => {
@@ -1786,8 +1843,9 @@ Transferred by ${info.transferFrom.name}`
       void uaRef.current?.stop().catch(() => undefined);
       uaRef.current = null;
       regRef.current = null;
+      setStatus('idle');
     };
-  }, [token]);
+  }, [token, engineOn]);
 
   // ── The real-time channel ─────────────────────────────────────────────────
   //
@@ -1804,8 +1862,13 @@ Transferred by ${info.transferFrom.name}`
   useRealtime(pushEvent);
 
   // ── SSE: which call belongs to whom ───────────────────────────────────────
+  // step2.md (2026-11-05): a FALLBACK now, opened only by the phone's tab while the
+  // realtime socket is down. The socket's `ringing` topic carries the same events (every
+  // `broadcastIncomingCall` publishes it), and this stream held one of Chrome's six
+  // per-host connections — shared by every tab — for as long as the tab was open.
+  const sseFallback = useRealtimeDownFor();
   useEffect(() => {
-    if (!token) return;
+    if (!token || !engineOn || !sseFallback) return;
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let retry = 0;
@@ -1858,7 +1921,7 @@ Transferred by ${info.transferFrom.name}`
     // `token` ONLY. Including call state here tore the stream down and reopened it on
     // every change — visible in nginx as a run of `GET /api/phone/events … 200 6`.
     // The stream must live as long as the session, like useInternalMessageStream.
-  }, [token, pushEvent]);
+  }, [token, pushEvent, engineOn, sseFallback]);
 
   // ── Call timer ────────────────────────────────────────────────────────────
   /**
@@ -2686,15 +2749,9 @@ Transferred by ${info.transferFrom.name}`
    *    for a call already answered, or one that rang out — resolves to nothing and does
    *    nothing. It can never act on a DIFFERENT call.
    */
-  useEffect(() => {
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-
-    const onMessage = (event: MessageEvent) => {
-      const message = event.data as
-        | { source?: string; action?: string; callSid?: string }
-        | undefined;
-      if (message?.source !== SW_MESSAGE_SOURCE) return;
-
+  /** The notification's Answer / Decline, here or relayed from a follower. */
+  const handleSwAction = useCallback(
+    (message: { action?: string; callSid?: string }) => {
       const slot = slotList().find(
         (s) => s.info.callSid === message.callSid && s.phase === 'ringing',
       );
@@ -2712,11 +2769,27 @@ Transferred by ${info.transferFrom.name}`
       // one of them reliably ended the ring for the other browsers holding it. See
       // `declineSlot`.
       actions.declineWaiting(slot.id);
+    },
+    [actions, answerSlot, slotList],
+  );
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const onMessage = (event: MessageEvent) => {
+      const message = event.data as
+        | { source?: string; action?: string; callSid?: string }
+        | undefined;
+      if (message?.source !== SW_MESSAGE_SOURCE) return;
+      const { action, callSid } = message;
+      // The worker focuses whichever tab it finds; a follower hands it to the phone's tab.
+      if (engineOnRef.current) handleSwAction({ action, callSid });
+      else relayRef.current?.send(SW_ACTION, [{ action, callSid }]);
     };
 
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-  }, [actions, answerSlot, slotList]);
+  }, [handleSwAction]);
 
   const state = useMemo<SoftphoneState>(() => {
     const active = calls.find((c) => c.id === activeCallId) ?? null;
@@ -2751,9 +2824,216 @@ Transferred by ${info.transferFrom.name}`
     };
   }, [status, calls, activeCallId, hasHeldInvite, dialing, completePrompt]);
 
+  // ── One tab holds the phone: the other tabs mirror it (step2.md 2026-11-05) ───────
+  //
+  // HOLDER: posts its state after every change and runs the actions followers relay.
+  // FOLLOWER: shows the holder's last snapshot and relays every button to it. The
+  // overlay is the same component either way, so a call looks identical in every tab.
+  const [mirror, setMirror] = useState<SoftphoneState | null>(null);
+  const mirrorToneRef = useRef<{ tone: ToneKind; ringing: boolean }>({
+    tone: null,
+    ringing: false,
+  });
+  const stateRef = useRef(state);
+  const actionsRef = useRef(actions);
+  useEffect(() => {
+    stateRef.current = state;
+    actionsRef.current = actions;
+  }, [state, actions]);
+
+  const { role, tabId, post, subscribe, onToneOwnerChange } = tab;
+
+  // Holder: every change goes out.
+  useEffect(() => {
+    if (role !== 'holder') return;
+    post({
+      t: 'snapshot',
+      from: tabId,
+      state,
+      tone: toneKindRef.current,
+      tabRinging: tabRingingRef.current,
+    });
+  }, [role, state, post, tabId]);
+
+  // Both sides of the channel.
+  useEffect(() => {
+    if (role === 'solo') return;
+    /** `DialHandle`s a follower opened here, by its handle id. */
+    const dials = new Map<string, DialHandle>();
+
+    const run = (msg: Extract<TabMessage, { t: 'action' }>) => {
+      if (msg.name === 'beginDialing') {
+        const [view, handleId] = msg.args as [
+          Omit<DialingView, 'startedAt' | 'callSid'>,
+          string,
+        ];
+        // The dial INTENT lives in the tab that pairs the INVITE — this one.
+        markDialedHere();
+        dials.set(handleId, actionsRef.current.beginDialing(view));
+        return;
+      }
+      if (msg.name === DIAL_PLACED) {
+        const [handleId, sid] = msg.args as [string, string];
+        markDialedHere();
+        dials.get(handleId)?.placed(sid);
+        return;
+      }
+      if (msg.name === DIAL_DONE) {
+        const [handleId] = msg.args as [string];
+        dials.get(handleId)?.done();
+        dials.delete(handleId);
+        return;
+      }
+      if (msg.name === SW_ACTION) {
+        handleSwAction(msg.args[0] as { action?: string; callSid?: string });
+        return;
+      }
+      const fn = (
+        actionsRef.current as unknown as Record<string, unknown>
+      )[msg.name];
+      if (typeof fn !== 'function') return;
+      const reply = (ok: boolean, value?: unknown, error?: string) => {
+        if (ASYNC_ACTIONS.has(msg.name)) {
+          post({ t: 'result', to: msg.from, id: msg.id, ok, value, error });
+        }
+      };
+      const fail = (e: unknown) =>
+        reply(false, undefined, e instanceof Error ? e.message : String(e));
+      try {
+        void Promise.resolve(
+          (fn as (...args: unknown[]) => unknown)(...msg.args),
+        ).then((v) => reply(true, v), fail);
+      } catch (e) {
+        fail(e);
+      }
+    };
+
+    const off = subscribe((msg) => {
+      if (role === 'holder') {
+        if (msg.t === 'hello') {
+          post({
+            t: 'snapshot',
+            from: tabId,
+            state: stateRef.current,
+            tone: toneKindRef.current,
+            tabRinging: tabRingingRef.current,
+          });
+        } else if (msg.t === 'action') {
+          run(msg);
+        }
+        return;
+      }
+      // follower
+      if (msg.t === 'snapshot') {
+        setMirror(msg.state as SoftphoneState);
+        mirrorToneRef.current = { tone: msg.tone, ringing: msg.tabRinging };
+        applyTone(msg.tone);
+        setTabRinging(msg.tabRinging);
+      } else if (msg.t === 'gone') {
+        setMirror(null);
+        mirrorToneRef.current = { tone: null, ringing: false };
+        applyTone(null);
+        setTabRinging(false);
+        relay.failAll('The phone tab closed.');
+      } else if (msg.t === 'result') {
+        relay.onResult(msg);
+      }
+    });
+
+    if (role === 'follower') post({ t: 'hello', from: tabId });
+    return () => {
+      off();
+      for (const h of dials.values()) h.done();
+    };
+  }, [role, post, subscribe, tabId, applyTone, handleSwAction, relay]);
+
+  // A follower that becomes the holder drops the mirror — its own engine takes over.
+  useEffect(() => {
+    if (role === 'follower') return;
+    mirrorToneRef.current = { tone: null, ringing: false };
+    return () => setMirror(null);
+  }, [role]);
+
+  // The user moved to another tab: the ringtone moves with them.
+  useEffect(
+    () =>
+      onToneOwnerChange(() => {
+        if (engineOnRef.current) applyTone(toneKindRef.current);
+        else applyTone(mirrorToneRef.current.tone);
+      }),
+    [onToneOwnerChange, applyTone],
+  );
+
+  /** A follower's buttons: every one is sent to the phone's tab. */
+  const relayActions = useMemo<SoftphoneActions>(() => {
+    const fire =
+      (name: string) =>
+      (...args: unknown[]) =>
+        relay.send(name, args);
+    const wait =
+      (name: string) =>
+      (...args: unknown[]) =>
+        relay.call(name, args).then(() => undefined);
+    let dialSeq = 0;
+    return {
+      answer: fire('answer'),
+      hangup: fire('hangup'),
+      completeEndedCall: fire('completeEndedCall'),
+      dismissCompletePrompt: fire('dismissCompletePrompt'),
+      declineActive: fire('declineActive'),
+      beginDialing: (view) => {
+        unlockAudio();
+        const handleId = `${tabId}:dial:${++dialSeq}`;
+        relay.send('beginDialing', [view, handleId]);
+        return {
+          placed: (callSid: string) => relay.send(DIAL_PLACED, [handleId, callSid]),
+          done: () => relay.send(DIAL_DONE, [handleId]),
+        };
+      },
+      cancelDialing: fire('cancelDialing'),
+      toggleMute: fire('toggleMute'),
+      toggleHold: fire('toggleHold'),
+      answerHeld: (info) => {
+        unlockAudio();
+        relay.send('answerHeld', [info]);
+      },
+      blindTransfer: wait('blindTransfer'),
+      takeBack: fire('takeBack'),
+      // Optimistic: the pad cannot wait a round trip per key. The holder still refuses
+      // a digit it cannot send.
+      sendDigit: (digit: string) => {
+        relay.send('sendDigit', [digit]);
+        return isDtmfKey(digit);
+      },
+      addCall: wait('addCall'),
+      holdParty: wait('holdParty'),
+      swapParties: wait('swapParties'),
+      mergeParties: wait('mergeParties'),
+      dropParty: wait('dropParty'),
+      switchTo: fire('switchTo'),
+      answerWaiting: (callId: string) => {
+        unlockAudio();
+        relay.send('answerWaiting', [callId]);
+      },
+      declineWaiting: fire('declineWaiting'),
+      endAndAnswer: fire('endAndAnswer'),
+      retryAudio: fire('retryAudio'),
+    };
+  }, [relay, tabId]);
+
+  const follower = role === 'follower';
+  const viewState: SoftphoneState = follower
+    ? (mirror ?? { ...state, status: 'connecting' })
+    : state;
+  const viewActions = follower ? relayActions : actions;
+  const showOverlay = follower
+    ? !!mirror &&
+      (mirror.calls.length > 0 || !!mirror.dialing || !!mirror.completePrompt)
+    : calls.length > 0 || !!dialing || !!completePrompt;
+
   return (
-    <ActionsCtx.Provider value={actions}>
-      <StateCtx.Provider value={state}>
+    <ActionsCtx.Provider value={viewActions}>
+      <StateCtx.Provider value={viewState}>
         {children}
         {/*
           Every call's <audio> lives HERE, appended imperatively, so audio survives the
@@ -2766,9 +3046,7 @@ Transferred by ${info.transferFrom.name}`
           Mount gated on call state ONLY, never on the route — gating on anything
           route-derived would unmount a live call on navigation.
         */}
-        {calls.length > 0 || dialing || completePrompt
-          ? createPortal(<CallOverlay />, document.body)
-          : null}
+        {showOverlay ? createPortal(<CallOverlay />, document.body) : null}
       </StateCtx.Provider>
     </ActionsCtx.Provider>
   );

@@ -14,6 +14,10 @@ import type { IncomingCallPayload } from '@/api/phone';
 import { RESET_KEYS, keysFor } from '@/lib/realtime-topics';
 import { setRealtimeConnected } from '@/lib/realtime-status';
 import { agentNoticeOf, emitAgentNotice } from '@/lib/agent-notify-bus';
+import {
+  emitInternalMessageNotice,
+  internalMessageNoticeOf,
+} from '@/lib/internal-message-bus';
 
 /** Backoff ceiling, matching `useInternalMessageStream`. */
 const MAX_BACKOFF_MS = 30_000;
@@ -104,6 +108,12 @@ export function useRealtime(
         if (event.topic === 'agent-notify') {
           const notice = agentNoticeOf(event.payload);
           if (notice) emitAgentNotice(notice);
+        }
+        // step2.md (2026-11-05): a new staff message carries its popup text, so the
+        // SSE stream can stay closed while this channel is up.
+        if (event.topic === 'internal-message') {
+          const msg = internalMessageNoticeOf(event.payload);
+          if (msg) emitInternalMessageNotice(msg);
         }
         invalidate(keysFor(event));
       }
