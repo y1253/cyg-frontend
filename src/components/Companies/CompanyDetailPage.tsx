@@ -48,14 +48,13 @@ import {
 } from '@/components/ui/dialog';
 import { useCompany } from '@/hooks/useCompany';
 import { useUsers } from '@/hooks/useUsers';
-import { useAssignCompany } from '@/hooks/useAssignCompany';
+import { AssignedUsersCard } from './AssignedUsersCard';
 import { useResolveTodo } from '@/hooks/useResolveTodo';
 import { useAuth } from '@/context/AuthContext';
 import { canManage, isSuperAdmin } from '@/lib/roles';
 import { DataSourcesCard } from './DataSourcesCard';
 import { QuickBooksCard } from './QuickBooksCard';
 import { BankFeedsCard } from './BankFeedsCard';
-import { roleLabel } from '@/api/users';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink, useReorderLinks } from '@/hooks/useLinks';
@@ -79,7 +78,7 @@ import { CopyButton } from './CopyButton';
 import { CommunicationsTab } from './CommunicationsTab';
 import { InternalCommunicationsTab } from './InternalCommunicationsTab';
 import { useNotifications } from '@/context/NotificationContext';
-import type { TodoItem } from '@/api/companies';
+import { assigneeNames, type TodoItem } from '@/api/companies';
 import type { AppTaskSchedule } from '@/api/taskSchedules';
 import type { CompanyLink } from '@/api/links';
 import type { CompanyNote } from '@/api/notes';
@@ -2259,7 +2258,6 @@ export function CompanyDetailPage() {
   const { data: company, isLoading, isError } = useCompany(companyId);
   const { data: users = [] } = useUsers();
   const { data: schedules = [] } = useTaskSchedules(companyId);
-  const assignMutation = useAssignCompany();
   const updateCompanyMutation = useUpdateCompany();
   const deleteCompanyMutation = useDeleteCompany();
   const restoreMutation = useRestoreCompany();
@@ -2455,11 +2453,6 @@ export function CompanyDetailPage() {
   if (isLoading) return <div className="p-8 text-muted-foreground text-sm">Loading…</div>;
   if (isError || !company) return <div className="p-8 text-destructive text-sm">Company not found.</div>;
 
-  // Every role is assignable -- admins and managers included. Assignment is not a
-  // permission grant (a manager already sees every company); it is what routes an
-  // inbound call and fires the new-message popup, so it has to be able to name the
-  // person actually running the account. The server has always accepted any user id.
-  const assignableUsers = users;
   const now = new Date();
   function isSnoozedNow(todo: TodoItem): boolean {
     return !!todo.snoozedUntil && new Date(todo.snoozedUntil) > now;
@@ -2534,11 +2527,6 @@ export function CompanyDetailPage() {
   const importantOnlyTodos = taskSort === 'priority' ? visibleTodos.filter(t => getTodoPriority(t) === 2) : [];
   const restTodos          = taskSort === 'priority' ? visibleTodos.filter(t => getTodoPriority(t) === 3) : [];
   const importantCount     = openTodos.filter(t => getSchedule(t)?.isImportant ?? false).length;
-
-  function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value;
-    assignMutation.mutate({ companyId, userId: val === '' ? null : Number(val) });
-  }
 
   function todoRowProps(todo: TodoItem) {
     const sched = getSchedule(todo);
@@ -2685,8 +2673,8 @@ export function CompanyDetailPage() {
           <>
             <p className="mb-4 text-xs text-muted-foreground sm:text-sm">
               {company.country ?? '—'} · Registered {formatDate(company.createdAt)} ·{' '}
-              {company.assignedUser
-                ? <>Assigned to <span className="font-medium text-foreground">{company.assignedUser.name}</span></>
+              {company.assignedUsers.length > 0
+                ? <>Assigned to <span className="font-medium text-foreground">{assigneeNames(company.assignedUsers, 3)}</span></>
                 : <span className="text-orange-600 font-medium">Unassigned</span>
               }
               {isAdmin && (
@@ -3189,34 +3177,13 @@ export function CompanyDetailPage() {
               <SignatureSettingsSection companyId={companyId} />
             )}
 
-            {/* Assigned User (admin only) */}
+            {/* Assigned users (admin only) */}
             {isAdmin && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Assigned User</CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center gap-3">
-                  <select
-                    className="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={company.assignedUser?.id ?? ''}
-                    onChange={handleAssign}
-                    disabled={assignMutation.isPending}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {assignableUsers.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.email}) — {roleLabel(u.role)}
-                      </option>
-                    ))}
-                  </select>
-                  {assignMutation.isPending && <span className="text-xs text-muted-foreground">Saving…</span>}
-                  {assignMutation.isError && (
-                    <span className="text-xs text-destructive">
-                      {assignMutation.error instanceof Error ? assignMutation.error.message : 'Error'}
-                    </span>
-                  )}
-                </CardContent>
-              </Card>
+              <AssignedUsersCard
+                companyId={companyId}
+                assigned={company.assignedUsers}
+                users={users}
+              />
             )}
           </div>
         )}
@@ -3423,7 +3390,7 @@ export function CompanyDetailPage() {
               key={companyId}
               companyId={companyId}
               isAdmin={isAdmin}
-              assignedToMe={company.assignedUser?.id === user?.id}
+              assignedToMe={company.assignedUsers.some(u => u.id === user?.id)}
               active={tab === 'communications'}
             />
           </div>

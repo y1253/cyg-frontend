@@ -13,6 +13,7 @@ function quiet(overrides: Partial<CompanySummary> = {}): CompanySummary {
     createdAt: '2026-01-01T00:00:00.000Z',
     isInternal: false,
     assignedUser: { id: 7, name: 'Dana', email: 'dana@cyg.com' },
+    assignedUsers: [{ id: 7, name: 'Dana', email: 'dana@cyg.com' }],
     totalTodos: 0,
     urgentTodos: 0,
     overdueTodos: 0,
@@ -47,7 +48,7 @@ describe('isQuietCompany', () => {
 
   describe('any single tag keeps the row at full weight', () => {
     it('unassigned', () => {
-      expect(isQuietCompany(quiet({ assignedUser: null }), 0, false)).toBe(
+      expect(isQuietCompany(quiet({ assignedUser: null, assignedUsers: [] }), 0, false)).toBe(
         false,
       );
     });

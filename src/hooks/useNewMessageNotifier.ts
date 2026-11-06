@@ -109,7 +109,10 @@ export function useNewMessageNotifier({
     const mine = unsuppressed.filter(
       (id) =>
         userId !== null &&
-        companiesRef.current?.find((c) => c.id === id)?.assignedUser?.id === userId,
+        (companiesRef.current
+          ?.find((c) => c.id === id)
+          ?.assignedUsers.some((u) => u.id === userId) ??
+          false),
     );
     if (mine.length === 0) return;
 

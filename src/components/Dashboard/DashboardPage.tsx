@@ -40,7 +40,7 @@ export function DashboardPage() {
   const assignees = useMemo(() => {
     const byId = new Map<number, AssignedUser>();
     for (const c of companies) {
-      if (c.assignedUser) byId.set(c.assignedUser.id, c.assignedUser);
+      for (const u of c.assignedUsers) byId.set(u.id, u);
     }
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [companies]);
@@ -55,15 +55,15 @@ export function DashboardPage() {
     return companies.filter(c => {
       if (q) {
         const name = c.businessName.toLowerCase().includes(q);
-        const user = c.assignedUser?.name.toLowerCase().includes(q) ?? false;
+        const user = c.assignedUsers.some(u => u.name.toLowerCase().includes(q));
         if (!name && !user) return false;
       }
       if (isAdmin && statusFilter !== 'all') {
         if (statusFilter === 'overdue25'  && c.urgentTodos === 0)    return false;
         if (statusFilter === 'important'  && c.importantTodos === 0) return false;
-        if (statusFilter === 'unassigned' && c.assignedUser !== null) return false;
+        if (statusFilter === 'unassigned' && c.assignedUsers.length > 0) return false;
       }
-      if (isAdmin && activeAssignee !== 'all' && c.assignedUser?.id !== activeAssignee) {
+      if (isAdmin && activeAssignee !== 'all' && !c.assignedUsers.some(u => u.id === activeAssignee)) {
         return false;
       }
       return true;

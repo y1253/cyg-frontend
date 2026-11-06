@@ -34,6 +34,6 @@ export function isQuietCompany(
     company.totalTodos === 0 &&
     company.urgentTodos === 0 &&
     company.importantTodos === 0 &&
-    company.assignedUser !== null
+    company.assignedUsers.length > 0
   );
 }

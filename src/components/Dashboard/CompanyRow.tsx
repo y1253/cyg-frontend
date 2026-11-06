@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react';
-import type { CompanySummary } from '@/api/companies';
+import { assigneeNames, type CompanySummary } from '@/api/companies';
 import { CountBadge } from './CountBadge';
 import { isQuietCompany } from './quiet-company';
 
@@ -76,8 +76,8 @@ export function CompanyRow({
             <>
               {company.country ?? '—'}
               {' · '}
-              {company.assignedUser ? (
-                company.assignedUser.name
+              {company.assignedUsers.length > 0 ? (
+                assigneeNames(company.assignedUsers)
               ) : (
                 <span className="text-orange-500 font-medium">Unassigned</span>
               )}
@@ -96,8 +96,8 @@ export function CompanyRow({
             <>
               {company.country ?? '—'}
               {' · '}
-              {company.assignedUser ? (
-                company.assignedUser.name
+              {company.assignedUsers.length > 0 ? (
+                assigneeNames(company.assignedUsers)
               ) : (
                 <span className="font-medium text-orange-500">Unassigned</span>
               )}

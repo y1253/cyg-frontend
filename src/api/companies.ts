@@ -16,6 +16,12 @@ export interface AssignedUser {
   email: string;
 }
 
+/** "Dana", "Dana, Avi", "Dana, Avi +2" — for one-line places like a dashboard row. */
+export function assigneeNames(users: AssignedUser[], max = 2): string {
+  const shown = users.slice(0, max).map((u) => u.name).join(', ');
+  return users.length > max ? `${shown} +${users.length - max}` : shown;
+}
+
 // ─── Company list ─────────────────────────────────────────────────────────────
 
 export interface CompanySummary {
@@ -27,7 +33,10 @@ export interface CompanySummary {
   createdAt: string;
   /** True for the caller's own internal "Cyg Finance" workspace, never a client company. */
   isInternal: boolean;
+  /** The first assignee — kept for older readers; use `assignedUsers`. */
   assignedUser: AssignedUser | null;
+  /** Every user assigned to the company, oldest assignment first. */
+  assignedUsers: AssignedUser[];
   totalTodos: number;
   urgentTodos: number;
   overdueTodos: number;
@@ -92,7 +101,10 @@ export interface CompanyDetail {
     billingEmail: string | null;
     billingPassword: string | null;
   } | null;
+  /** The first assignee — kept for older readers; use `assignedUsers`. */
   assignedUser: AssignedUser | null;
+  /** Every user assigned to the company, oldest assignment first. */
+  assignedUsers: AssignedUser[];
   todos: TodoItem[];
 }
 
@@ -198,19 +210,20 @@ export async function permanentDeleteCompany(token: string, id: number): Promise
 
 // ─── Assign user ─────────────────────────────────────────────────────────────
 
-export async function assignCompanyUser(
+/** Sets the company's assignees to exactly `userIds` (`[]` = unassigned). */
+export async function assignCompanyUsers(
   token: string,
   companyId: number,
-  userId: number | null,
-): Promise<{ ok: boolean }> {
+  userIds: number[],
+): Promise<{ ok: boolean; assignedUsers: AssignedUser[] }> {
   const res = await fetchWithAuth(token, `${API}/companies/${companyId}/assign`, {
     method: 'PATCH',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify({ userIds }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message ?? 'Failed to assign user');
+    throw new Error(body.message ?? 'Failed to assign users');
   }
-  return res.json() as Promise<{ ok: boolean }>;
+  return res.json() as Promise<{ ok: boolean; assignedUsers: AssignedUser[] }>;
 }
