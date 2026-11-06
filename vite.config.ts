@@ -76,7 +76,9 @@ export default defineConfig({
         // shell — but every API helper uses a relative '/api' base, and without the
         // denylist the worker would answer those navigations with index.html.
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api/],
+        // step2.md (2026-11-05): the Chrome extension download (/cyg-agent-extension.zip)
+        // is a file, never the shell.
+        navigateFallbackDenylist: [/^\/api/, /\.zip$/],
         // Deliberately no runtimeCaching for /api: every screen is live, per-user
         // authenticated data (mail, todos, internal messages), so caching it could
         // serve one user's data after logout. Installable, not offline-capable.

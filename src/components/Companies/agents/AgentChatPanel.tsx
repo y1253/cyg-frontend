@@ -198,6 +198,10 @@ function ChatBubble({
         {!fromStaff && !isApproval && !isQuestion && (
           <Bot className="mb-1 size-3.5 text-[#3BBFB4]" />
         )}
+        {/* step2.md (2026-11-05): every staff line names who wrote it. */}
+        {fromStaff && m.userName && (
+          <p className="mb-0.5 text-xs font-semibold text-white/90">{m.userName}</p>
+        )}
         <p className="whitespace-pre-wrap break-words">{m.body}</p>
 
         {isApproval && open && (
@@ -239,7 +243,6 @@ function ChatBubble({
             fromStaff ? 'text-white/80' : 'text-muted-foreground',
           )}
         >
-          {fromStaff && m.userName ? `${m.userName} · ` : ''}
           {fmtTime(m.createdAt)}
         </p>
       </div>

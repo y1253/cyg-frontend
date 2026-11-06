@@ -594,3 +594,20 @@ export function fetchBrowserSession(
     'Failed to load the browser session',
   );
 }
+
+// ── step2.md (2026-11-05): the CYG Chrome extension ────────────────────────
+
+/** Is MY Chrome extension connected to the agents server right now? */
+export interface ExtensionStatus {
+  connected: boolean;
+  registered: boolean;
+  version: string | null;
+  lastSeenAt: string | null;
+}
+
+export function fetchExtensionStatus(token: string): Promise<ExtensionStatus> {
+  return get(token, '/api/extension/status', 'Failed to load the extension status');
+}
+
+/** Served from the client's public folder (built by chrome-extension/build-zip.ps1). */
+export const EXTENSION_ZIP_URL = '/cyg-agent-extension.zip';

@@ -16,6 +16,7 @@ import type { Agent } from '@/api/agents';
 import { AgentFormDialog } from './agents/AgentFormDialog';
 import { AgentCard } from './agents/AgentCard';
 import { AgentView } from './agents/AgentView';
+import { ChromeExtensionCard } from './agents/ChromeExtensionCard';
 import { useNotifications } from '@/context/NotificationContext';
 
 /**
@@ -163,6 +164,9 @@ export function AgentsTab({
           )}
         </>
       )}
+
+      {/* step2.md (2026-11-05): the agents open tabs in YOUR Chrome through it. */}
+      {list.some((a) => a.role === 'WORKER') && <ChromeExtensionCard />}
 
       {dialogs}
     </div>
