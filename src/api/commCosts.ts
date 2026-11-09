@@ -157,6 +157,7 @@ export const PURPOSE_LABEL: Record<string, string> = {
   STRONG_AI: 'Strong AI follow-ups',
   FEATURE_DONE: 'Feature request done',
   BANK_ALERT: 'Bank transaction alerts',
+  WELCOME: 'Welcome texts (chat bubble)',
   OTHER: 'Other',
   INBOUND: 'Customer called us',
   REQUESTED: '“Call me” requests',
