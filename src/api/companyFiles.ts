@@ -161,13 +161,24 @@ export interface ChannelFilesPage {
   nextPageToken: string | null;
 }
 
+/** The Attachments folder's date filter: local days, YYYY-MM-DD, both inclusive. */
+export interface FileDateRange {
+  from?: string;
+  to?: string;
+}
+
 export async function fetchChannelFiles(
   token: string,
   companyId: number,
   channel: FileChannel,
   pageToken?: string | null,
+  range: FileDateRange = {},
 ): Promise<ChannelFilesPage> {
-  const qs = pageToken ? `?pageToken=${encodeURIComponent(pageToken)}` : '';
+  const params = new URLSearchParams();
+  if (pageToken) params.set('pageToken', pageToken);
+  if (range.from) params.set('from', range.from);
+  if (range.to) params.set('to', range.to);
+  const qs = params.size ? `?${params}` : '';
   const res = await fetchWithAuth(
     token,
     `${API}/companies/${companyId}/files/channels/${channel.toLowerCase()}${qs}`,

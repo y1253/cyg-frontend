@@ -14,9 +14,11 @@ import {
   downloadChannelFile, downloadCompanyFile, openChannelFile, openCompanyFile,
   type ChannelFile, type ChannelFileSource, type CompanyAttachmentFile,
   type CompanyFileFolder, type CompanyFileKind, type CompanyStatementFile, type FileChannel,
+  type FileDateRange,
 } from '@/api/companyFiles';
 import { fmtDateTime, fmtPeriod } from '@/components/Customers/customer-format';
 import { formatBytes } from '../message-utils';
+import { FileDateFilter, fileDateRangeLabel } from './FileDateFilter';
 import { FolderTabs } from './FolderTabs';
 
 /** How a row's bytes are reached. */
@@ -187,10 +189,15 @@ export function CompanyFilesPanel({
 }) {
   const { token } = useAuth();
   const uploads = useCompanyFiles(companyId);
-  const email = useCompanyChannelFiles(companyId, 'EMAIL');
-  const chat = useCompanyChannelFiles(companyId, 'CHAT');
-  const whatsapp = useCompanyChannelFiles(companyId, 'WHATSAPP');
-  const sms = useCompanyChannelFiles(companyId, 'SMS');
+  // step2.md (2026-11-10): date search. Sent to the server too, because email and
+  // WhatsApp page — a month three "Load older files" clicks back would otherwise
+  // look empty. The rows are filtered here as well (uploads, and any provider that
+  // ignores the range).
+  const [range, setRange] = useState<FileDateRange>({});
+  const email = useCompanyChannelFiles(companyId, 'EMAIL', range);
+  const chat = useCompanyChannelFiles(companyId, 'CHAT', range);
+  const whatsapp = useCompanyChannelFiles(companyId, 'WHATSAPP', range);
+  const sms = useCompanyChannelFiles(companyId, 'SMS', range);
   const channelQueries = { EMAIL: email, CHAT: chat, WHATSAPP: whatsapp, SMS: sms };
 
   const folders = useMemo(() => uploads.data?.folders ?? [], [uploads.data]);
@@ -200,20 +207,32 @@ export function CompanyFilesPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const inRange = useMemo(() => {
+    const from = range.from ? new Date(`${range.from}T00:00:00`).getTime() : -Infinity;
+    const to = range.to ? new Date(`${range.to}T23:59:59.999`).getTime() : Infinity;
+    return (r: FileRow) => {
+      const t = Date.parse(r.at);
+      return Number.isNaN(t) || (t >= from && t <= to);
+    };
+  }, [range]);
+
   const channelRows = useMemo(() => {
     const rowsOf = (pages: { items: ChannelFile[] }[] | undefined) =>
-      (pages ?? []).flatMap((p) => p.items.map(channelRow));
+      (pages ?? []).flatMap((p) => p.items.map(channelRow)).filter(inRange);
     return {
       EMAIL: rowsOf(email.data?.pages),
       CHAT: rowsOf(chat.data?.pages),
       WHATSAPP: rowsOf(whatsapp.data?.pages),
       SMS: rowsOf(sms.data?.pages),
     } satisfies Record<FileChannel, FileRow[]>;
-  }, [email.data, chat.data, whatsapp.data, sms.data]);
+  }, [email.data, chat.data, whatsapp.data, sms.data, inRange]);
 
   const uploadRows = useMemo(
-    () => folders.map((f) => [...f.statements.map(statementRow), ...f.attachments.map(attachmentRow)]),
-    [folders],
+    () =>
+      folders.map((f) =>
+        [...f.statements.map(statementRow), ...f.attachments.map(attachmentRow)].filter(inRange),
+      ),
+    [folders, inRange],
   );
 
   const rows = useMemo(() => {
@@ -333,6 +352,7 @@ export function CompanyFilesPanel({
     Object.values(channelRows).reduce((n, r) => n + r.length, 0) +
     uploadRows.reduce((n, r) => n + r.length, 0);
 
+  const rangeActive = Boolean(range.from || range.to);
   const emptyText =
     notConnected ??
     (view.kind === 'all'
@@ -399,7 +419,12 @@ export function CompanyFilesPanel({
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <SearchInput value={search} onChange={setSearch} placeholder="Search files…" />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <SearchInput value={search} onChange={setSearch} placeholder="Search files…" />
+            </div>
+            <FileDateFilter value={range} onChange={setRange} />
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           {uploads.isError && view.kind !== 'channel' && (
             <p className="text-sm text-destructive">{uploads.error.message}</p>
@@ -423,7 +448,7 @@ export function CompanyFilesPanel({
           ) : rows.length === 0 && !search ? (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
               <Paperclip size={20} />
-              {emptyText}
+              {rangeActive && !notConnected ? `No files from ${fileDateRangeLabel(range)}.` : emptyText}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">

@@ -94,9 +94,27 @@ export interface StatementTransaction {
   creditAccount: string;
 }
 
+/**
+ * Why a load failed, in words staff can act on. A 502/503/504 or a dropped connection
+ * is the API restarting (a deploy) — that is what showed "Could not load customers" on
+ * 2026-11-09, so it says so instead of a bare "failed".
+ */
+function loadError(what: string, status: number | null): Error {
+  if (status === null || status === 502 || status === 503 || status === 504) {
+    return new Error('The server is restarting or unreachable. Try again in a moment.');
+  }
+  if (status === 403) return new Error(`Only admins can see ${what}.`);
+  return new Error(`Failed to fetch ${what} (error ${status}).`);
+}
+
 async function getJson<T>(token: string, url: string, what: string): Promise<T> {
-  const res = await fetchWithAuth(token, url);
-  if (!res.ok) throw new Error(`Failed to fetch ${what}`);
+  let res: Response;
+  try {
+    res = await fetchWithAuth(token, url);
+  } catch {
+    throw loadError(what, null);
+  }
+  if (!res.ok) throw loadError(what, res.status);
   return res.json() as Promise<T>;
 }
 

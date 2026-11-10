@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FileText, ListOrdered, UserRound, Users2 } from 'lucide-react';
+import { AlertTriangle, FileText, ListOrdered, RotateCw, UserRound, Users2 } from 'lucide-react';
 import type { CustomerSummary } from '@/api/customers';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -74,7 +75,7 @@ export function CustomersPage() {
 /** Every customer who signed up on the public site. Click one for their statements and rows. */
 function CustomersList() {
   const navigate = useNavigate();
-  const { data: customers = [], isLoading, isError } = useCustomers();
+  const { data: customers = [], isLoading, isError, error, refetch, isFetching } = useCustomers();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('newest');
 
@@ -134,7 +135,15 @@ function CustomersList() {
             ))}
           </div>
         ) : isError ? (
-          <p className="text-destructive p-8 text-center text-sm">Could not load customers.</p>
+          <div className="px-6 py-14 text-center">
+            <AlertTriangle className="text-destructive mx-auto mb-2" size={28} />
+            <p className="font-medium">Could not load customers</p>
+            <p className="text-muted-foreground mt-1 text-sm">{error?.message}</p>
+            <Button variant="outline" size="sm" className="mt-4" disabled={isFetching} onClick={() => void refetch()}>
+              <RotateCw className={cn(isFetching && 'animate-spin')} />
+              Try again
+            </Button>
+          </div>
         ) : !rows.length ? (
           <div className="px-6 py-14 text-center">
             <Users2 className="text-muted-foreground mx-auto mb-2" size={28} />
