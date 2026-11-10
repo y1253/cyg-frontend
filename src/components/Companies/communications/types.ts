@@ -20,10 +20,11 @@ export const FOLDERS = [
   // but it is deliberately absent from INBOX_TABS and MAILBOX_ONLY_FOLDERS below, and
   // CommunicationsTab returns the contacts panel before any inbox machinery runs.
   { id: 'CONTACTS', label: 'Contacts', icon: Contact },
-  // Not a mail folder either, for the same reasons: the bookkeeping files the customer
-  // uploaded into THIS company on cygfinance.com (statements, receipts, cheques), filed
-  // per bank account. Read-only for staff. CommunicationsTab returns `CompanyFilesPanel`
-  // before any inbox machinery runs, exactly like Contacts.
+  // Not a mail folder either, for the same reasons: every file in THIS company's email,
+  // chat, WhatsApp and texts, plus the bookkeeping files the customer uploaded on
+  // cygfinance.com (statements, receipts, cheques), filed per bank account. Read-only for
+  // staff. CommunicationsTab returns `CompanyFilesPanel` before any inbox machinery runs,
+  // exactly like Contacts.
   { id: 'ATTACHMENTS', label: 'Attachments', icon: Paperclip },
 ] as const;
 

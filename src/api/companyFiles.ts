@@ -3,9 +3,10 @@ import { fetchWithAuth } from './client';
 const API = '/api';
 
 /**
- * The bookkeeping files a customer uploaded into ONE company on cygfinance.com (bank
- * statements, receipts, cheques, voice notes), filed per bank account. Read-only — the
- * Communications tab's "Attachments" folder. Server: `company-files` module.
+ * The Communications tab's "Attachments" folder: the bookkeeping files a customer uploaded
+ * into ONE company on cygfinance.com (bank statements, receipts, cheques, voice notes),
+ * filed per bank account (server: `company-files`), and every file from the company's
+ * email, chat, WhatsApp and texts (server: `communication-files`). Read-only.
  */
 export type FileStatementStatus =
   | 'UPLOADED'
@@ -72,18 +73,13 @@ const fileUrl = (companyId: number, kind: CompanyFileKind, id: number, download:
   `${API}/companies/${companyId}/files/${kind}/${id}/file${download ? '?download=1' : ''}`;
 
 /**
- * Opens a file in a new tab. The route is guarded, so the bytes come as a blob; the tab
- * is opened BEFORE the await so a popup blocker still counts the click.
+ * Opens a guarded file url in a new tab. The bytes come as a blob; the tab is opened
+ * BEFORE the await so a popup blocker still counts the click.
  */
-export async function openCompanyFile(
-  token: string,
-  companyId: number,
-  kind: CompanyFileKind,
-  id: number,
-): Promise<void> {
+async function openBlobUrl(token: string, path: string): Promise<void> {
   const tab = window.open('', '_blank');
   try {
-    const res = await fetchWithAuth(token, fileUrl(companyId, kind, id, false));
+    const res = await fetchWithAuth(token, path);
     if (!res.ok) throw new Error('The file is no longer available');
     const url = URL.createObjectURL(await res.blob());
     if (tab) tab.location.href = url;
@@ -95,15 +91,9 @@ export async function openCompanyFile(
   }
 }
 
-/** Saves a file under its original name. */
-export async function downloadCompanyFile(
-  token: string,
-  companyId: number,
-  kind: CompanyFileKind,
-  id: number,
-  filename: string,
-): Promise<void> {
-  const res = await fetchWithAuth(token, fileUrl(companyId, kind, id, true));
+/** Saves a guarded file url under `filename`. */
+async function downloadBlobUrl(token: string, path: string, filename: string): Promise<void> {
+  const res = await fetchWithAuth(token, path);
   if (!res.ok) throw new Error('The file is no longer available');
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');
@@ -113,4 +103,97 @@ export async function downloadCompanyFile(
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Opens an uploaded statement / attachment in a new tab. */
+export function openCompanyFile(
+  token: string,
+  companyId: number,
+  kind: CompanyFileKind,
+  id: number,
+): Promise<void> {
+  return openBlobUrl(token, fileUrl(companyId, kind, id, false));
+}
+
+/** Saves an uploaded statement / attachment under its original name. */
+export function downloadCompanyFile(
+  token: string,
+  companyId: number,
+  kind: CompanyFileKind,
+  id: number,
+  filename: string,
+): Promise<void> {
+  return downloadBlobUrl(token, fileUrl(companyId, kind, id, true), filename);
+}
+
+// ─── Files from the company's conversations (2026-11-09) ─────────────────────
+
+/** Where a conversation file came from. Server: `communication-files` module. */
+export type FileChannel = 'EMAIL' | 'CHAT' | 'WHATSAPP' | 'SMS';
+
+/**
+ * Opaque to the client: the server hands it out with each row and takes it back to fetch
+ * the bytes (the same shape the AI agents use, `AgentFileSource`).
+ */
+export type ChannelFileSource = Record<string, unknown> & { kind: string };
+
+export interface ChannelFile {
+  key: string;
+  channel: FileChannel;
+  filename: string;
+  mimeType: string;
+  size: number | null;
+  at: string;
+  direction: 'inbound' | 'outbound' | null;
+  /** Who sent it — a name, an address or a number ("Sent" for our own). */
+  from: string;
+  /** The email's subject, the chat space, the conversation's number. */
+  context: string;
+  /** Null = only reachable by `link` (a Drive / SharePoint file shared in a chat). */
+  source: ChannelFileSource | null;
+  link: string | null;
+}
+
+export interface ChannelFilesPage {
+  /** False = the channel is not set up for this company (no mailbox, no number…). */
+  connected: boolean;
+  items: ChannelFile[];
+  nextPageToken: string | null;
+}
+
+export async function fetchChannelFiles(
+  token: string,
+  companyId: number,
+  channel: FileChannel,
+  pageToken?: string | null,
+): Promise<ChannelFilesPage> {
+  const qs = pageToken ? `?pageToken=${encodeURIComponent(pageToken)}` : '';
+  const res = await fetchWithAuth(
+    token,
+    `${API}/companies/${companyId}/files/channels/${channel.toLowerCase()}${qs}`,
+  );
+  if (!res.ok) throw new Error('Failed to load the files');
+  return res.json() as Promise<ChannelFilesPage>;
+}
+
+const channelFileUrl = (companyId: number, source: ChannelFileSource, download: boolean) =>
+  `${API}/companies/${companyId}/files/channels/file?source=${encodeURIComponent(
+    JSON.stringify(source),
+  )}${download ? '&download=1' : ''}`;
+
+export function openChannelFile(
+  token: string,
+  companyId: number,
+  source: ChannelFileSource,
+): Promise<void> {
+  return openBlobUrl(token, channelFileUrl(companyId, source, false));
+}
+
+export function downloadChannelFile(
+  token: string,
+  companyId: number,
+  source: ChannelFileSource,
+  filename: string,
+): Promise<void> {
+  return downloadBlobUrl(token, channelFileUrl(companyId, source, true), filename);
 }
