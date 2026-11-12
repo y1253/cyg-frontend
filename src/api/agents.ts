@@ -11,7 +11,8 @@ export type ApprovalMode =
   | 'ASK_ALWAYS'
   | 'AUTONOMOUS'
   | 'ASK_SECURITY'
-  | 'ASK_COMPLETE';
+  | 'ASK_COMPLETE'
+  | 'COMMAND_ONLY';
 
 export const APPROVAL_MODES: { value: ApprovalMode; label: string; hint: string }[] = [
   {
@@ -33,6 +34,12 @@ export const APPROVAL_MODES: { value: ApprovalMode; label: string; hint: string 
     value: 'AUTONOMOUS',
     label: "Don't ask — just do it",
     hint: 'Works on its own. It still asks a question when it does not know what is right.',
+  },
+  {
+    // step11.md (2026-11-12)
+    value: 'COMMAND_ONLY',
+    label: "Don't ask — act only on command",
+    hint: 'Does nothing on its own when an email, WhatsApp, text or task arrives — it tells you in its chat. Whatever you ask it in the chat (and its own schedules) it does at once, without asking. It does not answer calls.',
   },
 ];
 
