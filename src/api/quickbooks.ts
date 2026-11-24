@@ -10,6 +10,8 @@ export interface QuickBooksStatus {
   connectedAt: string | null;
   needsReconnect: boolean;
   lastError: string | null;
+  /** step11 (2026-11-23): since when bank transactions are sent to QuickBooks; null = off. */
+  updateQuickbooks: string | null;
 }
 
 const base = (companyId: number) => `/api/quickbooks/companies/${companyId}`;
@@ -41,6 +43,24 @@ export function fetchQuickBooksAuthUrl(
   companyId: number,
 ): Promise<{ authUrl: string }> {
   return call(token, `${base(companyId)}/auth-url`, {}, 'Could not start the QuickBooks sign-in');
+}
+
+/** step11 (2026-11-23): ADMIN turns "send bank transactions to QuickBooks" on or off. */
+export function setUpdateQuickBooks(
+  token: string,
+  companyId: number,
+  on: boolean,
+): Promise<QuickBooksStatus> {
+  return call(
+    token,
+    `${base(companyId)}/update-quickbooks`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on }),
+    },
+    'Failed to change the QuickBooks setting',
+  );
 }
 
 export function disconnectQuickBooks(token: string, companyId: number): Promise<{ ok: true }> {

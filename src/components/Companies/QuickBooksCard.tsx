@@ -15,6 +15,7 @@ import {
   useConnectQuickBooks,
   useDisconnectQuickBooks,
   useQuickBooksStatus,
+  useSetUpdateQuickBooks,
 } from '@/hooks/useQuickBooks';
 
 /**
@@ -33,6 +34,7 @@ export function QuickBooksCard({
   const status = useQuickBooksStatus(companyId);
   const { connect, connecting, error } = useConnectQuickBooks(companyId);
   const disconnect = useDisconnectQuickBooks(companyId);
+  const setUpdate = useSetUpdateQuickBooks(companyId);
   const [confirming, setConfirming] = useState(false);
   const s = status.data;
 
@@ -92,6 +94,34 @@ export function QuickBooksCard({
               </Button>
             )}
           </div>
+        )}
+        {s?.connected && !s.needsReconnect && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm font-medium">Send bank transactions to QuickBooks</span>
+              <span className="text-xs text-muted-foreground">
+                {s.updateQuickbooks
+                  ? `On since ${new Date(s.updateQuickbooks).toLocaleString()} — every new bank transaction is entered with its category, and category / name changes are updated there.`
+                  : 'Off — bank transactions stay only in the books here.'}
+              </span>
+            </div>
+            {canConnect ? (
+              <Button
+                size="sm"
+                variant={s.updateQuickbooks ? 'outline' : 'default'}
+                disabled={setUpdate.isPending}
+                onClick={() => setUpdate.mutate(!s.updateQuickbooks)}
+              >
+                {setUpdate.isPending && <Loader2 className="size-4 animate-spin" />}
+                {s.updateQuickbooks ? 'Turn off' : 'Turn on'}
+              </Button>
+            ) : (
+              <Badge variant="outline">{s.updateQuickbooks ? 'On' : 'Off'}</Badge>
+            )}
+          </div>
+        )}
+        {setUpdate.isError && (
+          <p className="text-xs text-destructive">{(setUpdate.error as Error).message}</p>
         )}
         {s?.needsReconnect && s.lastError && (
           <p className="text-xs break-words text-muted-foreground">{s.lastError}</p>

@@ -1,45 +1,43 @@
 import { fetchWithAuth } from './client';
 
-/** step2.md (2026-11-04): a company's bank logins connected through Plaid (Details tab). */
+/**
+ * step11 (2026-11-23): a company's bank connections, kept by the CUSTOMER app in the
+ * company's book (`/api/companies/:id/customer-bank-feeds`, proxied to the customer API) —
+ * the same connections the customer sees on cygfinance.com.
+ */
 export interface BankAccount {
   id: number;
-  accountId: string;
   name: string;
-  officialName: string | null;
   mask: string | null;
-  type: string;
-  subtype: string | null;
+  kind: string;
+  /** The folder (account) its transactions are filed under. */
+  accountName: string;
   currency: string | null;
   currentBalance: number | null;
-  availableBalance: number | null;
-  creditLimit: number | null;
-  balanceAt: string | null;
+  /** YYYY-MM-DD — the first day filed; null = all the history there is. */
+  startDate: string | null;
 }
-
-export type BankItemStatus = 'ACTIVE' | 'LOGIN_REQUIRED' | 'ERROR' | 'REMOVED';
 
 export interface BankItem {
   id: number;
-  institutionId: string | null;
   institutionName: string | null;
-  products: string[];
-  status: BankItemStatus;
+  status: 'ACTIVE' | 'LOGIN_REQUIRED' | 'ERROR' | 'REMOVED';
   error: string | null;
+  errorDetail: string | null;
   historyDone: boolean;
   lastSyncAt: string | null;
   createdAt: string;
+  /** null = the start dates were never confirmed — nothing is filed until they are. */
+  setupAt: string | null;
   syncing: boolean;
+  refreshNote?: string | null;
+  newAccounts: boolean;
+  /** YYYY-MM-DD — the oldest day Plaid can give. */
+  earliestDate: string;
   accounts: BankAccount[];
 }
 
-export interface BankFeedsStatus {
-  /** The server has Plaid keys + ENCRYPTION_KEY. */
-  configured: boolean;
-  environment: string;
-  items: BankItem[];
-}
-
-const base = '/api/bank-feeds';
+const base = (companyId: number) => `/api/companies/${companyId}/customer-bank-feeds`;
 
 async function call<T>(
   token: string,
@@ -53,55 +51,93 @@ async function call<T>(
     const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message;
     throw new Error(msg || fallback);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
-const json = (body: unknown): RequestInit => ({
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
+const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-export function fetchBankFeedsStatus(token: string, companyId: number): Promise<BankFeedsStatus> {
-  return call(token, `${base}/companies/${companyId}/status`, {}, 'Failed to load bank feeds');
+export function fetchBankConfig(token: string, companyId: number) {
+  return call<{ enabled: boolean }>(
+    token,
+    `${base(companyId)}/config`,
+    {},
+    'Failed to load bank feeds',
+  );
 }
 
-/** A Plaid Link token; with `itemId` Link opens in update mode (Reconnect). */
+export function fetchBankItems(token: string, companyId: number) {
+  return call<BankItem[]>(token, base(companyId), {}, 'Failed to load bank feeds');
+}
+
+/** `itemId` = sign in to that bank again; `chooseAccounts` = pick its shared accounts again. */
 export function createBankLinkToken(
   token: string,
   companyId: number,
   itemId?: number,
-): Promise<{ linkToken: string }> {
-  return call(
+  chooseAccounts = false,
+) {
+  const q = new URLSearchParams();
+  if (itemId) q.set('itemId', String(itemId));
+  if (chooseAccounts) q.set('accounts', '1');
+  return call<{ linkToken: string }>(
     token,
-    `${base}/companies/${companyId}/link-token`,
-    json(itemId ? { itemId } : {}),
+    `${base(companyId)}/link-token${q.size ? `?${q}` : ''}`,
+    json('POST'),
     'Could not start the bank connection',
   );
 }
 
-export function exchangeBankToken(
-  token: string,
-  companyId: number,
-  publicToken: string,
-): Promise<BankItem> {
-  return call(
+export function exchangeBankToken(token: string, companyId: number, publicToken: string) {
+  return call<BankItem>(
     token,
-    `${base}/companies/${companyId}/exchange`,
-    json({ publicToken }),
-    'Could not save the bank connection',
+    `${base(companyId)}/exchange`,
+    json('POST', { publicToken }),
+    'Could not connect the bank',
   );
 }
 
-export function syncBankItem(token: string, itemId: number): Promise<BankItem> {
-  return call(token, `${base}/items/${itemId}/sync`, json({}), 'Sync failed');
+export function bankReconnected(token: string, companyId: number, itemId: number) {
+  return call<BankItem>(
+    token,
+    `${base(companyId)}/${itemId}/reconnected`,
+    json('POST'),
+    'Could not update the connection',
+  );
 }
 
-export function disconnectBankItem(token: string, itemId: number): Promise<{ ok: true }> {
-  return call(
+export function setBankStartDates(
+  token: string,
+  companyId: number,
+  itemId: number,
+  accounts: Array<{ id: number; startDate: string | null }>,
+) {
+  return call<BankItem>(
     token,
-    `${base}/items/${itemId}`,
-    { method: 'DELETE' },
+    `${base(companyId)}/${itemId}/accounts`,
+    json('PUT', { accounts }),
+    'Could not save the start dates',
+  );
+}
+
+export function syncBankItem(token: string, companyId: number, itemId: number) {
+  return call<BankItem>(
+    token,
+    `${base(companyId)}/${itemId}/sync`,
+    json('POST'),
+    'Could not refresh the bank',
+  );
+}
+
+export function disconnectBankItem(token: string, companyId: number, itemId: number) {
+  return call<void>(
+    token,
+    `${base(companyId)}/${itemId}`,
+    json('DELETE'),
     'Failed to disconnect the bank',
   );
 }

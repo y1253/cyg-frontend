@@ -5,6 +5,7 @@ import {
   disconnectQuickBooks,
   fetchQuickBooksAuthUrl,
   fetchQuickBooksStatus,
+  setUpdateQuickBooks,
 } from '@/api/quickbooks';
 
 /** step2.md: the company's QuickBooks Online connection. */
@@ -64,6 +65,16 @@ export function useConnectQuickBooks(companyId: number) {
   }, [token, companyId, qc]);
 
   return { connect, connecting, error };
+}
+
+/** step11: send the company's bank transactions to QuickBooks (ADMIN). */
+export function useSetUpdateQuickBooks(companyId: number) {
+  const { token } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => setUpdateQuickBooks(token!, companyId, on),
+    onSuccess: (status) => qc.setQueryData(['quickbooks', companyId], status),
+  });
 }
 
 export function useDisconnectQuickBooks(companyId: number) {

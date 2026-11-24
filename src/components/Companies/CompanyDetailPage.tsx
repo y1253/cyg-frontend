@@ -55,6 +55,7 @@ import { canManage, isSuperAdmin } from '@/lib/roles';
 import { DataSourcesCard } from './DataSourcesCard';
 import { QuickBooksCard } from './QuickBooksCard';
 import { BankFeedsCard } from './BankFeedsCard';
+import { BankTransactionsSection } from './BankTransactionsSection';
 import { useTaskSchedules } from '@/hooks/useTaskSchedules';
 import { useDeleteTodo, useSetTodoCycle, useRemoveTodoCycle, useSnoozeTodo, useUnsnoozeTodo } from '@/hooks/useTodoActions';
 import { useLinks, useCreateLink, useUpdateLink, useDeleteLink, useReorderLinks } from '@/hooks/useLinks';
@@ -885,6 +886,7 @@ type Tab =
   | 'links'
   | 'schedules'
   | 'rules'
+  | 'bank'
   | 'communications'
   | 'agents';
 
@@ -1143,6 +1145,7 @@ function TabBar({
     { key: 'links', label: 'Links' },
     { key: 'schedules' as Tab, label: 'Schedules' },
     { key: 'rules' as Tab, label: 'Rules' },
+    { key: 'bank' as Tab, label: 'Bank transactions' },
     { key: 'communications' as Tab, label: 'Communications' },
     { key: 'agents' as Tab, label: 'Agents' },
   ];
@@ -3332,6 +3335,11 @@ export function CompanyDetailPage() {
         {/* ── Rules tab — the customer's own bookkeeping rules (step2) ── */}
         {tab === 'rules' && (
           <CustomerRulesSection companyId={companyId} canEdit={isAdmin} />
+        )}
+
+        {/* ── Bank transactions tab — the customer API's categorised bank rows (step11) ── */}
+        {tab === 'bank' && (
+          <BankTransactionsSection companyId={companyId} canEdit={isAdmin} />
         )}
 
         {/* ── Agents tab (step12; kept mounted once visited, like Communications below —
