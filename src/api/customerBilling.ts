@@ -50,7 +50,8 @@ export interface TrialUsage {
 }
 
 export interface CustomerSubscriptionRow {
-  customer: { id: number; name: string; email: string | null; phone: string | null };
+  /** `stripeCustomerId`: its Stripe Customer (every account has one since 2026-11-25). */
+  customer: { id: number; name: string; email: string | null; phone: string | null; stripeCustomerId: string | null };
   status: SubscriptionStatus;
   access: AccessReason;
   amountCents: number | null;

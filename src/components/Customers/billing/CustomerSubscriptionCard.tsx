@@ -66,10 +66,25 @@ export function CustomerSubscriptionCard({ customerId }: { customerId: number })
         <p className="text-destructive p-6 text-center text-sm">Could not load the subscription.</p>
       ) : (
         <CardContent className="grid gap-5 p-4 sm:p-5">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-4">
             <Fact label="Renewal / free until" value={periodText(r)} />
             <Fact label="Ever paid" value={r.everPaid ? 'Yes' : 'No'} />
             <Fact label="Trial started" value={r.trialStartedAt ? fmtDateTime(r.trialStartedAt) : 'Not yet'} />
+            <div className="min-w-0">
+              <p className="text-muted-foreground text-xs">Stripe customer</p>
+              {r.customer.stripeCustomerId ? (
+                <a
+                  href={`https://dashboard.stripe.com/customers/${r.customer.stripeCustomerId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate font-mono text-sm text-blue-600 hover:underline"
+                >
+                  {r.customer.stripeCustomerId}
+                </a>
+              ) : (
+                <p className="text-sm">Not made yet</p>
+              )}
+            </div>
           </div>
 
           {r.failedSince && (
