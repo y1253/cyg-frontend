@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Coins, CreditCard, Inbox, Lightbulb, Mail, Megaphone, MessageSquareText, Phone, Receipt, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
+import { ArrowLeftRight, Coins, CreditCard, History, Inbox, Lightbulb, Mail, Megaphone, MessageSquareText, Phone, ShieldAlert, Sparkles, Tag, Users2 } from 'lucide-react';
 
 /** The Customer site area's pages, by `?tab=` key (`CustomerSiteShell`). */
 export type CustomerSiteTab =
@@ -11,7 +11,8 @@ export type CustomerSiteTab =
   | 'requests'
   | 'voice'
   | 'prospects'
-  | 'pricing'
+  | 'subscriptions'
+  | 'transactions'
   | 'promo'
   | 'payments'
   | 'costs';
@@ -71,22 +72,28 @@ export const CUSTOMER_SITE_TABS: {
     blurb: 'The mailbox customers email statements, receipts and questions to — the AI answers in the thread.',
   },
   {
-    key: 'pricing',
-    label: 'Pricing',
+    key: 'subscriptions',
+    label: 'Subscriptions',
     icon: <CreditCard size={14} />,
-    blurb: 'What a customer pays to Generate — live on cygfinance.com as soon as you save.',
+    blurb: 'The monthly plan and free trial, and every customer’s subscription — who can use the app, who is failing to pay.',
+  },
+  {
+    key: 'transactions',
+    label: 'Transactions',
+    icon: <ArrowLeftRight size={14} />,
+    blurb: 'Every subscription payment — paid, failed (with the bank’s reason), refunded, disputed or free with a promo code.',
   },
   {
     key: 'promo',
     label: 'Promo codes',
     icon: <Tag size={14} />,
-    blurb: 'Discounts customers enter before paying: a percentage off, or a fixed price.',
+    blurb: 'Codes customers enter to get the subscription free — for a number of months, or forever.',
   },
   {
     key: 'payments',
-    label: 'Payments',
-    icon: <Receipt size={14} />,
-    blurb: 'Every Generate a customer paid for (or got free with a promo code).',
+    label: 'Old payments',
+    icon: <History size={14} />,
+    blurb: 'Pay-per-Generate payments from before the monthly subscription (history only).',
   },
   {
     key: 'costs',
@@ -111,7 +118,7 @@ export const CUSTOMER_SITE_GROUPS: {
   { key: 'customers', label: 'Customers', icon: <Users2 size={15} />, tabs: ['customers'] },
   { key: 'ai', label: 'AI assistant', icon: <Sparkles size={15} />, tabs: ['ai', 'instructions', 'requests', 'voice', 'prospects'] },
   { key: 'inbound', label: 'Inbound', icon: <Inbox size={15} />, tabs: ['numbers', 'inbox'] },
-  { key: 'money', label: 'Money', icon: <Coins size={15} />, tabs: ['pricing', 'promo', 'payments', 'costs'] },
+  { key: 'money', label: 'Money', icon: <Coins size={15} />, tabs: ['subscriptions', 'transactions', 'promo', 'payments', 'costs'] },
 ];
 
 export function groupOf(tab: CustomerSiteTab): (typeof CUSTOMER_SITE_GROUPS)[number] {

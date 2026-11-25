@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { Copy, Pencil, Plus, Tag } from 'lucide-react';
-import { money, priceWithPromo, type PromoCode } from '@/api/customerBilling';
+import type { PromoCode } from '@/api/customerBilling';
 import { ConfirmRemoveButton } from '@/components/CompanySettings/ConfirmRemoveButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useCustomerPricing } from '@/hooks/useCustomerPricing';
 import { useDeletePromoCode } from '@/hooks/useDeletePromoCode';
 import { usePromoCodes } from '@/hooks/usePromoCodes';
 import { useSavePromoCode } from '@/hooks/useSavePromoCode';
@@ -24,10 +23,9 @@ function promoState(p: PromoCode): { label: string; className: string } {
   return { label: 'Live', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
 }
 
-/** ADMIN: promo codes customers enter before paying for a Generate. */
+/** ADMIN: promo codes that give a customer the subscription free, for N months or forever. */
 export function PromoCodesPanel() {
   const codes = usePromoCodes();
-  const pricing = useCustomerPricing();
   const save = useSavePromoCode();
   const remove = useDeletePromoCode();
   const [editing, setEditing] = useState<PromoCode | null>(null);
@@ -36,8 +34,6 @@ export function PromoCodesPanel() {
   const [copied, setCopied] = useState<number | null>(null);
 
   const list = codes.data ?? [];
-  const listPrice = pricing.data?.generatePriceCents ?? 0;
-  const currency = pricing.data?.currency ?? 'cad';
 
   const open = (p: PromoCode | null) => {
     setEditing(p);
@@ -54,8 +50,7 @@ export function PromoCodesPanel() {
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-muted-foreground text-sm">
-          The current price is <span className="text-foreground font-semibold">{listPrice ? money(listPrice, currency) : 'free'}</span>
-          {' '}— each code shows what a customer pays with it.
+          A code gives the monthly subscription free — for a number of months, or forever. No card is asked.
         </p>
         <Button onClick={() => open(null)} className="gap-1.5">
           <Plus size={15} /> New promo code
@@ -77,7 +72,7 @@ export function PromoCodesPanel() {
               <Tag size={20} />
             </span>
             <p className="font-medium">No promo codes yet</p>
-            <p className="text-muted-foreground mt-1 text-sm">Create one to give a customer a discount — or a free Generate.</p>
+            <p className="text-muted-foreground mt-1 text-sm">Create one to give a customer free months of the subscription.</p>
             <Button variant="outline" className="mt-4 gap-1.5" onClick={() => open(null)}>
               <Plus size={15} /> Create the first code
             </Button>
@@ -87,8 +82,7 @@ export function PromoCodesPanel() {
             <TableHeader className="bg-muted/40">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">Code</TableHead>
-                <TableHead>Discount</TableHead>
-                <TableHead>Customer pays</TableHead>
+                <TableHead>Gives</TableHead>
                 <TableHead>Uses</TableHead>
                 <TableHead className="hidden md:table-cell">Expires</TableHead>
                 <TableHead>Status</TableHead>
@@ -98,7 +92,6 @@ export function PromoCodesPanel() {
             <TableBody>
               {list.map(p => {
                 const state = promoState(p);
-                const pays = priceWithPromo(listPrice, p);
                 return (
                   <TableRow key={p.id} className={cn(!p.active && 'opacity-60')}>
                     <TableCell className="pl-4">
@@ -117,12 +110,9 @@ export function PromoCodesPanel() {
                       {p.note && <p className="text-muted-foreground mt-1 max-w-[220px] truncate text-xs">{p.note}</p>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={p.kind === 'PERCENT_OFF' ? 'border-violet-200 text-violet-700' : 'border-sky-200 text-sky-700'}>
-                        {promoValueText(p, currency)}
+                      <Badge variant="outline" className={p.freeMonths === null ? 'border-violet-200 text-violet-700' : 'border-sky-200 text-sky-700'}>
+                        {promoValueText(p)}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="font-medium tabular-nums">
-                      {pays === 0 ? <span className="text-emerald-700">Free</span> : money(pays, currency)}
                     </TableCell>
                     <TableCell className="tabular-nums">
                       {p.usedCount}
@@ -171,8 +161,6 @@ export function PromoCodesPanel() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         promo={editing}
-        listPriceCents={listPrice}
-        currency={currency}
       />
     </div>
   );

@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { CustomerAvatar } from './CustomerAvatar';
 import { CustomerSiteShell } from './CustomerSiteShell';
 import { StatementRowsDialog } from './StatementRowsDialog';
-import { CustomerPaymentsCard } from './billing/CustomerPaymentsCard';
+import { CustomerSubscriptionCard } from './billing/CustomerSubscriptionCard';
 import { CustomerAiCard } from './ai/CustomerAiCard';
 import { CustomerAiCostCard } from './costs/CustomerAiCostCard';
 import { CustomerCommCostCard } from './costs/CustomerCommCostCard';
@@ -235,7 +235,7 @@ export function CustomerDetailPage() {
         )}
       </Card>
 
-      <CustomerPaymentsCard customerId={c.id} />
+      <CustomerSubscriptionCard customerId={c.id} />
 
       <CustomerAiCard customerId={c.id} />
 

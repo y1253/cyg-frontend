@@ -22,7 +22,8 @@ import { FeatureRequestsPanel } from './requests/FeatureRequestsPanel';
 import { VoicePanel } from './voice/VoicePanel';
 import { ProspectsPanel } from './prospects/ProspectsPanel';
 import { CustomerInboxPanel } from './inbox/CustomerInboxPanel';
-import { PricingPanel } from './billing/PricingPanel';
+import { SubscriptionsPanel } from './billing/SubscriptionsPanel';
+import { TransactionsPanel } from './billing/TransactionsPanel';
 import { PromoCodesPanel } from './billing/PromoCodesPanel';
 import { CostsPanel } from './costs/CostsPanel';
 
@@ -45,12 +46,13 @@ const SORTERS: Record<Sort, (a: CustomerSummary, b: CustomerSummary) => number> 
 
 /**
  * ADMIN: the public site (cygfinance.com) — its customers, the numbers they text receipts
- * to, the Generate price, promo codes and payments. The tab lives in `?tab=` so a link (or a reload) lands on the same one.
+ * to, subscriptions, transactions, promo codes and the old payments. The tab lives in `?tab=` so a link (or a reload) lands on the same one.
  */
 export function CustomersPage() {
   const [params] = useSearchParams();
-  // `phone-costs` was its own tab until the Costs tab merged it with AI costs; old links still land.
-  const raw = params.get('tab') === 'phone-costs' ? 'costs' : params.get('tab');
+  // Old links: `phone-costs` merged into Costs; `pricing` (pay-per-Generate) became Subscriptions.
+  const legacy: Record<string, CustomerSiteTab> = { 'phone-costs': 'costs', pricing: 'subscriptions' };
+  const raw = legacy[params.get('tab') ?? ''] ?? params.get('tab');
   const tab: CustomerSiteTab = CUSTOMER_SITE_TABS.some(t => t.key === raw) ? (raw as CustomerSiteTab) : 'customers';
   const current = CUSTOMER_SITE_TABS.find(t => t.key === tab)!;
 
@@ -64,7 +66,8 @@ export function CustomersPage() {
       {tab === 'requests' && <FeatureRequestsPanel />}
       {tab === 'voice' && <VoicePanel />}
       {tab === 'prospects' && <ProspectsPanel />}
-      {tab === 'pricing' && <PricingPanel />}
+      {tab === 'subscriptions' && <SubscriptionsPanel />}
+      {tab === 'transactions' && <TransactionsPanel />}
       {tab === 'promo' && <PromoCodesPanel />}
       {tab === 'payments' && <PaymentsPanel />}
       {tab === 'costs' && <CostsPanel />}

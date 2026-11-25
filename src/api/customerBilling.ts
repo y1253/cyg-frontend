@@ -3,21 +3,123 @@ import { fetchWithAuth } from './client';
 const API = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-/** The flat price of one customer Generate on cygfinance.com. 0 = free (no card asked). */
-export interface CustomerPricing {
-  generatePriceCents: number;
-  currency: string;
+// ── Plan ─────────────────────────────────────────────────────────────────────
+
+/** The monthly plan: a subscriber's transaction limit and the free trial's allowances. */
+export interface SubscriptionPlan {
+  monthlyTransactionLimit: number;
+  warnPercent: number;
+  trialTransactions: number;
+  trialTexts: number;
+  trialCallMinutes: number;
   updatedAt: string;
 }
 
-export type PromoKind = 'FIXED_PRICE' | 'PERCENT_OFF';
+export type SubscriptionPlanInput = Omit<SubscriptionPlan, 'updatedAt'>;
 
+// ── Subscriptions ────────────────────────────────────────────────────────────
+
+export type SubscriptionStatus =
+  | 'NONE'
+  | 'INCOMPLETE'
+  | 'INCOMPLETE_EXPIRED'
+  | 'TRIALING'
+  | 'ACTIVE'
+  | 'PAST_DUE'
+  | 'UNPAID'
+  | 'CANCELED'
+  | 'PAUSED';
+
+/** Why the customer can (or cannot) use the app — the customer API's `accessOf`. */
+export type AccessReason = 'PAID' | 'PAST_DUE' | 'FREE' | 'TRIAL' | 'TRIAL_USED' | 'UNPAID' | 'ENDED' | 'NONE';
+
+export type SubscriptionFilter = 'all' | 'active' | 'past_due' | 'free' | 'trial' | 'trial_used' | 'locked';
+
+export type TrialItem = 'transactions' | 'texts' | 'callMinutes';
+
+export interface UsedOf {
+  used: number;
+  limit: number;
+}
+
+export interface TrialUsage {
+  transactions: UsedOf;
+  texts: UsedOf;
+  callMinutes: UsedOf;
+  usedUp: TrialItem[];
+}
+
+export interface CustomerSubscriptionRow {
+  customer: { id: number; name: string; email: string | null; phone: string | null };
+  status: SubscriptionStatus;
+  access: AccessReason;
+  amountCents: number | null;
+  currency: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  freeUntil: string | null;
+  freeForever: boolean;
+  failedSince: string | null;
+  lastFailureMessage: string | null;
+  everPaid: boolean;
+  trialStartedAt: string | null;
+  /** The customer's own limit; null = the plan's. */
+  transactionLimit: number | null;
+  month: { month: string; used: number; limit: number };
+  /** Only for a customer who never paid. */
+  trial: TrialUsage | null;
+}
+
+export interface SubscriptionsResponse {
+  month: string;
+  counts: Record<SubscriptionFilter, number>;
+  subscriptions: CustomerSubscriptionRow[];
+}
+
+// ── Billing transactions ─────────────────────────────────────────────────────
+
+export type BillingTransactionKind = 'SUBSCRIPTION_START' | 'RENEWAL' | 'PRORATION' | 'REFUND' | 'DISPUTE' | 'FREE_PROMO';
+export type BillingTransactionStatus = 'SUCCEEDED' | 'FAILED' | 'ACTION_REQUIRED' | 'REFUNDED' | 'DISPUTED' | 'FREE';
+
+export interface BillingTransaction {
+  id: number;
+  customerId: number;
+  kind: BillingTransactionKind;
+  status: BillingTransactionStatus;
+  amountCents: number;
+  currency: string;
+  attemptCount: number | null;
+  failureCode: string | null;
+  declineCode: string | null;
+  failureMessage: string | null;
+  nextRetryAt: string | null;
+  cardBrand: string | null;
+  cardLast4: string | null;
+  cardExpMonth: number | null;
+  cardExpYear: number | null;
+  hostedInvoiceUrl: string | null;
+  invoicePdfUrl: string | null;
+  receiptUrl: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  promoCode: string | null;
+  occurredAt: string;
+  customer: { id: number; name: string; email: string | null };
+}
+
+export interface BillingTransactionsResponse {
+  transactions: BillingTransaction[];
+  totals: { succeededCents30d: number; succeededCount30d: number; failedCount30d: number };
+}
+
+// ── Promo codes ──────────────────────────────────────────────────────────────
+
+/** 2026-11-23: every code is a free subscription — `freeMonths` months, null = forever. */
 export interface PromoCode {
   id: number;
   code: string;
-  kind: PromoKind;
-  /** FIXED_PRICE: cents. PERCENT_OFF: 1–100. */
-  value: number;
+  kind: 'FREE_SUBSCRIPTION';
+  freeMonths: number | null;
   active: boolean;
   expiresAt: string | null;
   maxUses: number | null;
@@ -28,13 +130,14 @@ export interface PromoCode {
 
 export interface PromoCodeInput {
   code: string;
-  kind: PromoKind;
-  value: number;
+  freeMonths: number | null;
   active: boolean;
   expiresAt: string | null;
   maxUses: number | null;
   note: string | null;
 }
+
+// ── Legacy per-Generate payments ─────────────────────────────────────────────
 
 export type PaymentStatus = 'SUCCEEDED' | 'FREE' | 'REFUNDED';
 
@@ -72,23 +175,71 @@ async function throwOnError(res: Response, fallback = 'Request failed') {
   throw new Error(message ?? fallback);
 }
 
-export async function fetchCustomerPricing(token: string): Promise<CustomerPricing> {
-  const res = await fetchWithAuth(token, `${API}/customer-billing/pricing`);
-  await throwOnError(res, 'Could not load the price');
-  return res.json() as Promise<CustomerPricing>;
+export async function fetchSubscriptionPlan(token: string): Promise<SubscriptionPlan> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/plan`);
+  await throwOnError(res, 'Could not load the plan');
+  return res.json() as Promise<SubscriptionPlan>;
 }
 
-export async function updateCustomerPricing(
+export async function updateSubscriptionPlan(
   token: string,
-  generatePriceCents: number,
-): Promise<CustomerPricing> {
-  const res = await fetchWithAuth(token, `${API}/customer-billing/pricing`, {
+  data: Partial<SubscriptionPlanInput>,
+): Promise<SubscriptionPlan> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/plan`, {
     method: 'PATCH',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ generatePriceCents }),
+    body: JSON.stringify(data),
   });
-  await throwOnError(res, 'Could not save the price');
-  return res.json() as Promise<CustomerPricing>;
+  await throwOnError(res, 'Could not save the plan');
+  return res.json() as Promise<SubscriptionPlan>;
+}
+
+export async function fetchSubscriptions(token: string, status: SubscriptionFilter = 'all'): Promise<SubscriptionsResponse> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/subscriptions?status=${status}`);
+  await throwOnError(res, 'Could not load subscriptions');
+  return res.json() as Promise<SubscriptionsResponse>;
+}
+
+export async function fetchCustomerSubscription(token: string, customerId: number): Promise<CustomerSubscriptionRow> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/subscriptions/${customerId}`);
+  await throwOnError(res, 'Could not load the subscription');
+  return res.json() as Promise<CustomerSubscriptionRow>;
+}
+
+/** null = back to the plan's limit. */
+export async function setCustomerTransactionLimit(
+  token: string,
+  customerId: number,
+  transactionLimit: number | null,
+): Promise<CustomerSubscriptionRow> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/subscriptions/${customerId}/limit`, {
+    method: 'PATCH',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ transactionLimit }),
+  });
+  await throwOnError(res, 'Could not save the limit');
+  return res.json() as Promise<CustomerSubscriptionRow>;
+}
+
+export async function restartCustomerTrial(token: string, customerId: number): Promise<CustomerSubscriptionRow> {
+  const res = await fetchWithAuth(token, `${API}/customer-billing/subscriptions/${customerId}/restart-trial`, {
+    method: 'POST',
+  });
+  await throwOnError(res, 'Could not restart the trial');
+  return res.json() as Promise<CustomerSubscriptionRow>;
+}
+
+export async function fetchBillingTransactions(
+  token: string,
+  opts: { status?: BillingTransactionStatus | null; customerId?: number } = {},
+): Promise<BillingTransactionsResponse> {
+  const q = new URLSearchParams();
+  if (opts.status) q.set('status', opts.status);
+  if (opts.customerId) q.set('customerId', String(opts.customerId));
+  const qs = q.toString();
+  const res = await fetchWithAuth(token, `${API}/customer-billing/transactions${qs ? `?${qs}` : ''}`);
+  await throwOnError(res, 'Could not load transactions');
+  return res.json() as Promise<BillingTransactionsResponse>;
 }
 
 export async function fetchPromoCodes(token: string): Promise<PromoCode[]> {
@@ -135,17 +286,4 @@ export function money(cents: number, currency = 'cad'): string {
     currency: currency.toUpperCase(),
     currencyDisplay: 'narrowSymbol',
   }).format(cents / 100);
-}
-
-/**
- * What a customer pays with this code against the current price. Display only — mirrors
- * the customer API's `priceFor` (which is what actually charges).
- */
-export function priceWithPromo(listCents: number, promo: Pick<PromoCode, 'kind' | 'value'>): number {
-  let cents =
-    promo.kind === 'FIXED_PRICE'
-      ? promo.value
-      : Math.round((listCents * (100 - Math.min(100, Math.max(0, promo.value)))) / 100);
-  cents = Math.max(0, cents);
-  return cents > 0 && cents < 50 ? 50 : cents;
 }

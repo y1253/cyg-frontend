@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Percent, Shuffle, Tag } from 'lucide-react';
-import { money, priceWithPromo, type PromoCode, type PromoKind } from '@/api/customerBilling';
+import { CalendarRange, Infinity as InfinityIcon, Loader2, Shuffle } from 'lucide-react';
+import type { PromoCode } from '@/api/customerBilling';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -16,11 +16,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useSavePromoCode } from '@/hooks/useSavePromoCode';
 import { cn } from '@/lib/utils';
-import { dollarsToCents } from './billing-format';
+import { promoValueText } from './billing-format';
 
-const KINDS: { kind: PromoKind; label: string; hint: string; icon: React.ReactNode }[] = [
-  { kind: 'PERCENT_OFF', label: '% off', hint: 'A percentage off the price', icon: <Percent size={15} /> },
-  { kind: 'FIXED_PRICE', label: 'Fixed price', hint: 'The customer pays exactly this', icon: <Tag size={15} /> },
+type Length = 'months' | 'forever';
+
+const LENGTHS: { key: Length; label: string; hint: string; icon: React.ReactNode }[] = [
+  { key: 'months', label: 'Free for N months', hint: 'Then they subscribe like everyone else', icon: <CalendarRange size={15} /> },
+  { key: 'forever', label: 'Free forever', hint: 'Never asked for a card', icon: <InfinityIcon size={15} /> },
 ];
 
 function randomCode(): string {
@@ -28,24 +30,20 @@ function randomCode(): string {
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-/** Create (`promo` null) or edit a promo code. */
+/** Create (`promo` null) or edit a free-subscription promo code. */
 export function PromoCodeDialog({
   open,
   onOpenChange,
   promo,
-  listPriceCents,
-  currency,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   promo: PromoCode | null;
-  listPriceCents: number;
-  currency: string;
 }) {
   const save = useSavePromoCode();
   const [code, setCode] = useState('');
-  const [kind, setKind] = useState<PromoKind>('PERCENT_OFF');
-  const [value, setValue] = useState('');
+  const [length, setLength] = useState<Length>('months');
+  const [months, setMonths] = useState('');
   const [expires, setExpires] = useState('');
   const [maxUses, setMaxUses] = useState('');
   const [active, setActive] = useState(true);
@@ -56,10 +54,8 @@ export function PromoCodeDialog({
   useEffect(() => {
     if (!open) return;
     setCode(promo?.code ?? '');
-    setKind(promo?.kind ?? 'PERCENT_OFF');
-    setValue(
-      promo ? (promo.kind === 'PERCENT_OFF' ? String(promo.value) : (promo.value / 100).toFixed(2)) : '',
-    );
+    setLength(promo && promo.freeMonths === null ? 'forever' : 'months');
+    setMonths(promo?.freeMonths ? String(promo.freeMonths) : '');
     setExpires(promo?.expiresAt ? promo.expiresAt.slice(0, 10) : '');
     setMaxUses(promo?.maxUses ? String(promo.maxUses) : '');
     setActive(promo?.active ?? true);
@@ -69,21 +65,14 @@ export function PromoCodeDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, promo]);
 
-  /** The value in the API's units (percent, or cents), or an error message. */
-  const parsed = (): number | string => {
-    if (kind === 'PERCENT_OFF') {
-      const n = Number(value);
-      if (!/^\d+$/.test(value.trim()) || n < 1 || n > 100) return 'A percentage is a whole number from 1 to 100.';
-      return n;
-    }
-    const cents = dollarsToCents(value);
-    if (cents === null) return 'Enter a price like 4.99 (0 = free).';
-    if (cents > 0 && cents < 50) return 'A fixed price must be $0 (free) or at least $0.50.';
-    return cents;
+  /** Months (1–120), null = forever, or an error message. */
+  const parsed = (): number | null | string => {
+    if (length === 'forever') return null;
+    const n = Number(months);
+    if (!/^\d+$/.test(months.trim()) || n < 1 || n > 120) return 'Months free is a whole number from 1 to 120.';
+    return n;
   };
-
   const p = parsed();
-  const pays = typeof p === 'number' ? priceWithPromo(listPriceCents, { kind, value: p }) : null;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,8 +86,7 @@ export function PromoCodeDialog({
       {
         id: promo?.id,
         code: c,
-        kind,
-        value: p,
+        freeMonths: p,
         active,
         // End of the chosen day, local time.
         expiresAt: expires ? new Date(expires + 'T23:59:59').toISOString() : null,
@@ -117,7 +105,7 @@ export function PromoCodeDialog({
         <form onSubmit={submit} className="contents">
           <DialogHeader>
             <DialogTitle>{promo ? 'Edit promo code' : 'New promo code'}</DialogTitle>
-            <DialogDescription>Customers type the code before paying for a Generate.</DialogDescription>
+            <DialogDescription>Customers type the code on cygfinance.com to get the subscription free — no card asked.</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4">
@@ -129,7 +117,7 @@ export function PromoCodeDialog({
                   autoFocus
                   value={code}
                   onChange={e => setCode(e.target.value.toUpperCase().replace(/\s/g, ''))}
-                  placeholder="SUMMER25"
+                  placeholder="FRIENDS3"
                   className="font-mono tracking-wider uppercase"
                 />
                 <Button type="button" variant="outline" className="gap-1.5" onClick={() => setCode(randomCode())}>
@@ -139,25 +127,22 @@ export function PromoCodeDialog({
             </div>
 
             <div className="grid gap-1.5">
-              <Label>Discount type</Label>
+              <Label>How long is it free?</Label>
               <div className="grid grid-cols-2 gap-2">
-                {KINDS.map(k => (
+                {LENGTHS.map(k => (
                   <button
-                    key={k.kind}
+                    key={k.key}
                     type="button"
-                    onClick={() => {
-                      setKind(k.kind);
-                      setValue('');
-                    }}
+                    onClick={() => setLength(k.key)}
                     className={cn(
                       'flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors',
-                      kind === k.kind ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-600/15' : 'hover:bg-muted/50',
+                      length === k.key ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-600/15' : 'hover:bg-muted/50',
                     )}
                   >
                     <span
                       className={cn(
                         'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md',
-                        kind === k.kind ? 'bg-teal-600 text-white' : 'bg-muted text-muted-foreground',
+                        length === k.key ? 'bg-teal-600 text-white' : 'bg-muted text-muted-foreground',
                       )}
                     >
                       {k.icon}
@@ -171,36 +156,33 @@ export function PromoCodeDialog({
               </div>
             </div>
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="promo-value">{kind === 'PERCENT_OFF' ? 'Percent off' : `Price (${currency.toUpperCase()})`}</Label>
-              <div className="relative sm:max-w-[200px]">
-                {kind === 'FIXED_PRICE' && (
-                  <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm">$</span>
-                )}
-                <Input
-                  id="promo-value"
-                  inputMode="decimal"
-                  value={value}
-                  onChange={e => setValue(e.target.value)}
-                  placeholder={kind === 'PERCENT_OFF' ? '25' : '4.99'}
-                  className={cn('tabular-nums', kind === 'FIXED_PRICE' ? 'pl-7' : 'pr-8')}
-                />
-                {kind === 'PERCENT_OFF' && (
-                  <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm">%</span>
-                )}
+            {length === 'months' && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="promo-months">Months free</Label>
+                <div className="relative sm:max-w-[200px]">
+                  <Input
+                    id="promo-months"
+                    inputMode="numeric"
+                    value={months}
+                    onChange={e => setMonths(e.target.value.replace(/\D/g, ''))}
+                    placeholder="3"
+                    className="pr-16 tabular-nums"
+                  />
+                  <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm">
+                    months
+                  </span>
+                </div>
               </div>
-              {pays !== null && (
-                <p className="text-muted-foreground text-xs">
-                  Customers pay{' '}
-                  <span className="font-semibold text-emerald-700">{pays === 0 ? 'nothing (free, no card asked)' : money(pays, currency)}</span>{' '}
-                  instead of {money(listPriceCents, currency)}.
-                </p>
-              )}
-            </div>
+            )}
+            {typeof p !== 'string' && (
+              <p className="text-muted-foreground -mt-2 text-xs">
+                Customers get: <span className="font-semibold text-emerald-700">{promoValueText({ freeMonths: p })}</span>
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="promo-expires">Expires (optional)</Label>
+                <Label htmlFor="promo-expires">Code expires (optional)</Label>
                 <Input id="promo-expires" type="date" value={expires} onChange={e => setExpires(e.target.value)} />
               </div>
               <div className="grid gap-1.5">
