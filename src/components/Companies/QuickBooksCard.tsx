@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, Loader2, Unplug } from 'lucide-react';
+import { BookOpen, Loader2, RefreshCw, Unplug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,7 @@ import {
   useQuickBooksStatus,
   useSetUpdateQuickBooks,
 } from '@/hooks/useQuickBooks';
+import { QboImportDialog } from './QboImportDialog';
 
 /**
  * step2.md (2026-11-04): the company's QuickBooks Online file. An ADMIN connects it once
@@ -36,6 +37,8 @@ export function QuickBooksCard({
   const disconnect = useDisconnectQuickBooks(companyId);
   const setUpdate = useSetUpdateQuickBooks(companyId);
   const [confirming, setConfirming] = useState(false);
+  // step11.md (2026-11-25): turning the push on first imports QuickBooks' history as rules.
+  const [importing, setImporting] = useState<null | { turnOn: boolean }>(null);
   const s = status.data;
 
   return (
@@ -106,15 +109,30 @@ export function QuickBooksCard({
               </span>
             </div>
             {canConnect ? (
-              <Button
-                size="sm"
-                variant={s.updateQuickbooks ? 'outline' : 'default'}
-                disabled={setUpdate.isPending}
-                onClick={() => setUpdate.mutate(!s.updateQuickbooks)}
-              >
-                {setUpdate.isPending && <Loader2 className="size-4 animate-spin" />}
-                {s.updateQuickbooks ? 'Turn off' : 'Turn on'}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {s.updateQuickbooks && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setImporting({ turnOn: false })}
+                  >
+                    <RefreshCw className="size-4" /> Re-run QuickBooks import
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant={s.updateQuickbooks ? 'outline' : 'default'}
+                  disabled={setUpdate.isPending}
+                  onClick={() =>
+                    s.updateQuickbooks
+                      ? setUpdate.mutate(false)
+                      : setImporting({ turnOn: true })
+                  }
+                >
+                  {setUpdate.isPending && <Loader2 className="size-4 animate-spin" />}
+                  {s.updateQuickbooks ? 'Turn off' : 'Turn on'}
+                </Button>
+              </div>
             ) : (
               <Badge variant="outline">{s.updateQuickbooks ? 'On' : 'Off'}</Badge>
             )}
@@ -128,6 +146,15 @@ export function QuickBooksCard({
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </CardContent>
+
+      {canConnect && (
+        <QboImportDialog
+          companyId={companyId}
+          open={!!importing}
+          turnOn={importing?.turnOn ?? false}
+          onClose={() => setImporting(null)}
+        />
+      )}
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>

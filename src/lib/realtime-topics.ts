@@ -155,6 +155,11 @@ export function keysFor(event: RealtimeEvent): unknown[][] {
     // chat and the list refresh like any agent message.
     case 'agent-notify':
       return perCompany('agent-messages', 'agents');
+
+    // step11.md (2026-11-25): the popup draws the payload (useRealtime → qbo-import-bus); a
+    // finished import may have switched the push on, and changed the customer's rules.
+    case 'qbo-import':
+      return perCompany('quickbooks', 'customer-rules');
   }
 
   // An unrecognised topic is a NEWER SERVER talking to an older bundle — this is an

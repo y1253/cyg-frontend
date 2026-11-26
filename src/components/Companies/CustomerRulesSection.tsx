@@ -43,14 +43,11 @@ import type {
 } from '@/api/customerRules';
 import { cn } from '@/lib/utils';
 
-type Section = 'descriptions' | 'names' | 'items';
+// step11.md (2026-11-25): description rules are not shown here — staff do not need the
+// bank description. They still exist and still file rows on the customer API.
+type Section = 'names' | 'items';
 
 const SECTIONS: { key: Section; label: string; hint: string }[] = [
-  {
-    key: 'descriptions',
-    label: 'Descriptions',
-    hint: 'A bank description the customer gave a name or category.',
-  },
   {
     key: 'names',
     label: 'Payee names',
@@ -84,7 +81,7 @@ type Draft = {
 };
 
 type Removing =
-  | { section: 'descriptions' | 'names'; rule: CustomerNameRule }
+  | { section: 'names'; rule: CustomerNameRule }
   | { section: 'items'; rule: CustomerItemRule };
 
 function fmtDate(iso: string): string {
@@ -102,7 +99,7 @@ function matches(q: string, ...values: (string | null)[]): boolean {
 
 /**
  * The customer's own bookkeeping rules for this company, as set on cygfinance.com: what
- * a bank description, a payee or a receipt item is renamed to and filed under. Everybody
+ * a payee or a receipt item is renamed to and filed under. Everybody
  * who can open the company sees them; a manager can change or remove one, which re-files
  * the customer's existing rows at once (the customer API does that, not this page).
  */
@@ -114,20 +111,13 @@ export function CustomerRulesSection({
   canEdit: boolean;
 }) {
   const { data, isLoading, error } = useCustomerRules(companyId);
-  const [section, setSection] = useState<Section>('descriptions');
+  const [section, setSection] = useState<Section>('names');
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [removing, setRemoving] = useState<Removing | null>(null);
   const change = useChangeCustomerRule(companyId);
 
   const q = search.trim().toLowerCase();
-  const descriptions = useMemo(
-    () =>
-      (data?.descriptions ?? []).filter((r) =>
-        matches(q, r.matchKey, r.example, r.name, r.effectiveCategory),
-      ),
-    [data, q],
-  );
   const names = useMemo(
     () =>
       (data?.names ?? []).filter((r) =>
@@ -140,7 +130,6 @@ export function CustomerRulesSection({
     [data, q],
   );
   const counts: Record<Section, number> = {
-    descriptions: data?.descriptions.length ?? 0,
     names: data?.names.length ?? 0,
     items: data?.items.length ?? 0,
   };
@@ -155,9 +144,9 @@ export function CustomerRulesSection({
     setRemoving(r);
   };
 
-  const editName = (section: 'descriptions' | 'names', r: CustomerNameRule) =>
+  const editName = (r: CustomerNameRule) =>
     openDraft({
-      section,
+      section: 'names',
       mode: 'edit',
       key: r.matchKey,
       name: r.name ?? '',
@@ -173,7 +162,7 @@ export function CustomerRulesSection({
         ? { action: 'save-item', itemKey: key, category: category ?? '' }
         : {
             action: 'save-name',
-            matchType: draft.section === 'names' ? 'NAME' : 'DESCRIPTION',
+            matchType: 'NAME',
             matchKey: key,
             name: draft.name.trim() || null,
             category,
@@ -287,23 +276,12 @@ export function CustomerRulesSection({
           )}
         </div>
         <div className="overflow-x-auto">
-          {section === 'descriptions' && (
-            <NameRulesTable
-              rules={descriptions}
-              kind="descriptions"
-              canEdit={canEdit}
-              searching={!!q}
-              onEdit={(r) => editName('descriptions', r)}
-              onRemove={(r) => askRemove({ section: 'descriptions', rule: r })}
-            />
-          )}
           {section === 'names' && (
             <NameRulesTable
               rules={names}
-              kind="names"
               canEdit={canEdit}
               searching={!!q}
-              onEdit={(r) => editName('names', r)}
+              onEdit={editName}
               onRemove={(r) => askRemove({ section: 'names', rule: r })}
             />
           )}
@@ -416,14 +394,12 @@ function RowActions({
 
 function NameRulesTable({
   rules,
-  kind,
   canEdit,
   searching,
   onEdit,
   onRemove,
 }: {
   rules: CustomerNameRule[];
-  kind: 'descriptions' | 'names';
   canEdit: boolean;
   searching: boolean;
   onEdit: (r: CustomerNameRule) => void;
@@ -434,10 +410,8 @@ function NameRulesTable({
     <Table>
       <TableHeader>
         <TableRow className="bg-muted/40 hover:bg-muted/40">
-          <TableHead className="pl-4">
-            {kind === 'descriptions' ? 'When the description is' : 'Payee'}
-          </TableHead>
-          <TableHead>{kind === 'descriptions' ? 'Name' : 'Renamed to'}</TableHead>
+          <TableHead className="pl-4">Payee</TableHead>
+          <TableHead>Renamed to</TableHead>
           <TableHead>Category</TableHead>
           <TableHead className="text-right">Rows</TableHead>
           <TableHead>Updated</TableHead>
@@ -449,14 +423,9 @@ function NameRulesTable({
         {rules.map((r) => (
           <TableRow key={r.id}>
             <TableCell className="pl-4 max-w-[22rem]">
-              <div className="truncate font-medium" title={r.example ?? r.matchKey}>
-                {kind === 'descriptions' ? (r.example ?? r.matchKey) : r.matchKey}
+              <div className="truncate font-medium" title={r.matchKey}>
+                {r.matchKey}
               </div>
-              {kind === 'descriptions' && r.example && (
-                <div className="truncate text-xs text-muted-foreground" title={r.matchKey}>
-                  matches “{r.matchKey}”
-                </div>
-              )}
             </TableCell>
             <TableCell>
               {r.name ? (
@@ -557,12 +526,7 @@ function RuleDialog({
   onSave: () => void;
 }) {
   const isItem = draft.section === 'items';
-  const keyLabel =
-    draft.section === 'descriptions'
-      ? 'When the bank description is'
-      : draft.section === 'names'
-        ? 'Payee name'
-        : 'Receipt item';
+  const keyLabel = isItem ? 'Receipt item' : 'Payee name';
 
   const groups = useMemo(() => {
     const byType = new Map<string, CustomerCategory[]>();
@@ -609,7 +573,7 @@ function RuleDialog({
               value={draft.key}
               readOnly={draft.mode === 'edit'}
               className={cn(draft.mode === 'edit' && 'bg-muted text-muted-foreground')}
-              placeholder={isItem ? 'e.g. Pampers' : 'e.g. POS WALMART TORONTO'}
+              placeholder={isItem ? 'e.g. Pampers' : 'e.g. Walmart'}
               onChange={(e) => onChange({ ...draft, key: e.target.value })}
             />
           </div>
@@ -617,7 +581,7 @@ function RuleDialog({
           {!isItem && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="rule-name">
-                {draft.section === 'names' ? 'Rename to' : 'Name'}{' '}
+                Rename to{' '}
                 <span className="font-normal text-muted-foreground">(optional)</span>
               </Label>
               <Input

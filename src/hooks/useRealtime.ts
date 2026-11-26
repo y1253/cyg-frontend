@@ -14,6 +14,8 @@ import type { IncomingCallPayload } from '@/api/phone';
 import { RESET_KEYS, keysFor } from '@/lib/realtime-topics';
 import { setRealtimeConnected } from '@/lib/realtime-status';
 import { agentNoticeOf, emitAgentNotice } from '@/lib/agent-notify-bus';
+import { emitQboImport, qboImportEventOf } from '@/lib/qbo-import-bus';
+import { setRealtimeSocket } from '@/lib/realtime-send';
 import {
   emitInternalMessageNotice,
   internalMessageNoticeOf,
@@ -109,6 +111,11 @@ export function useRealtime(
           const notice = agentNoticeOf(event.payload);
           if (notice) emitAgentNotice(notice);
         }
+        // step11.md (2026-11-25): the QuickBooks import popup's state.
+        if (event.topic === 'qbo-import') {
+          const update = qboImportEventOf(event.payload);
+          if (update) emitQboImport(update);
+        }
         // step2.md (2026-11-05): a new staff message carries its popup text, so the
         // SSE stream can stay closed while this channel is up.
         if (event.topic === 'internal-message') {
@@ -149,6 +156,7 @@ export function useRealtime(
           clearTimeout(helloTimer);
           if (silence) clearTimeout(silence);
           socket = null;
+          setRealtimeSocket(null);
           resolve(outcome);
         };
         const armSilence = () => {
@@ -183,6 +191,8 @@ export function useRealtime(
             retry = 0;
             since = frame.seq;
             setRealtimeConnected(true);
+            // step11.md: commands go out on this socket once it has said hello.
+            setRealtimeSocket(ws);
             dispatch(frame.events, frame.reset);
             return;
           }

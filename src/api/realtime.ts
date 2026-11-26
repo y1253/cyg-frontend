@@ -33,6 +33,8 @@ export const REALTIME_TOPICS = [
   'agent-messages',
   /** step11: an agent wrote to staff — carries the popup (`lib/agent-notify-bus.ts`). */
   'agent-notify',
+  /** step11.md (2026-11-25): the QuickBooks import's state — carries the popup's snapshot. */
+  'qbo-import',
 ] as const;
 
 export type RealtimeTopic = (typeof REALTIME_TOPICS)[number];
