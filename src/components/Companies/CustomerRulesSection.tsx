@@ -42,15 +42,23 @@ import type {
   CustomerNameRule,
 } from '@/api/customerRules';
 import { cn } from '@/lib/utils';
+import { useCustomerNames } from '@/hooks/useCustomerNames';
+import { CustomerNamesPanel } from './CustomerNamesPanel';
 
 // step11.md (2026-11-25): description rules are not shown here — staff do not need the
 // bank description. They still exist and still file rows on the customer API.
-type Section = 'names' | 'items';
+// step11 part 2 (2026-11-26): 'list' = every payee name, dragged onto another to merge.
+type Section = 'list' | 'names' | 'items';
 
 const SECTIONS: { key: Section; label: string; hint: string }[] = [
   {
+    key: 'list',
+    label: 'Names',
+    hint: 'Every payee name of the customer’s books, with its sub-names.',
+  },
+  {
     key: 'names',
-    label: 'Payee names',
+    label: 'Name rules',
     hint: 'A payee the customer renamed or put in a category.',
   },
   {
@@ -73,7 +81,7 @@ const KEEP = '__keep__';
 
 /** What the edit dialog is working on. */
 type Draft = {
-  section: Section;
+  section: 'names' | 'items';
   mode: 'add' | 'edit';
   key: string;
   name: string;
@@ -111,7 +119,8 @@ export function CustomerRulesSection({
   canEdit: boolean;
 }) {
   const { data, isLoading, error } = useCustomerRules(companyId);
-  const [section, setSection] = useState<Section>('names');
+  const [section, setSection] = useState<Section>('list');
+  const { data: nameList } = useCustomerNames(companyId, !!data && !data.noCustomer);
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [removing, setRemoving] = useState<Removing | null>(null);
@@ -130,6 +139,7 @@ export function CustomerRulesSection({
     [data, q],
   );
   const counts: Record<Section, number> = {
+    list: nameList?.length ?? 0,
     names: data?.names.length ?? 0,
     items: data?.items.length ?? 0,
   };
@@ -263,7 +273,7 @@ export function CustomerRulesSection({
       <Card className="py-0 gap-0">
         <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
           <p className="text-xs text-muted-foreground">{hint}</p>
-          {canEdit && (
+          {canEdit && section !== 'list' && (
             <Button
               size="sm"
               variant="outline"
@@ -275,6 +285,9 @@ export function CustomerRulesSection({
             </Button>
           )}
         </div>
+        {section === 'list' && (
+          <CustomerNamesPanel companyId={companyId} canEdit={canEdit} search={search} />
+        )}
         <div className="overflow-x-auto">
           {section === 'names' && (
             <NameRulesTable

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -196,7 +195,10 @@ function PeriodStep({
       <div className="flex flex-col gap-1">
         <Label>Clean up and learn from QuickBooks transactions since when?</Label>
         <p className="text-xs text-muted-foreground">
-          Older history is often messy. Only transactions from this date on are read.
+          Older history is often messy. Only transactions from this date on are read. The rest
+          is done for you: a payee filed under several categories is split into sub-names (its
+          QuickBooks payee becomes &ldquo;name-mix&rdquo;), QuickBooks wins over the
+          customer&rsquo;s own rules, and QuickBooks&rsquo; history is fixed to match.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -244,7 +246,6 @@ function ReviewStep({
   sending: boolean;
   send: (cmd: ImportAction) => Promise<void>;
 }) {
-  const [fixHistory, setFixHistory] = useState(false);
   const open = s.questions.filter((q) => !q.answer);
   const fixCount = s.historyFix.recategorize + s.historyFix.toMix;
   const activeNames = s.names.filter(
@@ -297,29 +298,22 @@ function ReviewStep({
       <RulesSummary names={activeNames} descriptions={activeDescriptions} />
 
       {fixCount > 0 && (
-        <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-          <Checkbox
-            checked={fixHistory}
-            onCheckedChange={(v) => setFixHistory(v === true)}
-            className="mt-0.5"
-          />
-          <span>
-            Also fix QuickBooks&rsquo; history{s.since ? ` since ${s.since}` : ''}
-            <span className="block text-xs text-muted-foreground">
-              {s.historyFix.recategorize > 0 &&
-                `${s.historyFix.recategorize} transaction(s) moved to the category you picked. `}
-              {s.historyFix.toMix > 0 &&
-                `${s.historyFix.toMix} transaction(s) of split names moved to their “-mix” payee.`}
-            </span>
+        <p className="rounded-md border p-3 text-sm">
+          QuickBooks&rsquo; history{s.since ? ` since ${s.since}` : ''} is fixed too:
+          <span className="block text-xs text-muted-foreground">
+            {s.historyFix.recategorize > 0 &&
+              `${s.historyFix.recategorize} transaction(s) moved to the name's category. `}
+            {s.historyFix.toMix > 0 &&
+              `${s.historyFix.toMix} transaction(s) of split names moved to their “-mix” payee.`}
           </span>
-        </label>
+        </p>
       )}
 
       <div className="flex flex-col gap-1.5">
         <Button
           className="self-start"
           disabled={sending || s.aiBusy || open.length > 0}
-          onClick={() => void send({ action: 'apply', fixHistory })}
+          onClick={() => void send({ action: 'apply' })}
         >
           {sending && <Loader2 className="size-4 animate-spin" />}
           {s.turnOn ? 'Save the rules and turn on' : 'Save the rules'}

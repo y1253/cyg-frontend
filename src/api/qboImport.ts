@@ -76,7 +76,7 @@ export type ImportAction =
   | { action: 'answer'; questionId: string; value: string; note?: string }
   | { action: 'answer-rest' }
   | { action: 'message'; text: string }
-  | { action: 'apply'; fixHistory: boolean }
+  | { action: 'apply' }
   | { action: 'skip-import' }
   | { action: 'cancel' }
   | { action: 'snapshot' };
@@ -104,4 +104,28 @@ export async function sendImportCommandHttp(
     throw new Error(msg || 'The QuickBooks import failed');
   }
   return body;
+}
+
+/** step11 part 2 (2026-11-26): the import's Company-settings switch. */
+export interface QboImportSettings {
+  aiReview: boolean;
+}
+
+export async function fetchQboImportSettings(token: string): Promise<QboImportSettings> {
+  const res = await fetchWithAuth(token, '/api/quickbooks-import/settings');
+  if (!res.ok) throw new Error('Could not load the QuickBooks import setting');
+  return res.json() as Promise<QboImportSettings>;
+}
+
+export async function updateQboImportSettings(
+  token: string,
+  data: QboImportSettings,
+): Promise<QboImportSettings> {
+  const res = await fetchWithAuth(token, '/api/quickbooks-import/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Could not save the QuickBooks import setting');
+  return res.json() as Promise<QboImportSettings>;
 }

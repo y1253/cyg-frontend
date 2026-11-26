@@ -20,6 +20,7 @@ import { QuickRepliesEditor } from './QuickRepliesEditor';
 import { AudioLibrary } from './AudioLibrary';
 import { SignatureDefaultsCard } from './SignatureDefaultsCard';
 import { SignatureImageLibrary } from './SignatureImageLibrary';
+import { QboImportSettingsCard } from './QboImportSettingsCard';
 import { usePhoneAudio } from '@/hooks/usePhoneAudio';
 import { SegmentedChoice } from './OverrideField';
 import { VOICEMAIL_SECONDS, voicemailLengthLabel } from '@/lib/voicemail';
@@ -470,6 +471,7 @@ export function CompanySettingsPage() {
       <div className="flex flex-col gap-5 mt-5">
         <SignatureDefaultsCard />
         <SignatureImageLibrary />
+        <QboImportSettingsCard />
       </div>
 
       {/* Sticky save bar: the three cards are one coherent change, saved together. */}

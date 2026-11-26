@@ -127,3 +127,67 @@ export async function removeCustomerItemRule(
     'Could not remove the rule',
   );
 }
+
+/**
+ * step11 part 2 (2026-11-26): one name of the Rules tab's Names list, with its sub-names —
+ * dragged onto another to merge (the customer API merges; QuickBooks follows).
+ */
+export interface CustomerNameSub {
+  id: number;
+  name: string;
+  category: string;
+  rows: number;
+  total: number;
+}
+
+export interface CustomerName {
+  name: string;
+  category: string;
+  rows: number;
+  total: number;
+  group: string;
+  /** Has sub-names: its rows live on them, so it cannot be merged away itself. */
+  wrapper: boolean;
+  unclarified: boolean;
+  subNames: CustomerNameSub[];
+}
+
+export type MergeNamesBody =
+  | { from: string; into: string }
+  | { from: string; intoSubNameId: number }
+  | { fromSubNameId: number; into: string }
+  | { fromSubNameId: number; intoSubNameId: number };
+
+async function asNames(res: Response, fallback: string): Promise<CustomerName[]> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string | string[] };
+    const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+    throw new Error(msg || fallback);
+  }
+  return res.json() as Promise<CustomerName[]>;
+}
+
+export async function fetchCustomerNames(
+  token: string,
+  companyId: number,
+): Promise<CustomerName[]> {
+  return asNames(
+    await fetchWithAuth(token, `${base(companyId)}/names-list`),
+    'Failed to load the names',
+  );
+}
+
+export async function mergeCustomerNames(
+  token: string,
+  companyId: number,
+  body: MergeNamesBody,
+): Promise<CustomerName[]> {
+  return asNames(
+    await fetchWithAuth(token, `${base(companyId)}/names/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    'Could not merge the names',
+  );
+}
