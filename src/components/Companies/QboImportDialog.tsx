@@ -555,6 +555,13 @@ function DoneStep({ s }: { s: ImportSnapshot }) {
           New categories: {r.categoriesCreated.join(', ')}
         </p>
       )}
+      {!!r.columns && (
+        <p className="text-muted-foreground">
+          QuickBooks classes / custom fields: {r.columns} column
+          {r.columns === 1 ? '' : 's'}, set as the default of {r.defaults ?? 0}{' '}
+          name{r.defaults === 1 ? '' : 's'}.
+        </p>
+      )}
       <p className={r.turnedOn ? 'text-teal-700' : 'text-muted-foreground'}>
         {r.turnedOn
           ? 'Bank transactions now go to QuickBooks.'

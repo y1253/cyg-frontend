@@ -63,6 +63,9 @@ export interface ImportSnapshot {
     categoriesCreated: string[];
     subNames: number;
     errors: string[];
+    /** step11 part 3: QuickBooks class / custom-field columns, and name defaults set. */
+    columns?: number;
+    defaults?: number;
     historyFixed: number;
     historyErrors: string[];
     turnedOn: boolean;
