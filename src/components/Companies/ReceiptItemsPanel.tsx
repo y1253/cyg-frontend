@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowRight, GripVertical, Loader2, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,10 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import type { CustomerItemRule, CustomerProduct } from '@/api/customerRules';
 import { useChangeCustomerRule } from '@/hooks/useChangeCustomerRule';
+import { usePointerDrag } from '@/lib/pointer-drag';
 import { cn } from '@/lib/utils';
-
-/** The drag payload type — its own, so a name can never be dropped on an item. */
-const MIME = 'application/x-cyg-staff-item';
 
 const money = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -48,8 +46,6 @@ export function ReceiptItemsPanel({
   onRemove: (rule: CustomerItemRule) => void;
 }) {
   const change = useChangeCustomerRule(companyId);
-  const [dragging, setDragging] = useState<CustomerProduct | null>(null);
-  const [over, setOver] = useState<string | null>(null);
   const [merging, setMerging] = useState<{ from: CustomerProduct; to: CustomerProduct } | null>(
     null,
   );
@@ -81,43 +77,19 @@ export function ReceiptItemsPanel({
     );
   }, [products, rules, q]);
 
-  const dragProps = (p: CustomerProduct) =>
-    canEdit
-      ? {
-          draggable: true,
-          onDragStart: (ev: DragEvent) => {
-            ev.dataTransfer.setData(MIME, p.itemKey);
-            ev.dataTransfer.effectAllowed = 'move';
-            setDragging(p);
-          },
-          onDragEnd: () => {
-            setDragging(null);
-            setOver(null);
-          },
-          onDragOver: (ev: DragEvent) => {
-            if (!dragging || !ev.dataTransfer.types.includes(MIME)) return;
-            setOver(p.itemKey);
-            if (dragging.itemKey === p.itemKey) {
-              ev.dataTransfer.dropEffect = 'none';
-              return;
-            }
-            ev.preventDefault();
-            ev.dataTransfer.dropEffect = 'move';
-          },
-          onDragLeave: (ev: DragEvent) => {
-            if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setOver(null);
-          },
-          onDrop: (ev: DragEvent) => {
-            ev.preventDefault();
-            setOver(null);
-            if (dragging && dragging.itemKey !== p.itemKey) {
-              change.reset();
-              setMerging({ from: dragging, to: p });
-            }
-            setDragging(null);
-          },
-        }
-      : {};
+  // Pointer-based (`usePointerDrag`): the native HTML5 drag never worked on this tab.
+  const byKey = new Map(products.map((p) => [`i:${p.itemKey}`, p]));
+  const { drag, start, ghost } = usePointerDrag<CustomerProduct>({
+    refuse: (item, key) => {
+      const to = byKey.get(key);
+      if (!to) return 'Drop it on another item';
+      return to.itemKey === item.itemKey ? 'Same item' : null;
+    },
+    onDrop: (item, key) => {
+      change.reset();
+      setMerging({ from: item, to: byKey.get(key)! });
+    },
+  });
 
   if (!shown.length && !orphans.length)
     return (
@@ -128,6 +100,7 @@ export function ReceiptItemsPanel({
 
   return (
     <div className="flex min-w-0 flex-col">
+      {ghost}
       {canEdit && shown.length > 1 && (
         <p className="border-b px-4 py-2 text-xs text-muted-foreground">
           Drag an item onto another to merge them into one product.
@@ -140,16 +113,22 @@ export function ReceiptItemsPanel({
           return (
             <li
               key={p.itemKey}
-              {...dragProps(p)}
+              data-drop-key={`i:${p.itemKey}`}
               className={cn(
                 'flex min-w-0 items-start gap-2 px-4 py-2 text-sm transition-colors',
-                over === p.itemKey &&
-                  dragging?.itemKey !== p.itemKey &&
+                drag?.over === `i:${p.itemKey}` &&
+                  drag.item.itemKey !== p.itemKey &&
                   'bg-teal-50 ring-1 ring-inset ring-teal-400',
               )}
             >
               {canEdit ? (
-                <GripVertical className="mt-0.5 size-4 shrink-0 cursor-grab text-muted-foreground" />
+                <span
+                  onPointerDown={start(p, p.name)}
+                  title="Drag onto another item to merge"
+                  className="mt-0.5 shrink-0 cursor-grab touch-none select-none text-muted-foreground hover:text-foreground"
+                >
+                  <GripVertical className="size-4" />
+                </span>
               ) : (
                 <span className="size-4 shrink-0" />
               )}

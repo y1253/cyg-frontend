@@ -1,13 +1,6 @@
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import {
-  ArrowRight,
-  ChevronDown,
-  ChevronRight,
-  GripVertical,
-  Loader2,
-  Pencil,
-  X,
-} from 'lucide-react';
+import { useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArrowRight, ChevronDown, ChevronRight, GripVertical, Loader2, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,19 +10,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useCustomerNames, useMergeCustomerNames } from '@/hooks/useCustomerNames';
-import type {
-  CustomerName,
-  CustomerNameRule,
-  CustomerNameSub,
-  MergeNamesBody,
-} from '@/api/customerRules';
+import { useMergeCustomerNames } from '@/hooks/useCustomerNames';
+import { namesFullKey, useCustomerNamesFull, useEditNames } from '@/hooks/useCustomerNamesFull';
+import type { CustomerNameRule, MergeNamesBody } from '@/api/customerRules';
+import {
+  NamesApiError,
+  type FullSubName,
+  type NameAnswer,
+  type NameDescription,
+} from '@/api/customerNames';
+import { usePointerDrag } from '@/lib/pointer-drag';
 import { cn } from '@/lib/utils';
+import { pickLabel, pickValue } from '@/lib/name-picks';
+import { NameEditor } from './NameEditor';
 
-/** The drag payload type (a copy of the customer site's `name-drag.ts` idea; no shared code). */
-const MIME = 'application/x-cyg-staff-name';
-
-/** What is being dragged, or dropped on. */
+/** A name or sub-name — what is merged, or merged into. */
 type End =
   | { kind: 'name'; name: string; wrapper: boolean; unclarified: boolean }
   | { kind: 'sub'; id: number; name: string; parent: string; category: string };
@@ -113,14 +108,22 @@ export interface NameEdit {
   category: string | null;
 }
 
+/** What is dragged: a name, a sub-name, or one of a name's descriptions. */
+type DragItem =
+  | { kind: 'end'; end: End }
+  | { kind: 'desc'; key: string; description: string; owner: string };
+
 /**
  * step11 part 2 (2026-11-26): the Rules tab's Names list — every payee name of the
- * customer's book with its sub-names. A manager drags one onto another to merge them, like
- * the customer site's Names tab; the customer API does the merge and moves the QuickBooks
- * payee along (`mergeNamesAndQuickBooks` there).
- * step11 part 4 (2026-11-27): the same list is where a name is edited — the pencil renames it
- * or changes its category (a NAME rule, QuickBooks renamed / updated by the customer API),
- * and the rules that point at it show on its row (× removes one).
+ * customer's book with its sub-names; a manager drags one onto another to merge them (the
+ * customer API merges and moves the QuickBooks payee along).
+ * step11 part 4 (2026-11-27): the pencil renames a name / changes its category (a NAME rule)
+ * and its rules show as chips.
+ * 2026-11-27, later (user: "same idea like the customer system"; "dragging still unable"):
+ * the list reads the customer site's whole Names-tab view, each row unfolds the
+ * `NameEditor` (group, profile, split rules, custom-field defaults, descriptions), and the
+ * drag is pointer-based (`usePointerDrag`) — the native HTML5 drag never started for the
+ * user. A description dragged onto another name moves to it.
  */
 export function CustomerNamesPanel({
   companyId,
@@ -137,15 +140,19 @@ export function CustomerNamesPanel({
   onEdit: (e: NameEdit) => void;
   onRemoveRule: (r: CustomerNameRule) => void;
 }) {
-  const { data, isLoading, error } = useCustomerNames(companyId);
+  const { data, isLoading, error } = useCustomerNamesFull(companyId);
   const merge = useMergeCustomerNames(companyId);
-  const [dragging, setDragging] = useState<End | null>(null);
-  const [over, setOver] = useState<string | null>(null);
+  const edit = useEditNames(companyId);
+  const qc = useQueryClient();
   const [merging, setMerging] = useState<{ from: End; to: End } | null>(null);
-  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const [moving, setMoving] = useState<{
+    key: string;
+    description: string;
+    to: End;
+    conflict: string | null;
+  } | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
-  // NAME rules by the name they belong to: its own (keyed by it) and the ones renaming
-  // another payee to it.
   const rulesOf = useMemo(() => {
     const map = new Map<string, { own: CustomerNameRule | null; from: CustomerNameRule[] }>();
     const at = (k: string) => {
@@ -162,17 +169,102 @@ export function CustomerNamesPanel({
     return map;
   }, [rules]);
 
+  const subsOf = useMemo(() => {
+    const map = new Map<string, FullSubName[]>();
+    for (const s of data?.subNames ?? []) {
+      const k = s.parent.toLowerCase();
+      map.set(k, [...(map.get(k) ?? []), s]);
+    }
+    return map;
+  }, [data]);
+
+  /** Every drop target by its key: `n:<name>` / `s:<id>`. */
+  const ends = useMemo(() => {
+    const map = new Map<string, End>();
+    for (const n of data?.names.names ?? []) {
+      const subs = subsOf.get(n.name.toLowerCase()) ?? [];
+      map.set(`n:${n.name}`, {
+        kind: 'name',
+        name: n.name,
+        wrapper: subs.length > 0,
+        unclarified: !!n.unclarified,
+      });
+    }
+    for (const s of data?.subNames ?? [])
+      map.set(`s:${s.id}`, {
+        kind: 'sub',
+        id: s.id,
+        name: s.name,
+        parent: s.parent,
+        category: s.category,
+      });
+    return map;
+  }, [data, subsOf]);
+
+  const refuse = (item: DragItem, key: string): string | null => {
+    const to = ends.get(key);
+    if (!to) return 'Drop it on a name';
+    if (item.kind === 'end') return refusal(item.end, to);
+    if (to.kind === 'name' && to.unclarified) return 'Drop it on a real name';
+    if (to.kind === 'name' && to.wrapper) return `${to.name} has sub-names — drop it on one of them`;
+    if (to.name.toLowerCase() === item.owner.toLowerCase()) return 'It is already there';
+    return null;
+  };
+
+  const moveDescription = (key: string, to: End, replace: boolean) => {
+    edit.mutate(
+      {
+        method: 'PUT',
+        path: '/names/description-rule',
+        body: {
+          matchType: 'DESCRIPTION',
+          matchKey: key,
+          name: to.kind === 'sub' ? to.parent : to.name,
+          category: null,
+          ...(to.kind === 'sub' ? { subNameId: to.id } : {}),
+          ...(replace ? { replace: true } : {}),
+        },
+      },
+      {
+        onSuccess: () => setMoving(null),
+        onError: (err) =>
+          setMoving((m) =>
+            m && err instanceof NamesApiError && err.status === 409
+              ? { ...m, conflict: err.message }
+              : m,
+          ),
+      },
+    );
+  };
+
+  const { drag, start, ghost } = usePointerDrag<DragItem>({
+    refuse,
+    onDrop: (item, key) => {
+      const to = ends.get(key)!;
+      if (item.kind === 'end') {
+        merge.reset();
+        setMerging({ from: item.end, to });
+      } else {
+        edit.reset();
+        setMoving({ key: item.key, description: item.description, to, conflict: null });
+      }
+    },
+  });
+
   const q = search.trim().toLowerCase();
   const names = useMemo(
     () =>
-      (data ?? []).filter(
+      (data?.names.names ?? []).filter(
         (n) =>
           !q ||
           n.name.toLowerCase().includes(q) ||
           n.category.toLowerCase().includes(q) ||
-          n.subNames.some((s) => s.name.toLowerCase().includes(q)),
+          n.descriptions.some((d) => d.description.toLowerCase().includes(q)) ||
+          (subsOf.get(n.name.toLowerCase()) ?? []).some((s) =>
+            s.name.toLowerCase().includes(q),
+          ),
       ),
-    [data, q],
+    [data, q, subsOf],
   );
 
   if (isLoading)
@@ -183,6 +275,7 @@ export function CustomerNamesPanel({
         {error instanceof Error ? error.message : 'Failed to load the names'}
       </p>
     );
+  if (!data) return null;
   if (!names.length)
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -190,86 +283,73 @@ export function CustomerNamesPanel({
       </p>
     );
 
-  const keyOf = (e: End) => (e.kind === 'name' ? `n:${e.name}` : `s:${e.id}`);
+  const toggle = (k: string) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
 
-  const dragProps = (e: End) =>
-    canEdit && !refusalAsSource(e)
-      ? {
-          draggable: true,
-          onDragStart: (ev: DragEvent) => {
-            ev.stopPropagation();
-            ev.dataTransfer.setData(MIME, keyOf(e));
-            ev.dataTransfer.effectAllowed = 'move';
-            setDragging(e);
-          },
-          onDragEnd: () => {
-            setDragging(null);
-            setOver(null);
-          },
-        }
-      : {};
-
-  const dropProps = (e: End) =>
-    canEdit
-      ? {
-          onDragOver: (ev: DragEvent) => {
-            if (!dragging || !ev.dataTransfer.types.includes(MIME)) return;
-            ev.stopPropagation();
-            setOver(keyOf(e));
-            if (refusal(dragging, e)) {
-              ev.dataTransfer.dropEffect = 'none';
-              return;
-            }
-            ev.preventDefault();
-            ev.dataTransfer.dropEffect = 'move';
-          },
-          onDragLeave: (ev: DragEvent) => {
-            if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setOver(null);
-          },
-          onDrop: (ev: DragEvent) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            setOver(null);
-            if (dragging && !refusal(dragging, e)) {
-              merge.reset();
-              setMerging({ from: dragging, to: e });
-            }
-            setDragging(null);
-          },
-        }
-      : {};
-
-  const hintFor = (e: End): string | null =>
-    dragging && over === keyOf(e) ? refusal(dragging, e) : null;
+  const overKey = drag?.over ?? null;
+  const hintFor = (key: string): string | null =>
+    drag && overKey === key ? refuse(drag.item, key) : null;
+  const groupLabel = (key: string | null) =>
+    key ? (data.names.groups.find((g) => g.key === key)?.label ?? null) : null;
+  const defaultsOf = (match: (a: NameAnswer) => boolean) =>
+    data.columns.flatMap((c) => {
+      const a = data.nameAnswers.find((x) => x.columnId === c.id && match(x));
+      return a?.value ? [`${c.name}: ${a.value}`] : [];
+    });
+  const descDrag = (owner: string) => (d: NameDescription) =>
+    start(
+      { kind: 'desc', key: d.key, description: d.description, owner },
+      `“${d.description}”`,
+    );
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-w-0 flex-col">
+      {ghost}
       {canEdit && (
         <p className="border-b px-4 py-2 text-xs text-muted-foreground">
-          Drag a name or sub-name onto another to merge them. QuickBooks follows when this
-          company sends bank transactions there.
+          Drag a name (by its handle) onto another to merge them; open a name to set its group,
+          profile, split rules, custom fields and descriptions. QuickBooks follows.
         </p>
       )}
       <ul className="divide-y">
         {names.map((n) => {
-          const end: End = {
-            kind: 'name',
-            name: n.name,
-            wrapper: n.wrapper,
-            unclarified: n.unclarified,
-          };
-          const open = n.wrapper && !closed.has(n.name);
+          const key = `n:${n.name}`;
+          const end = ends.get(key)!;
+          const subs = subsOf.get(n.name.toLowerCase()) ?? [];
           const nameRules = rulesOf.get(n.name.toLowerCase());
+          const isOpen = open.has(key);
+          const pick = pickLabel(data, pickValue(data, n.agencyIds, false));
+          const defaults = defaultsOf((a) => a.subNameId === null && a.name === n.name);
           return (
-            <li key={n.name}>
-              <NameLine
+            <li key={key}>
+              <Line
+                dropKey={key}
                 title={n.name}
-                category={n.wrapper ? `${n.subNames.length} sub-names` : n.category}
                 rows={n.rows}
                 total={n.total}
-                draggable={canEdit && !refusalAsSource(end)}
-                over={over === keyOf(end)}
-                hint={hintFor(end)}
+                over={overKey === key}
+                hint={hintFor(key)}
+                handle={
+                  canEdit && !refusalAsSource(end)
+                    ? start({ kind: 'end', end }, n.name)
+                    : null
+                }
+                open={n.unclarified ? undefined : isOpen}
+                onToggle={() => toggle(key)}
+                chips={[
+                  subs.length ? `${subs.length} sub-names` : n.category,
+                  groupLabel(n.group),
+                  pick && `Split: ${pick}`,
+                  ...defaults,
+                  !subs.length && n.descriptions.length
+                    ? `${n.descriptions.length} description${n.descriptions.length === 1 ? '' : 's'}`
+                    : null,
+                ]}
                 extra={
                   nameRules && (
                     <RuleChips
@@ -285,8 +365,7 @@ export function CustomerNamesPanel({
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      title={n.wrapper ? 'Rename' : 'Rename or change its category'}
-                      draggable={false}
+                      title={subs.length ? 'Rename' : 'Rename or change its category'}
                       onClick={() =>
                         onEdit({
                           matchKey: n.name,
@@ -299,38 +378,63 @@ export function CustomerNamesPanel({
                     </Button>
                   ) : null
                 }
-                toggle={
-                  n.wrapper
-                    ? {
-                        open,
-                        onClick: () =>
-                          setClosed((s) => {
-                            const next = new Set(s);
-                            if (next.has(n.name)) next.delete(n.name);
-                            else next.add(n.name);
-                            return next;
-                          }),
-                      }
-                    : undefined
-                }
-                {...dragProps(end)}
-                {...dropProps(end)}
               />
-              {open && (
+              {isOpen && (
+                <NameEditor
+                  companyId={companyId}
+                  target={{ kind: 'name', name: n, wrapper: subs.length > 0 }}
+                  data={data}
+                  canEdit={canEdit}
+                  dragDescription={descDrag(n.name)}
+                />
+              )}
+              {subs.length > 0 && (
                 <ul className="border-t border-dashed bg-muted/30">
-                  {n.subNames.map((s) => (
-                    <SubLine
-                      key={s.id}
-                      parent={n}
-                      sub={s}
-                      canEdit={canEdit}
-                      over={over}
-                      keyOf={keyOf}
-                      hintFor={hintFor}
-                      dragProps={dragProps}
-                      dropProps={dropProps}
-                    />
-                  ))}
+                  {subs.map((s) => {
+                    const sKey = `s:${s.id}`;
+                    const sEnd = ends.get(sKey)!;
+                    const sOpen = open.has(sKey);
+                    const sPick = pickLabel(data, pickValue(data, s.agencyIds, !s.ownAgencies));
+                    const sDescs = data.names.subDescriptions[s.id] ?? [];
+                    return (
+                      <li key={sKey} className="pl-6">
+                        <Line
+                          dropKey={sKey}
+                          title={s.name}
+                          rows={s.rows}
+                          total={s.total}
+                          over={overKey === sKey}
+                          hint={hintFor(sKey)}
+                          handle={canEdit ? start({ kind: 'end', end: sEnd }, s.name) : null}
+                          open={sOpen}
+                          onToggle={() => toggle(sKey)}
+                          chips={[
+                            s.category,
+                            groupLabel(s.group),
+                            sPick && `Split: ${sPick}`,
+                            ...defaultsOf((a) => a.subNameId === s.id),
+                            sDescs.length
+                              ? `${sDescs.length} description${sDescs.length === 1 ? '' : 's'}`
+                              : null,
+                          ]}
+                        />
+                        {sOpen && (
+                          <NameEditor
+                            companyId={companyId}
+                            target={{
+                              kind: 'sub',
+                              sub: s,
+                              descriptions: sDescs,
+                              contains: data.names.subContains[s.id] ?? [],
+                            }}
+                            data={data}
+                            canEdit={canEdit}
+                            dragDescription={descDrag(s.name)}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </li>
@@ -342,8 +446,7 @@ export function CustomerNamesPanel({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              Merge {merging ? label(merging.from) : ''} into{' '}
-              {merging ? label(merging.to) : ''}?
+              Merge {merging ? label(merging.from) : ''} into {merging ? label(merging.to) : ''}?
             </DialogTitle>
             <DialogDescription>
               {merging && mergeText(merging.from, merging.to).join(' ')}
@@ -353,11 +456,7 @@ export function CustomerNamesPanel({
             <p className="text-sm text-destructive">{merge.error.message}</p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={merge.isPending}
-              onClick={() => setMerging(null)}
-            >
+            <Button variant="outline" disabled={merge.isPending} onClick={() => setMerging(null)}>
               Cancel
             </Button>
             <Button
@@ -365,12 +464,47 @@ export function CustomerNamesPanel({
               onClick={() =>
                 merging &&
                 merge.mutate(bodyOf(merging.from, merging.to), {
-                  onSuccess: () => setMerging(null),
+                  onSuccess: () => {
+                    setMerging(null);
+                    void qc.invalidateQueries({ queryKey: namesFullKey(companyId) });
+                  },
                 })
               }
             >
               {merge.isPending && <Loader2 className="size-4 animate-spin" />}
               {merge.isPending ? 'Merging…' : 'Merge'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!moving} onOpenChange={(o) => !o && !edit.isPending && setMoving(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move this description to {moving ? label(moving.to) : ''}?</DialogTitle>
+            <DialogDescription>
+              {moving &&
+                `Every transaction with “${moving.description}” takes the name ${label(moving.to)}, now and on later statements and bank feeds. QuickBooks is updated on the next push.`}
+            </DialogDescription>
+          </DialogHeader>
+          {moving?.conflict && (
+            <p className="text-sm text-amber-700">
+              {moving.conflict}
+            </p>
+          )}
+          {edit.error instanceof Error && !moving?.conflict && (
+            <p className="text-sm text-destructive">{edit.error.message}</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={edit.isPending} onClick={() => setMoving(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={edit.isPending}
+              onClick={() => moving && moveDescription(moving.key, moving.to, !!moving.conflict)}
+            >
+              {edit.isPending && <Loader2 className="size-4 animate-spin" />}
+              {moving?.conflict ? 'Take it away and move' : 'Move'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -382,49 +516,6 @@ export function CustomerNamesPanel({
 /** A name that can never be dragged (the server refuses it as a source). */
 function refusalAsSource(e: End): boolean {
   return e.kind === 'name' && e.unclarified;
-}
-
-function SubLine({
-  parent,
-  sub,
-  canEdit,
-  over,
-  keyOf,
-  hintFor,
-  dragProps,
-  dropProps,
-}: {
-  parent: CustomerName;
-  sub: CustomerNameSub;
-  canEdit: boolean;
-  over: string | null;
-  keyOf: (e: End) => string;
-  hintFor: (e: End) => string | null;
-  dragProps: (e: End) => object;
-  dropProps: (e: End) => object;
-}) {
-  const end: End = {
-    kind: 'sub',
-    id: sub.id,
-    name: sub.name,
-    parent: parent.name,
-    category: sub.category,
-  };
-  return (
-    <li className="pl-8">
-      <NameLine
-        title={sub.name}
-        category={sub.category}
-        rows={sub.rows}
-        total={sub.total}
-        draggable={canEdit}
-        over={over === keyOf(end)}
-        hint={hintFor(end)}
-        {...dragProps(end)}
-        {...dropProps(end)}
-      />
-    </li>
-  );
 }
 
 /** The NAME rules of a name: its own one, and payees renamed to it. */
@@ -449,7 +540,6 @@ function RuleChips({
       {canEdit && (
         <button
           type="button"
-          draggable={false}
           title="Remove this rule"
           className="shrink-0 hover:text-destructive"
           onClick={() => onRemove(r)}
@@ -476,71 +566,87 @@ function RuleChips({
   );
 }
 
-function NameLine({
+/** One row: handle, name (+ chevron), chips wrapping under it, amount and rows, actions. */
+function Line({
+  dropKey,
   title,
-  category,
   rows,
   total,
-  draggable,
   over,
   hint,
-  toggle,
+  handle,
+  open,
+  onToggle,
+  chips,
   extra,
   actions,
-  ...events
 }: {
+  dropKey: string;
   title: string;
-  category: string;
   rows: number;
   total: number;
-  draggable: boolean;
   over: boolean;
   hint: string | null;
-  toggle?: { open: boolean; onClick: () => void };
+  handle: ((e: ReactPointerEvent) => void) | null;
+  open?: boolean;
+  onToggle: () => void;
+  chips: Array<string | null | false>;
   extra?: ReactNode;
   actions?: ReactNode;
-} & Record<string, unknown>) {
+}) {
   return (
     <div
-      {...events}
-      // The browser starts a drag only on an element marked draggable (it was never set — the
-      // prop only drew the grip — so no name could be dragged, 2026-11-27).
-      draggable={draggable || undefined}
+      data-drop-key={dropKey}
       className={cn(
-        // Never wider than the card: the name truncates, the category and rules wrap
-        // onto the line below (2026-11-27, user: no sideways scrolling).
         'flex min-w-0 items-start gap-2 px-4 py-2 text-sm transition-colors',
         over && !hint && 'bg-teal-50 ring-1 ring-inset ring-teal-400',
         over && hint && 'bg-muted',
       )}
     >
-      {draggable ? (
-        <GripVertical className="mt-0.5 size-4 shrink-0 cursor-grab text-muted-foreground" />
+      {handle ? (
+        <span
+          onPointerDown={handle}
+          title="Drag onto another name to merge"
+          className="mt-0.5 shrink-0 cursor-grab touch-none select-none text-muted-foreground hover:text-foreground"
+        >
+          <GripVertical className="size-4" />
+        </span>
       ) : (
         <span className="size-4 shrink-0" />
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {toggle ? (
+        {open === undefined ? (
+          <span className="min-w-0 truncate font-medium">{title}</span>
+        ) : (
           <button
             type="button"
-            onClick={toggle.onClick}
+            onClick={onToggle}
             className="flex min-w-0 items-center gap-1 text-left font-medium"
+            title={open ? 'Close its settings' : 'Open its settings'}
           >
-            {toggle.open ? (
+            {open ? (
               <ChevronDown className="size-3.5 shrink-0" />
             ) : (
               <ChevronRight className="size-3.5 shrink-0" />
             )}
             <span className="truncate">{title}</span>
           </button>
-        ) : (
-          <span className="min-w-0 truncate font-medium">{title}</span>
         )}
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span className={cn('min-w-0 break-words', hint && 'text-foreground')}>
-            {hint ?? category}
-          </span>
-          {!hint && extra}
+          {hint ? (
+            <span className="text-foreground">{hint}</span>
+          ) : (
+            <>
+              {chips
+                .filter((c): c is string => !!c)
+                .map((c, i) => (
+                  <span key={i} className="min-w-0 break-words">
+                    {c}
+                  </span>
+                ))}
+              {extra}
+            </>
+          )}
         </span>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">

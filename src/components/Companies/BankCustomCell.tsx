@@ -14,36 +14,45 @@ import { cn } from '@/lib/utils';
 
 const NONE = '__none__';
 
+/** What a cell save sends: the typed value, or the picked option (with its label). */
+export interface ColumnCellSave {
+  value: string | null;
+  dropDownId: number | null;
+  label: string | null;
+}
+
 /**
- * step11 part 4 (2026-11-27): one cell of a customer's own column (a QuickBooks class,
- * location, customer or custom field, or a column they made) on the Bank transactions tab.
- * A manager edits it in place — a DROPDOWN picks an option, the others type (the column's
- * rules enforced while typing, `answerProblem` before sending); the customer API checks it
- * again and sends a QuickBooks-linked one to QuickBooks. Read-only for everyone else.
+ * One cell of a customer's own column (a QuickBooks class, location, customer or custom
+ * field, or a column they made): a DROPDOWN picks an option, the others type (the column's
+ * rules enforced while typing, `answerProblem` before sending). Used for a transaction's
+ * answer (Bank transactions tab) and a name's default (Rules tab). Read-only without `canEdit`.
  */
-export function BankCustomCell({
-  companyId,
+export function ColumnCell({
   column,
-  rowId,
   cell,
   canEdit,
+  onSave,
+  serverError,
+  onStartEdit,
+  placeholder = '—',
 }: {
-  companyId: number;
   column: BankColumn;
-  rowId: number;
   cell: BankCell | undefined;
   canEdit: boolean;
+  onSave: (v: ColumnCellSave) => void;
+  serverError: string | null;
+  onStartEdit?: () => void;
+  placeholder?: string;
 }) {
-  const save = useSaveBankAnswer(companyId);
   const [draft, setDraft] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const error = problem ?? (save.error instanceof Error ? save.error.message : null);
+  const error = problem ?? serverError;
   const stored = cell?.value ?? '';
 
   if (!canEdit) {
     return (
       <span className={cn('block truncate text-sm', !stored && 'text-muted-foreground/60')}>
-        {stored || '—'}
+        {stored || placeholder}
       </span>
     );
   }
@@ -64,9 +73,7 @@ export function BankCustomCell({
           value={value}
           onValueChange={(v) => {
             const id = !v || v === NONE ? null : Number(v);
-            save.mutate({
-              id: rowId,
-              columnId: column.id,
+            onSave({
               value: null,
               dropDownId: id,
               label: column.options.find((o) => o.id === id)?.label ?? null,
@@ -77,7 +84,7 @@ export function BankCustomCell({
             size="sm"
             className={cn('h-7 w-full min-w-0 text-xs', !value && 'text-muted-foreground')}
           >
-            <SelectValue placeholder="—" />
+            <SelectValue placeholder={placeholder} />
           </SelectTrigger>
           <SelectContent className="max-h-72">
             <SelectItem value={NONE}>—</SelectItem>
@@ -106,13 +113,7 @@ export function BankCustomCell({
     const next = draft.trim();
     setDraft(null);
     if (next === stored) return;
-    save.mutate({
-      id: rowId,
-      columnId: column.id,
-      value: next || null,
-      dropDownId: null,
-      label: null,
-    });
+    onSave({ value: next || null, dropDownId: null, label: null });
   };
 
   if (draft === null) {
@@ -123,7 +124,7 @@ export function BankCustomCell({
           onClick={() => {
             setDraft(stored);
             setProblem(null);
-            save.reset();
+            onStartEdit?.();
           }}
           title="Click to edit"
           className={cn(
@@ -131,7 +132,7 @@ export function BankCustomCell({
             !stored && 'text-muted-foreground/60',
           )}
         >
-          {stored || '—'}
+          {stored || placeholder}
         </button>
         {error && <span className="text-[11px] text-destructive">{error}</span>}
       </span>
@@ -160,5 +161,32 @@ export function BankCustomCell({
       />
       {error && <span className="text-[11px] text-destructive">{error}</span>}
     </span>
+  );
+}
+
+/** step11 part 4: a transaction's (or split's) answer on the Bank transactions tab. */
+export function BankCustomCell({
+  companyId,
+  column,
+  rowId,
+  cell,
+  canEdit,
+}: {
+  companyId: number;
+  column: BankColumn;
+  rowId: number;
+  cell: BankCell | undefined;
+  canEdit: boolean;
+}) {
+  const save = useSaveBankAnswer(companyId);
+  return (
+    <ColumnCell
+      column={column}
+      cell={cell}
+      canEdit={canEdit}
+      serverError={save.error instanceof Error ? save.error.message : null}
+      onStartEdit={() => save.reset()}
+      onSave={(v) => save.mutate({ id: rowId, columnId: column.id, ...v })}
+    />
   );
 }
