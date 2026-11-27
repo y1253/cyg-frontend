@@ -49,6 +49,11 @@ export function useChangeCustomerRule(companyId: number) {
           return removeCustomerItemRule(token!, companyId, { itemKey: c.itemKey });
       }
     },
-    onSuccess: (view) => qc.setQueryData(['customer-rules', companyId], view),
+    onSuccess: (view) => {
+      qc.setQueryData(['customer-rules', companyId], view);
+      // A rename / new category moves the name in the Names list and the Bank tab too.
+      void qc.invalidateQueries({ queryKey: ['customer-names', companyId] });
+      void qc.invalidateQueries({ queryKey: ['bank-transactions', companyId] });
+    },
   });
 }

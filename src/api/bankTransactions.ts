@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './client';
+import type { CustomColumnType } from '@/lib/custom-columns';
 
 /**
  * step11 (2026-11-23): a company's bank transactions with their name and category, read
@@ -19,6 +20,25 @@ export interface BankTransactionRow {
   fullAmount: number | null;
   account: string;
   qbo: { id: string | null; syncedAt: string | null; error: string | null } | null;
+  /** step11 part 4: its answers in the book's own columns (column id → cell). */
+  custom: Record<number, BankCell>;
+}
+
+export interface BankCell {
+  value: string | null;
+  dropDownId: number | null;
+}
+
+/** step11 part 4 (2026-11-27): one of the book's own columns (QuickBooks-linked when `qbo`). */
+export interface BankColumn {
+  id: number;
+  name: string;
+  type: CustomColumnType;
+  minChars: number | null;
+  maxChars: number | null;
+  required: boolean;
+  options: Array<{ id: number; label: string }>;
+  qbo: 'CLASS' | 'FIELD' | 'LOCATION' | 'CUSTOMER' | null;
 }
 
 export interface BankTransactionPage {
@@ -75,5 +95,29 @@ export function editBankTransaction(
       body: JSON.stringify(body),
     },
     'Could not save the change',
+  );
+}
+
+export function fetchBankColumns(token: string, companyId: number): Promise<BankColumn[]> {
+  return call(token, `${base(companyId)}/custom-columns`, {}, 'Failed to load the columns');
+}
+
+/** One cell of a transaction / split; answers the row's cells. */
+export function saveBankAnswer(
+  token: string,
+  companyId: number,
+  id: number,
+  columnId: number,
+  body: { value: string | null; dropDownId: number | null },
+): Promise<Record<number, BankCell>> {
+  return call(
+    token,
+    `${base(companyId)}/${id}/custom/${columnId}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    'Could not save the answer',
   );
 }

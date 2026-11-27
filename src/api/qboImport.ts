@@ -66,6 +66,8 @@ export interface ImportSnapshot {
     /** step11 part 3: QuickBooks class / custom-field columns, and name defaults set. */
     columns?: number;
     defaults?: number;
+    /** step11 part 4: transaction cells filled with their own QuickBooks value. */
+    cells?: number;
     historyFixed: number;
     historyErrors: string[];
     turnedOn: boolean;

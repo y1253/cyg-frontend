@@ -557,9 +557,13 @@ function DoneStep({ s }: { s: ImportSnapshot }) {
       )}
       {!!r.columns && (
         <p className="text-muted-foreground">
-          QuickBooks classes / custom fields: {r.columns} column
+          QuickBooks classes / locations / customers / custom fields: {r.columns} column
           {r.columns === 1 ? '' : 's'}, set as the default of {r.defaults ?? 0}{' '}
-          name{r.defaults === 1 ? '' : 's'}.
+          name{r.defaults === 1 ? '' : 's'}
+          {r.cells
+            ? ` and filled in on ${r.cells} transaction${r.cells === 1 ? '' : 's'}`
+            : ''}
+          .
         </p>
       )}
       <p className={r.turnedOn ? 'text-teal-700' : 'text-muted-foreground'}>

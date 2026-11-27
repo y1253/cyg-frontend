@@ -48,18 +48,15 @@ import { CustomerNamesPanel } from './CustomerNamesPanel';
 // step11.md (2026-11-25): description rules are not shown here — staff do not need the
 // bank description. They still exist and still file rows on the customer API.
 // step11 part 2 (2026-11-26): 'list' = every payee name, dragged onto another to merge.
-type Section = 'list' | 'names' | 'items';
+// step11 part 4 (2026-11-27): the "Name rules" section is folded into it — one list where a
+// name is edited (renamed / re-categorised) AND dragged; its rules show on its row.
+type Section = 'list' | 'items';
 
 const SECTIONS: { key: Section; label: string; hint: string }[] = [
   {
     key: 'list',
     label: 'Names',
-    hint: 'Every payee name of the customer’s books, with its sub-names.',
-  },
-  {
-    key: 'names',
-    label: 'Name rules',
-    hint: 'A payee the customer renamed or put in a category.',
+    hint: 'Every payee name with its sub-names and rules — edit one, or drag it onto another to merge. QuickBooks follows.',
   },
   {
     key: 'items',
@@ -127,20 +124,22 @@ export function CustomerRulesSection({
   const change = useChangeCustomerRule(companyId);
 
   const q = search.trim().toLowerCase();
-  const names = useMemo(
-    () =>
-      (data?.names ?? []).filter((r) =>
+  // NAME rules for names the list does not show (no transactions yet) — listed under it.
+  const orphanRules = useMemo(() => {
+    const shown = new Set((nameList ?? []).map((n) => n.name.toLowerCase()));
+    return (data?.names ?? []).filter(
+      (r) =>
+        !shown.has(r.matchKey.toLowerCase()) &&
+        !(r.name && shown.has(r.name.toLowerCase())) &&
         matches(q, r.matchKey, r.name, r.effectiveCategory),
-      ),
-    [data, q],
-  );
+    );
+  }, [data, nameList, q]);
   const items = useMemo(
     () => (data?.items ?? []).filter((r) => matches(q, r.itemKey, r.category)),
     [data, q],
   );
   const counts: Record<Section, number> = {
     list: nameList?.length ?? 0,
-    names: data?.names.length ?? 0,
     items: data?.items.length ?? 0,
   };
 
@@ -154,7 +153,7 @@ export function CustomerRulesSection({
     setRemoving(r);
   };
 
-  const editName = (r: CustomerNameRule) =>
+  const editName = (r: { matchKey: string; name: string | null; category: string | null }) =>
     openDraft({
       section: 'names',
       mode: 'edit',
@@ -273,12 +272,18 @@ export function CustomerRulesSection({
       <Card className="py-0 gap-0">
         <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
           <p className="text-xs text-muted-foreground">{hint}</p>
-          {canEdit && section !== 'list' && (
+          {canEdit && (
             <Button
               size="sm"
               variant="outline"
               onClick={() =>
-                openDraft({ section, mode: 'add', key: '', name: '', category: KEEP })
+                openDraft({
+                  section: section === 'items' ? 'items' : 'names',
+                  mode: 'add',
+                  key: '',
+                  name: '',
+                  category: KEEP,
+                })
               }
             >
               <Plus size={14} /> Add rule
@@ -286,17 +291,29 @@ export function CustomerRulesSection({
           )}
         </div>
         {section === 'list' && (
-          <CustomerNamesPanel companyId={companyId} canEdit={canEdit} search={search} />
+          <CustomerNamesPanel
+            companyId={companyId}
+            canEdit={canEdit}
+            search={search}
+            rules={data.names}
+            onEdit={editName}
+            onRemoveRule={(r) => askRemove({ section: 'names', rule: r })}
+          />
         )}
         <div className="overflow-x-auto">
-          {section === 'names' && (
-            <NameRulesTable
-              rules={names}
-              canEdit={canEdit}
-              searching={!!q}
-              onEdit={editName}
-              onRemove={(r) => askRemove({ section: 'names', rule: r })}
-            />
+          {section === 'list' && orphanRules.length > 0 && (
+            <>
+              <p className="border-t px-4 py-2 text-xs font-medium text-muted-foreground">
+                Rules for names with no transactions yet
+              </p>
+              <NameRulesTable
+                rules={orphanRules}
+                canEdit={canEdit}
+                searching={!!q}
+                onEdit={editName}
+                onRemove={(r) => askRemove({ section: 'names', rule: r })}
+              />
+            </>
           )}
           {section === 'items' && (
             <ItemRulesTable
@@ -565,10 +582,14 @@ function RuleDialog({
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{draft.mode === 'add' ? 'Add a rule' : 'Edit rule'}</DialogTitle>
+          <DialogTitle>
+            {draft.mode === 'add' ? 'Add a rule' : isItem ? 'Edit rule' : `Edit ${draft.key}`}
+          </DialogTitle>
           <DialogDescription>
             Saved for this customer's books. Their existing rows move right away, and every
             statement or receipt they upload later follows it.
+            {!isItem &&
+              ' If this company sends bank transactions to QuickBooks, the payee is renamed there and the transactions are updated.'}
           </DialogDescription>
         </DialogHeader>
 

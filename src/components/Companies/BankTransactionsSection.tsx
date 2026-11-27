@@ -31,7 +31,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { BankCategory, BankTransactionRow } from '@/api/bankTransactions';
+import { BankCustomCell } from './BankCustomCell';
+import { QBO_KIND_LABELS } from '@/lib/custom-columns';
 import {
+  useBankColumns,
   useBankCategories,
   useBankTransactions,
   useEditBankTransaction,
@@ -207,6 +210,7 @@ export function BankTransactionsSection({
   }, [search]);
   const txns = useBankTransactions(companyId, q);
   const categories = useBankCategories(companyId);
+  const columns = useBankColumns(companyId).data ?? [];
   const [editing, setEditing] = useState<BankTransactionRow | null>(null);
   const rows = txns.data?.pages.flatMap((p) => p.rows) ?? [];
 
@@ -235,6 +239,20 @@ export function BankTransactionsSection({
                 <TableHead>Date</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Category</TableHead>
+                {columns.map((c) => (
+                  <TableHead
+                    key={c.id}
+                    className="min-w-32"
+                    title={c.qbo ? `Linked to the ${QBO_KIND_LABELS[c.qbo]}` : undefined}
+                  >
+                    {c.name}
+                    {c.qbo && (
+                      <span className="ml-1 rounded bg-[#2CA01C]/10 px-1 text-[10px] font-medium text-[#2CA01C]">
+                        QB
+                      </span>
+                    )}
+                  </TableHead>
+                ))}
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead className="hidden md:table-cell">Account</TableHead>
                 <TableHead>QuickBooks</TableHead>
@@ -258,6 +276,17 @@ export function BankTransactionsSection({
                         {r.category}
                       </Badge>
                     </TableCell>
+                    {columns.map((c) => (
+                      <TableCell key={c.id} className="max-w-48">
+                        <BankCustomCell
+                          companyId={companyId}
+                          column={c}
+                          rowId={r.id}
+                          cell={r.custom?.[c.id]}
+                          canEdit={canEdit}
+                        />
+                      </TableCell>
+                    ))}
                     <TableCell
                       className={cn(
                         'text-right tabular-nums',
