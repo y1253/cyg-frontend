@@ -36,6 +36,7 @@ import type {
 import { cn } from '@/lib/utils';
 import { useCustomerNames } from '@/hooks/useCustomerNames';
 import { CustomerNamesPanel } from './CustomerNamesPanel';
+import { ReceiptItemsPanel } from './ReceiptItemsPanel';
 
 // step11.md (2026-11-25): description rules are not shown here — staff do not need the
 // bank description. They still exist and still file rows on the customer API.
@@ -53,7 +54,7 @@ const SECTIONS: { key: Section; label: string; hint: string }[] = [
   {
     key: 'items',
     label: 'Receipt items',
-    hint: 'An item on a receipt that always goes in one category.',
+    hint: 'Every item on the customer’s receipts — set its category, or drag it onto another to merge them.',
   },
 ];
 
@@ -126,13 +127,9 @@ export function CustomerRulesSection({
         matches(q, r.matchKey, r.name, r.effectiveCategory),
     );
   }, [data, nameList, q]);
-  const items = useMemo(
-    () => (data?.items ?? []).filter((r) => matches(q, r.itemKey, r.category)),
-    [data, q],
-  );
   const counts: Record<Section, number> = {
     list: nameList?.length ?? 0,
-    items: data?.items.length ?? 0,
+    items: data?.products?.length ?? data?.items.length ?? 0,
   };
 
   const openDraft = (d: Draft) => {
@@ -308,17 +305,19 @@ export function CustomerRulesSection({
             </>
           )}
           {section === 'items' && (
-            <ItemRulesTable
-              rules={items}
+            <ReceiptItemsPanel
+              companyId={companyId}
               canEdit={canEdit}
-              searching={!!q}
-              onEdit={(r) =>
+              search={search}
+              products={data.products ?? []}
+              rules={data.items}
+              onEdit={(itemKey, category) =>
                 openDraft({
                   section: 'items',
                   mode: 'edit',
-                  key: r.itemKey,
+                  key: itemKey,
                   name: '',
-                  category: r.category,
+                  category,
                 })
               }
               onRemove={(r) => askRemove({ section: 'items', rule: r })}
@@ -484,42 +483,6 @@ function NameRulesTable({
               <span className="tabular-nums">
                 {r.rows} row{r.rows === 1 ? '' : 's'}
               </span>
-              <span>updated {fmtDate(r.updatedAt)}</span>
-            </>
-          }
-        />
-      ))}
-    </ul>
-  );
-}
-
-function ItemRulesTable({
-  rules,
-  canEdit,
-  searching,
-  onEdit,
-  onRemove,
-}: {
-  rules: CustomerItemRule[];
-  canEdit: boolean;
-  searching: boolean;
-  onEdit: (r: CustomerItemRule) => void;
-  onRemove: (r: CustomerItemRule) => void;
-}) {
-  if (!rules.length) return <Empty searching={searching} />;
-  return (
-    <ul className="divide-y">
-      {rules.map((r) => (
-        <RuleRow
-          key={r.id}
-          canEdit={canEdit}
-          onEdit={() => onEdit(r)}
-          onRemove={() => onRemove(r)}
-          title={<span className="capitalize">{r.itemKey}</span>}
-          details={
-            <>
-              <span>always filed under</span>
-              <CategoryBadge value={r.category} />
               <span>updated {fmtDate(r.updatedAt)}</span>
             </>
           }

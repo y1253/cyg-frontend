@@ -503,6 +503,9 @@ function NameLine({
   return (
     <div
       {...events}
+      // The browser starts a drag only on an element marked draggable (it was never set — the
+      // prop only drew the grip — so no name could be dragged, 2026-11-27).
+      draggable={draggable || undefined}
       className={cn(
         // Never wider than the card: the name truncates, the category and rules wrap
         // onto the line below (2026-11-27, user: no sideways scrolling).

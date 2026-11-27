@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import {
+  mergeCustomerItems,
   removeCustomerItemRule,
   removeCustomerNameRule,
   saveCustomerItemRule,
@@ -20,7 +21,8 @@ export type CustomerRuleChange =
     }
   | { action: 'remove-name'; matchType: RuleMatchType; matchKey: string }
   | { action: 'save-item'; itemKey: string; category: string }
-  | { action: 'remove-item'; itemKey: string };
+  | { action: 'remove-item'; itemKey: string }
+  | { action: 'merge-items'; from: string; into: string };
 
 export function useChangeCustomerRule(companyId: number) {
   const { token } = useAuth();
@@ -47,6 +49,8 @@ export function useChangeCustomerRule(companyId: number) {
           });
         case 'remove-item':
           return removeCustomerItemRule(token!, companyId, { itemKey: c.itemKey });
+        case 'merge-items':
+          return mergeCustomerItems(token!, companyId, { from: c.from, into: c.into });
       }
     },
     onSuccess: (view) => {

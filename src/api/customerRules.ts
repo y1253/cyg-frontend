@@ -32,7 +32,20 @@ export interface CustomerItemRule {
   id: number;
   itemKey: string;
   category: string;
+  /** 2026-11-27: merged into this item — its receipt lines are renamed to it. */
+  name?: string | null;
   updatedAt: string;
+}
+
+/** 2026-11-27: one item on the customer's receipts (dragged onto another to merge). */
+export interface CustomerProduct {
+  itemKey: string;
+  name: string;
+  category: string;
+  /** Where the category comes from: the customer's rule, the firm memory, or the transaction. */
+  source: string;
+  rows: number;
+  total: number;
 }
 
 export interface CustomerCategory {
@@ -47,6 +60,8 @@ export interface CustomerRulesView {
   descriptions: CustomerNameRule[];
   names: CustomerNameRule[];
   items: CustomerItemRule[];
+  /** Absent from an older API. */
+  products?: CustomerProduct[];
   categories: CustomerCategory[];
 }
 
@@ -114,6 +129,21 @@ export async function saveCustomerItemRule(
   return asView(
     await send(token, `${base(companyId)}/items`, 'PUT', rule),
     'Could not save the rule',
+  );
+}
+
+export async function mergeCustomerItems(
+  token: string,
+  companyId: number,
+  body: { from: string; into: string },
+): Promise<CustomerRulesView> {
+  return asView(
+    await fetchWithAuth(token, `${base(companyId)}/items/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    'Could not merge the items',
   );
 }
 
