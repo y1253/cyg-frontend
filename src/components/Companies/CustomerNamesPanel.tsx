@@ -43,9 +43,10 @@ const label = (e: End) => e.name;
 function refusal(from: End, to: End): string | null {
   if (from.kind === 'name' && from.unclarified) return 'Unclarified name cannot be merged';
   if (to.kind === 'name' && to.unclarified) return 'Nothing can be merged into Unclarified name';
-  if (from.kind === 'name' && from.wrapper)
-    return `${from.name} has sub-names — drag one of its sub-names instead`;
+  // 2026-11-27: a name with sub-names merges sub by sub (the customer API's `mergeWrapper`).
   if (from.kind === 'name' && to.kind === 'name' && from.name === to.name) return 'Same name';
+  if (from.kind === 'name' && to.kind === 'sub' && to.parent === from.name)
+    return 'That is one of its own sub-names';
   if (from.kind === 'sub' && to.kind === 'sub' && from.id === to.id) return 'Same sub-name';
   if (from.kind === 'sub' && to.kind === 'name' && to.name === from.parent)
     return `It is already under ${from.parent}`;
@@ -66,7 +67,13 @@ function mergeText(from: End, to: End): string[] {
   const lines: string[] = [];
   const f = label(from);
   const t = label(to);
-  if (to.kind === 'name' && to.wrapper)
+  if (from.kind === 'name' && from.wrapper)
+    lines.push(
+      to.kind === 'sub'
+        ? `All of ${f}'s sub-names merge into ${t} and take its category; new transactions follow.`
+        : `Each sub-name of ${f} joins ${t}'s sub-name of the same category, or moves under ${t} keeping its category; new transactions follow.`,
+    );
+  else if (to.kind === 'name' && to.wrapper)
     lines.push(
       `Every transaction of ${f} moves under ${t}, into its sub-name of the same category (made if it has none), and new ones follow.`,
     );
@@ -374,7 +381,7 @@ export function CustomerNamesPanel({
 
 /** A name that can never be dragged (the server refuses it as a source). */
 function refusalAsSource(e: End): boolean {
-  return e.kind === 'name' && (e.wrapper || e.unclarified);
+  return e.kind === 'name' && e.unclarified;
 }
 
 function SubLine({
@@ -436,7 +443,7 @@ function RuleChips({
     <span
       key={r.id}
       title={title}
-      className="inline-flex max-w-[14rem] items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
+      className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
     >
       <span className="truncate">{text}</span>
       {canEdit && (
@@ -453,7 +460,7 @@ function RuleChips({
     </span>
   );
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
+    <>
       {own?.category &&
         chip(own, `rule: ${own.category}`, 'The customer’s rule puts this name in this category')}
       {from.map((r) =>
@@ -465,7 +472,7 @@ function RuleChips({
           `“${r.matchKey}” is renamed to this name${r.category ? ` (${r.category})` : ''}`,
         ),
       )}
-    </span>
+    </>
   );
 }
 
@@ -497,40 +504,48 @@ function NameLine({
     <div
       {...events}
       className={cn(
-        'flex items-center gap-2 px-4 py-2 text-sm transition-colors',
+        // Never wider than the card: the name truncates, the category and rules wrap
+        // onto the line below (2026-11-27, user: no sideways scrolling).
+        'flex min-w-0 items-start gap-2 px-4 py-2 text-sm transition-colors',
         over && !hint && 'bg-teal-50 ring-1 ring-inset ring-teal-400',
         over && hint && 'bg-muted',
       )}
     >
       {draggable ? (
-        <GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground" />
+        <GripVertical className="mt-0.5 size-4 shrink-0 cursor-grab text-muted-foreground" />
       ) : (
         <span className="size-4 shrink-0" />
       )}
-      {toggle ? (
-        <button
-          type="button"
-          onClick={toggle.onClick}
-          className="flex min-w-0 items-center gap-1 font-medium"
-        >
-          {toggle.open ? (
-            <ChevronDown className="size-3.5 shrink-0" />
-          ) : (
-            <ChevronRight className="size-3.5 shrink-0" />
-          )}
-          <span className="truncate">{title}</span>
-        </button>
-      ) : (
-        <span className="min-w-0 truncate font-medium">{title}</span>
-      )}
-      <span className="min-w-0 truncate text-xs text-muted-foreground">
-        {hint ?? category}
-      </span>
-      <span className="min-w-0 flex-1">{!hint && extra}</span>
-      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-        {rows} row{rows === 1 ? '' : 's'}
-      </span>
-      <span className="w-24 shrink-0 text-right tabular-nums">{money(total)}</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {toggle ? (
+          <button
+            type="button"
+            onClick={toggle.onClick}
+            className="flex min-w-0 items-center gap-1 text-left font-medium"
+          >
+            {toggle.open ? (
+              <ChevronDown className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronRight className="size-3.5 shrink-0" />
+            )}
+            <span className="truncate">{title}</span>
+          </button>
+        ) : (
+          <span className="min-w-0 truncate font-medium">{title}</span>
+        )}
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className={cn('min-w-0 break-words', hint && 'text-foreground')}>
+            {hint ?? category}
+          </span>
+          {!hint && extra}
+        </span>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
+        <span className="tabular-nums">{money(total)}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {rows} row{rows === 1 ? '' : 's'}
+        </span>
+      </div>
       {actions !== undefined && <span className="w-8 shrink-0">{actions}</span>}
     </div>
   );

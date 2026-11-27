@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowRight, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,14 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { useCustomerRules } from '@/hooks/useCustomerRules';
 import {
   useChangeCustomerRule,
@@ -300,7 +292,7 @@ export function CustomerRulesSection({
             onRemoveRule={(r) => askRemove({ section: 'names', rule: r })}
           />
         )}
-        <div className="overflow-x-auto">
+        <div className="min-w-0">
           {section === 'list' && orphanRules.length > 0 && (
             <>
               <p className="border-t px-4 py-2 text-xs font-medium text-muted-foreground">
@@ -374,13 +366,11 @@ export function CustomerRulesSection({
   );
 }
 
-function Empty({ searching, colSpan }: { searching: boolean; colSpan: number }) {
+function Empty({ searching }: { searching: boolean }) {
   return (
-    <TableRow>
-      <TableCell colSpan={colSpan} className="py-10 text-center text-sm text-muted-foreground">
-        {searching ? 'No rules match your search.' : 'The customer has no rules here yet.'}
-      </TableCell>
-    </TableRow>
+    <p className="py-10 text-center text-sm text-muted-foreground">
+      {searching ? 'No rules match your search.' : 'The customer has no rules here yet.'}
+    </p>
   );
 }
 
@@ -389,7 +379,7 @@ function CategoryBadge({ value, inherited }: { value: string | null; inherited?:
   return (
     <Badge
       variant="secondary"
-      className={cn('font-normal', inherited && 'bg-transparent border border-dashed')}
+      className={cn('max-w-full truncate font-normal', inherited && 'bg-transparent border border-dashed')}
       title={inherited ? "The payee name's category" : undefined}
     >
       {value}
@@ -405,7 +395,7 @@ function RowActions({
   onRemove: () => void;
 }) {
   return (
-    <div className="flex justify-end gap-1">
+    <div className="flex shrink-0 justify-end gap-1">
       <Button size="icon-sm" variant="ghost" title="Edit" onClick={onEdit}>
         <Pencil size={14} />
       </Button>
@@ -422,6 +412,36 @@ function RowActions({
   );
 }
 
+/**
+ * A rule as one stacked row (2026-11-27, user: no sideways scrolling) — the main line, the
+ * details wrapping under it, the actions at the end. Never wider than the card.
+ */
+function RuleRow({
+  title,
+  details,
+  canEdit,
+  onEdit,
+  onRemove,
+}: {
+  title: ReactNode;
+  details: ReactNode;
+  canEdit: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <li className="flex min-w-0 items-start gap-2 px-4 py-2 text-sm">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="min-w-0 truncate font-medium">{title}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {details}
+        </div>
+      </div>
+      {canEdit && <RowActions onEdit={onEdit} onRemove={onRemove} />}
+    </li>
+  );
+}
+
 function NameRulesTable({
   rules,
   canEdit,
@@ -435,59 +455,41 @@ function NameRulesTable({
   onEdit: (r: CustomerNameRule) => void;
   onRemove: (r: CustomerNameRule) => void;
 }) {
-  const cols = canEdit ? 6 : 5;
+  if (!rules.length) return <Empty searching={searching} />;
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="bg-muted/40 hover:bg-muted/40">
-          <TableHead className="pl-4">Payee</TableHead>
-          <TableHead>Renamed to</TableHead>
-          <TableHead>Category</TableHead>
-          <TableHead className="text-right">Rows</TableHead>
-          <TableHead>Updated</TableHead>
-          {canEdit && <TableHead className="w-20" />}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rules.length === 0 && <Empty searching={searching} colSpan={cols} />}
-        {rules.map((r) => (
-          <TableRow key={r.id}>
-            <TableCell className="pl-4 max-w-[22rem]">
-              <div className="truncate font-medium" title={r.matchKey}>
-                {r.matchKey}
-              </div>
-            </TableCell>
-            <TableCell>
-              {r.name ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <ArrowRight size={12} className="text-teal-600 shrink-0" />
-                  {r.name}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">—</span>
+    <ul className="divide-y">
+      {rules.map((r) => (
+        <RuleRow
+          key={r.id}
+          canEdit={canEdit}
+          onEdit={() => onEdit(r)}
+          onRemove={() => onRemove(r)}
+          title={
+            <span title={r.matchKey}>
+              {r.matchKey}
+              {r.name && (
+                <>
+                  {' '}
+                  <ArrowRight size={12} className="inline text-teal-600" /> {r.name}
+                </>
               )}
-            </TableCell>
-            <TableCell>
+            </span>
+          }
+          details={
+            <>
               <CategoryBadge
                 value={r.effectiveCategory}
                 inherited={!r.category && !!r.effectiveCategory}
               />
-            </TableCell>
-            <TableCell className="text-right tabular-nums text-muted-foreground">
-              {r.rows}
-            </TableCell>
-            <TableCell className="text-muted-foreground whitespace-nowrap">
-              {fmtDate(r.updatedAt)}
-            </TableCell>
-            {canEdit && (
-              <TableCell>
-                <RowActions onEdit={() => onEdit(r)} onRemove={() => onRemove(r)} />
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              <span className="tabular-nums">
+                {r.rows} row{r.rows === 1 ? '' : 's'}
+              </span>
+              <span>updated {fmtDate(r.updatedAt)}</span>
+            </>
+          }
+        />
+      ))}
+    </ul>
   );
 }
 
@@ -504,37 +506,26 @@ function ItemRulesTable({
   onEdit: (r: CustomerItemRule) => void;
   onRemove: (r: CustomerItemRule) => void;
 }) {
-  const cols = canEdit ? 4 : 3;
+  if (!rules.length) return <Empty searching={searching} />;
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="bg-muted/40 hover:bg-muted/40">
-          <TableHead className="pl-4">Item</TableHead>
-          <TableHead>Always filed under</TableHead>
-          <TableHead>Updated</TableHead>
-          {canEdit && <TableHead className="w-20" />}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rules.length === 0 && <Empty searching={searching} colSpan={cols} />}
-        {rules.map((r) => (
-          <TableRow key={r.id}>
-            <TableCell className="pl-4 font-medium capitalize">{r.itemKey}</TableCell>
-            <TableCell>
+    <ul className="divide-y">
+      {rules.map((r) => (
+        <RuleRow
+          key={r.id}
+          canEdit={canEdit}
+          onEdit={() => onEdit(r)}
+          onRemove={() => onRemove(r)}
+          title={<span className="capitalize">{r.itemKey}</span>}
+          details={
+            <>
+              <span>always filed under</span>
               <CategoryBadge value={r.category} />
-            </TableCell>
-            <TableCell className="text-muted-foreground whitespace-nowrap">
-              {fmtDate(r.updatedAt)}
-            </TableCell>
-            {canEdit && (
-              <TableCell>
-                <RowActions onEdit={() => onEdit(r)} onRemove={() => onRemove(r)} />
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              <span>updated {fmtDate(r.updatedAt)}</span>
+            </>
+          }
+        />
+      ))}
+    </ul>
   );
 }
 
